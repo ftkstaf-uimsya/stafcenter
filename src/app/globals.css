@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  .dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-[#F8FAFC] text-[#0F172A] antialiased selection:bg-[#0D9488]/20 selection:text-[#0F766E] dark:bg-[#0B1120] dark:text-[#F8FAFC] dark:selection:bg-[#2DD4BF]/25 dark:selection:text-[#5EEAD4];
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Custom scrollbar for dense administrative tables */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.65);
+}
+
+@media print {
+  aside,
+  header,
+  nav,
+  button {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+}
