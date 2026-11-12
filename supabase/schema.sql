@@ -246,12 +246,64 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_apply_consumable_tx ON public.consumable_transactions;
+
+-- SEED DATA AWAL BERNUANSA KAMPUS
+INSERT INTO public.buildings (id, code, name, floors_count, zone, description) VALUES
+  ('b1000000-0000-0000-0000-000000000001', 'GD-REKT', 'Gedung Rektorat & Administrasi Pusat', 4, 'Zona Barat', 'Pusat administrasi akademik, ruang rapat pimpinan, dan biro sarpras.'),
+  ('b1000000-0000-0000-0000-000000000002', 'GD-SAINTEK', 'Gedung Kuliah Bersama Saintek (GKB A)', 5, 'Zona Utara', 'Gedung perkuliahan reguler dan laboratorium komputasi terpadu.'),
+  ('b1000000-0000-0000-0000-000000000003', 'GD-AULA', 'Graha Cendekia & Pusat Kegiatan Mahasiswa', 2, 'Zona Tengah', 'Aula serbaguna, auditorium seminar nasional, dan sekretariat UKM.')
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO public.rooms (id, code, name, building_id, floor, category, capacity, pic_name, pic_contact, status, facilities_notes) VALUES
+  ('c2000000-0000-0000-0000-000000000001', '1-SM6', 'Ruang Kelas Reguler 1-SM6', 'b1000000-0000-0000-0000-000000000002', 1, 'Ruang Kelas', 45, 'Hendra Wijaya, S.T.', '0812-3400-1101', 'Digunakan', 'Smart TV 65 inch, Proyektor Laser, 2 Unit AC Split 2 PK'),
+  ('c2000000-0000-0000-0000-000000000002', 'LAB-KOM1', 'Laboratorium Pemrograman & Jaringan 1', 'b1000000-0000-0000-0000-000000000002', 2, 'Laboratorium', 40, 'Arif Rahman, M.Kom.', '0812-3400-1102', 'Digunakan', '40 Workstation PC, Server Rack Lokal, 3 Unit AC Cassette'),
+  ('c2000000-0000-0000-0000-000000000003', 'AULA-GC1', 'Auditorium Utama Graha Cendekia', 'b1000000-0000-0000-0000-000000000003', 1, 'Aula', 350, 'Drs. Bambang Sutrisno', '0812-3400-1103', 'Tersedia', 'Videotron P2.5, Sound System Line Array, Panggung Rigging'),
+  ('c2000000-0000-0000-0000-000000000004', 'R-DOSEN2', 'Ruang Dosen Fakultas Teknik & Transit', 'b1000000-0000-0000-0000-000000000001', 2, 'Ruang Staf/Dosen', 25, 'Siti Nurhaliza, S.E.', '0812-3400-1104', 'Tersedia', 'Meja Kubikal Dosen, Dispenser, Printer Jaringan, Loker Akademik'),
+  ('c2000000-0000-0000-0000-000000000005', '2-SM4', 'Ruang Kelas Multimedia 2-SM4', 'b1000000-0000-0000-0000-000000000002', 2, 'Ruang Kelas', 40, 'Hendra Wijaya, S.T.', '0812-3400-1101', 'Perbaikan', 'Sedang perbaikan plafon dan instalasi pipa drainase AC')
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO public.assets (id, inventory_code, name, brand_model, category, category_label, room_id, procurement_year, funding_source, acquisition_cost, condition, is_portable, serial_number, notes) VALUES
+  ('a3000000-0000-0000-0000-000000000001', 'INV-ELK-2024-0001', 'Proyektor Laser WUXGA', 'Epson EB-L530U', 'ELK', 'Elektronik & Visual', 'c2000000-0000-0000-0000-000000000001', 2024, 'Hibah Kemendikbudristek', 28500000, 'Baik', false, 'EPS-L530-9921', 'Terpasang di bracket plafon ruang 1-SM6'),
+  ('a3000000-0000-0000-0000-000000000002', 'INV-KLM-2023-0002', 'AC Split Inverter 2 PK', 'Daikin FTKQ50UVM4', 'KLM', 'Pendingin Udara', 'c2000000-0000-0000-0000-000000000001', 2023, 'Dana Operasional Kampus', 9200000, 'Baik', false, 'DKN-50U-4410', 'Servis berkala tiap 4 bulan'),
+  ('a3000000-0000-0000-0000-000000000003', 'INV-KOM-2024-0003', 'PC Workstation Praktikum #01', 'Dell OptiPlex 7010 Tower i7', 'KOM', 'Komputer & Jaringan', 'c2000000-0000-0000-0000-000000000002', 2024, 'Dana Pengembangan Lab', 16400000, 'Baik', false, 'DLL-7010-001', 'RAM 32GB, NVMe 1TB'),
+  ('a3000000-0000-0000-0000-000000000004', 'INV-AUD-2022-0004', 'Wireless Microphone Dual Handheld', 'Sennheiser EW-D 835-S Set', 'AUD', 'Audio & Pengeras Suara', 'c2000000-0000-0000-0000-000000000003', 2022, 'Dana Yayasan', 14800000, 'Rusak Ringan', true, 'SNH-EWD-772', 'Receiver channel B kadang putus sinyal'),
+  ('a3000000-0000-0000-0000-000000000005', 'INV-KLM-2021-0005', 'AC Split Standard 2 PK Unit Barat', 'Panasonic CS-YN18WKJ', 'KLM', 'Pendingin Udara', 'c2000000-0000-0000-0000-000000000005', 2021, 'Dana Operasional Kampus', 7900000, 'Rusak Berat', false, 'PNS-18W-319', 'Kompresor mati dan pipa drainase bocor'),
+  ('a3000000-0000-0000-0000-000000000006', 'INV-ELK-2025-0006', 'Proyektor Portabel Cadangan Biro', 'BenQ MH560 FHD', 'ELK', 'Elektronik & Visual', 'c2000000-0000-0000-0000-000000000004', 2025, 'Dana Operasional Kampus', 8400000, 'Baik', true, 'BNQ-560-882', 'Unit portabel untuk peminjaman lintas unit'),
+  ('a3000000-0000-0000-0000-000000000007', 'INV-ELK-2024-0007', 'Kamera Mirrorless Dokumentasi Kampus', 'Sony Alpha a6400 Kit 16-50mm', 'ELK', 'Elektronik & Visual', 'c2000000-0000-0000-0000-000000000004', 2024, 'Dana Humas & Sarpras', 15200000, 'Baik', true, 'SNY-6400-511', 'Dilengkapi tas, 2 baterai NP-FW50, dan SD Card 128GB'),
+  ('a3000000-0000-0000-0000-000000000008', 'INV-MBL-2023-0008', 'Meja Kuliah Lipat Modular (Set 20 Unit)', 'Chitose Folding Table FT-1845', 'MBL', 'Meubelair & Furnitur', 'c2000000-0000-0000-0000-000000000001', 2023, 'Dana Operasional Kampus', 32000000, 'Baik', false, 'CHT-FT-2023', 'Kondisi engsel pengunci seluruhnya normal')
+ON CONFLICT (inventory_code) DO NOTHING;
+
+INSERT INTO public.bookings (id, booking_code, borrower_name, borrower_role, borrower_unit, borrower_phone, target_type, room_id, asset_id, activity_name, attendees_count, booking_date, start_time, end_time, status, approved_by, return_condition_notes) VALUES
+  ('d4000000-0000-0000-0000-000000000001', 'PJM-202611-001', 'Dr. Eng. Lukman Hakim, M.T.', 'Dosen', 'Prodi Teknik Informatika', '0813-2211-9001', 'Ruangan', 'c2000000-0000-0000-0000-000000000002', NULL, 'Praktikum Pengolahan Citra Digital & Visi Komputer', 38, CURRENT_DATE, '08:00', '11:30', 'Sedang Dipinjam', 'Hendra Wijaya, S.T.', NULL),
+  ('d4000000-0000-0000-0000-000000000002', 'PJM-202611-002', 'Rizky Pratama (Ketua BEM)', 'Mahasiswa/Ormawa', 'BEM Universitas', '0857-8899-1204', 'Ruangan & Alat', 'c2000000-0000-0000-0000-000000000003', 'a3000000-0000-0000-0000-000000000007', 'Gladi Bersih Seminar Nasional Kepemimpinan Mahasiswa', 250, CURRENT_DATE, '13:00', '17:00', 'Disetujui', 'Drs. Bambang Sutrisno', NULL),
+  ('d4000000-0000-0000-0000-000000000003', 'PJM-202611-003', 'Nadia Kusuma, S.Pd., M.Hum.', 'Dosen', 'Pusat Bahasa Kampus', '0812-7766-3310', 'Ruangan', 'c2000000-0000-0000-0000-000000000001', NULL, 'Kelas Intensif Academic Writing Semester Ganjil', 42, CURRENT_DATE, '09:00', '12:00', 'Sedang Dipinjam', 'Hendra Wijaya, S.T.', NULL),
+  ('d4000000-0000-0000-0000-000000000004', 'PJM-202611-004', 'Fajar Nugroho, S.Kom.', 'Staf', 'Biro Kemahasiswaan & Alumni', '0811-3344-5566', 'Alat', NULL, 'a3000000-0000-0000-0000-000000000006', 'Rapat Koordinasi Tracer Study di Ruang Sidang Lt. 3', 20, CURRENT_DATE + 1, '09:00', '12:00', 'Menunggu Persetujuan', NULL, NULL)
+ON CONFLICT (booking_code) DO NOTHING;
+
+INSERT INTO public.maintenance_logs (id, ticket_code, asset_id, room_id, reporter_name, reporter_role, issue_title, issue_description, damage_severity, priority, status, technician_vendor, repair_cost, reported_at, resolution_notes) VALUES
+  ('e5000000-0000-0000-0000-000000000001', 'MNT-202611-001', 'a3000000-0000-0000-0000-000000000005', 'c2000000-0000-0000-0000-000000000005', 'Hendra Wijaya, S.T.', 'PIC Ruangan GKB A', 'Kompresor AC mati & kebocoran pipa drainase plafon', 'Unit AC barat di ruang 2-SM4 mengeluarkan tetesan air deras ke deretan meja depan dan kompresor outdoor tidak menyala.', 'Rusak Berat', 'Tinggi/Darurat', 'Dalam Pengerjaan', 'CV Sejuk Teknik Mandiri (Teknisi: Pak Wahyu)', 1450000, NOW() - INTERVAL '1 day', 'Sedang penggantian kapasitor outdoor dan pengurasan jalur pipa pembuangan.'),
+  ('e5000000-0000-0000-0000-000000000002', 'MNT-202611-002', 'a3000000-0000-0000-0000-000000000004', 'c2000000-0000-0000-0000-000000000003', 'Drs. Bambang Sutrisno', 'Koordinator Graha Cendekia', 'Sinyal mikrofon wireless Channel B putus-putus', 'Pada jarak lebih dari 8 meter dari panggung, suara mikrofon genggam kedua mengalami drop frekuensi.', 'Rusak Ringan', 'Sedang', 'Dilaporkan', NULL, 0, NOW() - INTERVAL '4 hours', NULL)
+ON CONFLICT (ticket_code) DO NOTHING;
+
+INSERT INTO public.consumables (id, code, name, category, unit, current_stock, min_stock, storage_location, last_restocked_at) VALUES
+  ('f6000000-0000-0000-0000-000000000001', 'BHP-ATK-001', 'Spidol Whiteboard Snowman BG-12 Hitam', 'ATK & Kelas', 'Box', 4, 10, 'Lemari ATK A1 - Biro Sarpras', NOW() - INTERVAL '14 days'),
+  ('f6000000-0000-0000-0000-000000000002', 'BHP-KRT-002', 'Kertas HVS A4 80gsm Sidu', 'Cetakan & Kertas', 'Rim', 38, 15, 'Rak Palet B2 - Gudang Utama', NOW() - INTERVAL '5 days'),
+  ('f6000000-0000-0000-0000-000000000003', 'BHP-TNT-003', 'Tinta Refill Spidol Whiteboard Hitam', 'Tinta & Toner', 'Botol', 6, 12, 'Lemari ATK A1 - Biro Sarpras', NOW() - INTERVAL '20 days'),
+  ('f6000000-0000-0000-0000-000000000004', 'BHP-KBR-004', 'Cairan Pembersih Lantai Karbol 5 Liter', 'Kebersihan & Sanitasi', 'Botol', 14, 6, 'Gudang Janitor GKB A Lt. Dasar', NOW() - INTERVAL '7 days'),
+  ('f6000000-0000-0000-0000-000000000005', 'BHP-KLS-005', 'Baterai Alkaline AA (Untuk Mic & Remote AC)', 'Kelistrikan Ringan', 'Pack', 3, 8, 'Lemari ATK A2 - Biro Sarpras', NOW() - INTERVAL '18 days')
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO public.consumable_transactions (id, consumable_id, transaction_type, quantity, actor_name, actor_unit, purpose_notes, transaction_date) VALUES
+  ('07000000-0000-0000-0000-000000000001', 'f6000000-0000-0000-0000-000000000001', 'Keluar', 3, 'Hendra Wijaya, S.T.', 'GKB Saintek Lt. 1 & 2', 'Distribusi spidol awal pekan untuk 12 ruang kelas reguler', NOW() - INTERVAL '2 days'),
+  ('07000000-0000-0000-0000-000000000002', 'f6000000-0000-0000-0000-000000000002', 'Masuk', 25, 'Siti Nurhaliza, S.E.', 'Bagian Pengadaan Sarpras', 'Pengadaan rutin bulanan kertas administrasi & soal ujian', NOW() - INTERVAL '5 days'),
+  ('07000000-0000-0000-0000-000000000003', 'f6000000-0000-0000-0000-000000000005', 'Keluar', 4, 'Drs. Bambang Sutrisno', 'Graha Cendekia', 'Cadangan baterai mikrofon wireless untuk seminar nasional', NOW() - INTERVAL '1 day')
+ON CONFLICT (id) DO NOTHING;
+
+-- AKTIFKAN TRIGGER SETELAH SEED DATA AWAL TERPASANG
 CREATE TRIGGER trg_apply_consumable_tx
 AFTER INSERT ON public.consumable_transactions
 FOR EACH ROW
 EXECUTE FUNCTION public.fn_apply_consumable_transaction();
-
--- ROW LEVEL SECURITY (RLS)
 ALTER TABLE public.buildings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.rooms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.assets ENABLE ROW LEVEL SECURITY;
