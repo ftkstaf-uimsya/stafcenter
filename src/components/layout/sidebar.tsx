@@ -41,8 +41,14 @@ export function Sidebar({
   onCloseMobile,
 }: SidebarProps) {
   const pathname = usePathname();
-  const { rooms, assets, bookings, maintenanceLogs, consumables } =
-    useSarpras();
+  const {
+    rooms,
+    assets,
+    bookings,
+    maintenanceLogs,
+    consumables,
+    authUser,
+  } = useSarpras();
   const [sarprasExpanded, setSarprasExpanded] = useState(true);
 
   const pendingBookings = bookings.filter(
@@ -252,17 +258,28 @@ export function Sidebar({
           {!collapsed ? (
             <div className="text-xs text-slate-200 space-y-1">
               <p className="font-semibold text-white">Biro Umum & Sarpras</p>
-              <p className="font-mono text-[11px] text-slate-300">
-                Akun: ftkstaf@gmail.com
+              <p className="font-mono text-[11px] text-slate-300 truncate">
+                {authUser ? `Sesi: ${authUser.email}` : "Belum masuk (Mode Baca)"}
               </p>
+              <Link
+                href="/login"
+                className="inline-block text-[11px] font-semibold text-amber-300 hover:text-amber-200 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded"
+              >
+                {authUser ? "Kelola Sesi Staf" : "Masuk Akun Staf"}
+              </Link>
             </div>
           ) : (
-            <div
-              className="text-center font-mono text-xs font-bold text-amber-300"
-              title="Biro Umum & Sarpras (ftkstaf@gmail.com)"
+            <Link
+              href="/login"
+              className="block text-center font-mono text-xs font-bold text-amber-300 hover:text-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded py-1"
+              title={
+                authUser
+                  ? `Sesi aktif: ${authUser.email}`
+                  : "Masuk Akun Staf"
+              }
             >
-              [PIC]
-            </div>
+              {authUser ? "[ON]" : "[AUTH]"}
+            </Link>
           )}
         </div>
       </aside>
@@ -302,11 +319,18 @@ export function Sidebar({
             <nav className="flex-1 p-3 overflow-y-auto">
               {renderNavLinks(false)}
             </nav>
-            <div className="p-4 border-t border-white/15 text-xs text-slate-200">
+            <div className="p-4 border-t border-white/15 text-xs text-slate-200 space-y-1">
               <p className="font-semibold text-white">Biro Umum & Sarpras</p>
-              <p className="font-mono text-[11px] text-slate-300 mt-0.5">
-                ftkstaf@gmail.com
+              <p className="font-mono text-[11px] text-slate-300 truncate">
+                {authUser ? `Sesi: ${authUser.email}` : "Belum masuk (Mode Baca)"}
               </p>
+              <Link
+                href="/login"
+                onClick={onCloseMobile}
+                className="inline-block text-[11px] font-semibold text-amber-300 hover:text-amber-200 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded"
+              >
+                {authUser ? "Kelola Sesi Staf" : "Masuk Akun Staf"}
+              </Link>
             </div>
           </div>
         </div>

@@ -25,8 +25,10 @@ import {
   ASSET_CATEGORY_LABELS,
   findBookingConflict,
   generateInventoryCode,
+  generateUuid,
   getSupabaseBrowserClient,
   isSupabaseConfigured,
+  normalizeTimeHHMM,
 } from "@/lib/supabase/client";
 import {
   INITIAL_ASSETS,
@@ -40,6 +42,12 @@ import {
 
 const STORAGE_KEY = "stafcenter_sarpras_v1";
 const THEME_KEY = "stafcenter_theme_v1";
+
+export interface AuthStaffUser {
+  id: string;
+  email: string;
+  fullName?: string;
+}
 
 export interface ToastNotice {
   id: string;
@@ -57,6 +65,9 @@ interface SarprasContextValue {
   consumables: Consumable[];
   consumableTransactions: ConsumableTransaction[];
   isLiveSupabase: boolean;
+  authUser: AuthStaffUser | null;
+  authLoading: boolean;
+  isSyncingDb: boolean;
   uiSimState: UISimulationState;
   setUiSimState: (state: UISimulationState) => void;
   theme: "light" | "dark";
@@ -65,6 +76,19 @@ interface SarprasContextValue {
   dismissToast: (id: string) => void;
   notify: (type: ToastNotice["type"], title: string, message: string) => void;
   resetToSeedData: () => void;
+  refreshFromSupabase: () => Promise<void>;
+
+  // Autentikasi Staf (Supabase Auth)
+  signInWithPassword: (
+    email: string,
+    password: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  signUpStaff: (
+    email: string,
+    password: string,
+    fullName: string
+  ) => Promise<{ ok: boolean; error?: string; needsEmailConfirm?: boolean }>;
+  signOut: () => Promise<void>;
 
   // Gedung & Ruangan CRUD
   addBuilding: (payload: Omit<Building, "id" | "created_at">) => void;
@@ -125,6 +149,25 @@ interface SarprasContextValue {
 
 const SarprasContext = createContext<SarprasContextValue | null>(null);
 
+function extractMaxSequence(codes: string[]): number {
+  let maxSeq = codes.length;
+  for (const code of codes) {
+    const parts = code.split("-");
+    const last = Number(parts[parts.length - 1]);
+    if (!Number.isNaN(last) && last > maxSeq) {
+      maxSeq = last;
+    }
+  }
+  return maxSeq;
+}
+
+function getCurrentYearMonth(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  return `${y}${m}`;
+}
+
 export function SarprasProvider({ children }: { children: React.ReactNode }) {
   const [buildings, setBuildings] = useState<Building[]>(INITIAL_BUILDINGS);
   const [rooms, setRooms] = useState<Room[]>(INITIAL_ROOMS);
@@ -139,6 +182,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ConsumableTransaction[]
   >(INITIAL_CONSUMABLE_TRANSACTIONS);
 
+  const [authUser, setAuthUser] = useState<AuthStaffUser | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [isSyncingDb, setIsSyncingDb] = useState<boolean>(false);
+
   const [uiSimState, setUiSimState] = useState<UISimulationState>("normal");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [toasts, setToasts] = useState<ToastNotice[]>([]);
@@ -152,7 +199,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       setToasts((prev) => [...prev, { id, type, title, message }]);
       setTimeout(() => {
         setToasts((prev) => prev.filter((item) => item.id !== id));
-      }, 4500);
+      }, 4800);
     },
     []
   );
@@ -161,34 +208,13 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
-  // Hydrate theme & local state or fetch from Supabase
-  useEffect(() => {
-    try {
-      const savedTheme = localStorage.getItem(THEME_KEY);
-      if (savedTheme === "dark" || savedTheme === "light") {
-        setTheme(savedTheme);
-        document.documentElement.classList.toggle("dark", savedTheme === "dark");
-      }
-
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed.buildings) setBuildings(parsed.buildings);
-        if (parsed.rooms) setRooms(parsed.rooms);
-        if (parsed.assets) setAssets(parsed.assets);
-        if (parsed.bookings) setBookings(parsed.bookings);
-        if (parsed.maintenanceLogs) setMaintenanceLogs(parsed.maintenanceLogs);
-        if (parsed.consumables) setConsumables(parsed.consumables);
-        if (parsed.consumableTransactions)
-          setConsumableTransactions(parsed.consumableTransactions);
-      }
-    } catch {
-      // Gunakan fallback seed data bila localStorage tidak tersedia
-    }
-
+  const refreshFromSupabase = useCallback(async () => {
     const supabase = getSupabaseBrowserClient();
-    if (supabase) {
-      Promise.all([
+    if (!supabase) return;
+
+    setIsSyncingDb(true);
+    try {
+      const [bRes, rRes, aRes, bkRes, mRes, cRes, ctRes] = await Promise.all([
         supabase.from("buildings").select("*").order("code"),
         supabase.from("rooms").select("*").order("code"),
         supabase.from("assets").select("*").order("inventory_code"),
@@ -205,39 +231,147 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           .from("consumable_transactions")
           .select("*")
           .order("transaction_date", { ascending: false }),
-      ])
-        .then(
-          ([
-            bRes,
-            rRes,
-            aRes,
-            bkRes,
-            mRes,
-            cRes,
-            ctRes,
-          ]) => {
-            if (bRes.data?.length) setBuildings(bRes.data as Building[]);
-            if (rRes.data?.length) setRooms(rRes.data as Room[]);
-            if (aRes.data?.length) setAssets(aRes.data as Asset[]);
-            if (bkRes.data?.length) setBookings(bkRes.data as Booking[]);
-            if (mRes.data?.length)
-              setMaintenanceLogs(mRes.data as MaintenanceLog[]);
-            if (cRes.data?.length) setConsumables(cRes.data as Consumable[]);
-            if (ctRes.data?.length)
-              setConsumableTransactions(ctRes.data as ConsumableTransaction[]);
-          }
-        )
-        .catch(() => {
-          // Tetap gunakan state seed lokal bila tabel belum dimigrasikan
-        });
-    }
+      ]);
 
-    setHydrated(true);
+      if (bRes.data) setBuildings(bRes.data as Building[]);
+      if (rRes.data) setRooms(rRes.data as Room[]);
+      if (aRes.data) {
+        setAssets(
+          (aRes.data as Asset[]).map((item) => ({
+            ...item,
+            acquisition_cost: Number(item.acquisition_cost) || 0,
+            procurement_year: Number(item.procurement_year) || 2026,
+          }))
+        );
+      }
+      if (bkRes.data) {
+        setBookings(
+          (bkRes.data as Booking[]).map((item) => ({
+            ...item,
+            attendees_count: Number(item.attendees_count) || 1,
+            start_time: normalizeTimeHHMM(item.start_time),
+            end_time: normalizeTimeHHMM(item.end_time),
+          }))
+        );
+      }
+      if (mRes.data) {
+        setMaintenanceLogs(
+          (mRes.data as MaintenanceLog[]).map((item) => ({
+            ...item,
+            repair_cost: Number(item.repair_cost) || 0,
+          }))
+        );
+      }
+      if (cRes.data) {
+        setConsumables(
+          (cRes.data as Consumable[]).map((item) => ({
+            ...item,
+            current_stock: Number(item.current_stock) || 0,
+            min_stock: Number(item.min_stock) || 0,
+          }))
+        );
+      }
+      if (ctRes.data) {
+        setConsumableTransactions(
+          (ctRes.data as ConsumableTransaction[]).map((item) => ({
+            ...item,
+            quantity: Number(item.quantity) || 0,
+          }))
+        );
+      }
+    } catch {
+      // Tetap gunakan state sebelumnya bila koneksi terputus
+    } finally {
+      setIsSyncingDb(false);
+    }
   }, []);
 
-  // Persist perubahan ke localStorage
+  // Hydrate theme, auth session, and Supabase or localStorage data
   useEffect(() => {
-    if (!hydrated) return;
+    try {
+      const savedTheme = localStorage.getItem(THEME_KEY);
+      if (savedTheme === "dark" || savedTheme === "light") {
+        setTheme(savedTheme);
+        document.documentElement.classList.toggle("dark", savedTheme === "dark");
+      }
+
+      if (!isLiveSupabase) {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.buildings) setBuildings(parsed.buildings);
+          if (parsed.rooms) setRooms(parsed.rooms);
+          if (parsed.assets) setAssets(parsed.assets);
+          if (parsed.bookings) setBookings(parsed.bookings);
+          if (parsed.maintenanceLogs) setMaintenanceLogs(parsed.maintenanceLogs);
+          if (parsed.consumables) setConsumables(parsed.consumables);
+          if (parsed.consumableTransactions)
+            setConsumableTransactions(parsed.consumableTransactions);
+        }
+      }
+    } catch {
+      // Gunakan fallback seed data bila localStorage tidak tersedia
+    }
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setAuthLoading(false);
+      setHydrated(true);
+      return;
+    }
+
+    let active = true;
+
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!active) return;
+        const user = data.session?.user;
+        if (user) {
+          setAuthUser({
+            id: user.id,
+            email: user.email || "staf@kampus.ac.id",
+            fullName:
+              (user.user_metadata?.full_name as string | undefined) || undefined,
+          });
+        } else {
+          setAuthUser(null);
+        }
+        setAuthLoading(false);
+      })
+      .catch(() => {
+        if (active) setAuthLoading(false);
+      });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        const user = session?.user;
+        if (user) {
+          setAuthUser({
+            id: user.id,
+            email: user.email || "staf@kampus.ac.id",
+            fullName:
+              (user.user_metadata?.full_name as string | undefined) || undefined,
+          });
+        } else {
+          setAuthUser(null);
+        }
+        void refreshFromSupabase();
+      }
+    );
+
+    void refreshFromSupabase();
+    setHydrated(true);
+
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, [isLiveSupabase, refreshFromSupabase]);
+
+  // Persist perubahan ke localStorage hanya saat mode seed offline atau belum login
+  useEffect(() => {
+    if (!hydrated || (isLiveSupabase && authUser)) return;
     try {
       localStorage.setItem(
         STORAGE_KEY,
@@ -256,6 +390,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     }
   }, [
     hydrated,
+    isLiveSupabase,
+    authUser,
     buildings,
     rooms,
     assets,
@@ -264,6 +400,119 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     consumables,
     consumableTransactions,
   ]);
+
+  const signInWithPassword = useCallback(
+    async (
+      email: string,
+      password: string
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) {
+        return {
+          ok: false,
+          error: "Konfigurasi Supabase (.env.local) belum tersedia.",
+        };
+      }
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error || !data.user) {
+        return {
+          ok: false,
+          error:
+            error?.message === "Invalid login credentials"
+              ? "Email atau kata sandi staf tidak cocok."
+              : error?.message || "Gagal masuk ke akun staf.",
+        };
+      }
+      setAuthUser({
+        id: data.user.id,
+        email: data.user.email || email.trim(),
+        fullName:
+          (data.user.user_metadata?.full_name as string | undefined) ||
+          undefined,
+      });
+      await refreshFromSupabase();
+      notify(
+        "success",
+        "Berhasil Masuk Staf",
+        `Sesi aktif sebagai ${data.user.email}. Perubahan data kini tersimpan permanen ke Supabase.`
+      );
+      return { ok: true };
+    },
+    [notify, refreshFromSupabase]
+  );
+
+  const signUpStaff = useCallback(
+    async (
+      email: string,
+      password: string,
+      fullName: string
+    ): Promise<{
+      ok: boolean;
+      error?: string;
+      needsEmailConfirm?: boolean;
+    }> => {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) {
+        return {
+          ok: false,
+          error: "Konfigurasi Supabase (.env.local) belum tersedia.",
+        };
+      }
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            full_name: fullName.trim(),
+            role: "staff_sarpras",
+          },
+        },
+      });
+      if (error) {
+        return { ok: false, error: error.message };
+      }
+
+      if (data.session && data.user) {
+        setAuthUser({
+          id: data.user.id,
+          email: data.user.email || email.trim(),
+          fullName: fullName.trim(),
+        });
+        await refreshFromSupabase();
+        notify(
+          "success",
+          "Akun Staf Terdaftar",
+          `Selamat datang, ${fullName.trim()}. Sinkronisasi tulis Supabase langsung aktif.`
+        );
+        return { ok: true, needsEmailConfirm: false };
+      }
+
+      notify(
+        "info",
+        "Verifikasi Email Diperlukan",
+        `Tautan konfirmasi pendaftaran telah dikirim ke ${email.trim()}.`
+      );
+      return { ok: true, needsEmailConfirm: true };
+    },
+    [notify, refreshFromSupabase]
+  );
+
+  const signOut = useCallback(async () => {
+    const supabase = getSupabaseBrowserClient();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    setAuthUser(null);
+    await refreshFromSupabase();
+    notify(
+      "info",
+      "Keluar dari Sesi Staf",
+      "Anda kini berada di mode baca/pratinjau. Masuk kembali untuk menulis data ke Supabase."
+    );
+  }, [notify, refreshFromSupabase]);
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
@@ -281,6 +530,17 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const resetToSeedData = useCallback(() => {
+    if (isLiveSupabase) {
+      setUiSimState("normal");
+      void refreshFromSupabase();
+      notify(
+        "info",
+        "Data Disinkronkan Ulang",
+        "Seluruh tabel telah dimuat ulang langsung dari database Supabase."
+      );
+      return;
+    }
+
     setBuildings(INITIAL_BUILDINGS);
     setRooms(INITIAL_ROOMS);
     setAssets(INITIAL_ASSETS);
@@ -299,40 +559,120 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       "Data Seed Dipulihkan",
       "Seluruh data modul Sarana Prasarana telah dikembalikan ke kondisi awal kampus."
     );
-  }, [notify]);
+  }, [isLiveSupabase, notify, refreshFromSupabase]);
+
+  const persistNoticeMode = useCallback(
+    (title: string, message: string) => {
+      if (isLiveSupabase && !authUser) {
+        notify(
+          "info",
+          `${title} (Pratinjau Lokal)`,
+          `${message} Masuk akun Staf agar tersimpan ke Supabase.`
+        );
+      } else {
+        notify("success", title, message);
+      }
+    },
+    [authUser, isLiveSupabase, notify]
+  );
+
+  const handleDbError = useCallback(
+    async (actionLabel: string, errMessage: string) => {
+      notify("error", `Gagal ${actionLabel}`, errMessage);
+      await refreshFromSupabase();
+    },
+    [notify, refreshFromSupabase]
+  );
 
   const addBuilding = useCallback(
     (payload: Omit<Building, "id" | "created_at">) => {
+      const id = generateUuid();
+      const createdAt = new Date().toISOString();
       const newBuilding: Building = {
         ...payload,
-        id: `bld-${Date.now()}`,
-        created_at: new Date().toISOString(),
+        id,
+        created_at: createdAt,
       };
       setBuildings((prev) => [...prev, newBuilding]);
-      notify(
-        "success",
+
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase.from("buildings").insert({
+            id,
+            code: payload.code,
+            name: payload.name,
+            floors_count: payload.floors_count,
+            zone: payload.zone,
+            description: payload.description || null,
+          });
+          if (error) {
+            await handleDbError("Menyimpan Gedung", error.message);
+          } else {
+            notify(
+              "success",
+              "Gedung Tersimpan di Supabase",
+              `${newBuilding.code} (${newBuilding.name}) berhasil disimpan ke database.`
+            );
+          }
+        })();
+        return;
+      }
+
+      persistNoticeMode(
         "Gedung Ditambahkan",
-        `${newBuilding.code} (${newBuilding.name}) berhasil disimpan.`
+        `${newBuilding.code} (${newBuilding.name}) berhasil dicatat.`
       );
     },
-    [notify]
+    [authUser, handleDbError, notify, persistNoticeMode]
   );
 
   const addRoom = useCallback(
     (payload: Omit<Room, "id" | "created_at">) => {
+      const id = generateUuid();
+      const createdAt = new Date().toISOString();
       const newRoom: Room = {
         ...payload,
-        id: `rm-${Date.now()}`,
-        created_at: new Date().toISOString(),
+        id,
+        created_at: createdAt,
       };
       setRooms((prev) => [newRoom, ...prev]);
-      notify(
-        "success",
+
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase.from("rooms").insert({
+            id,
+            code: payload.code,
+            name: payload.name,
+            building_id: payload.building_id,
+            floor: payload.floor,
+            category: payload.category,
+            capacity: payload.capacity,
+            pic_name: payload.pic_name,
+            pic_contact: payload.pic_contact || null,
+            status: payload.status,
+            facilities_notes: payload.facilities_notes || null,
+          });
+          if (error) {
+            await handleDbError("Menyimpan Ruangan", error.message);
+          } else {
+            notify(
+              "success",
+              "Ruangan Tersimpan di Supabase",
+              `Ruang ${newRoom.code} (${newRoom.name}) berhasil disimpan ke database.`
+            );
+          }
+        })();
+        return;
+      }
+
+      persistNoticeMode(
         "Ruangan Ditambahkan",
         `Ruang ${newRoom.code} (${newRoom.name}) berhasil didaftarkan.`
       );
     },
-    [notify]
+    [authUser, handleDbError, notify, persistNoticeMode]
   );
 
   const updateRoom = useCallback(
@@ -340,13 +680,33 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       setRooms((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
-      notify(
-        "success",
+
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase
+            .from("rooms")
+            .update({ ...payload, updated_at: new Date().toISOString() })
+            .eq("id", id);
+          if (error) {
+            await handleDbError("Memperbarui Ruangan", error.message);
+          } else {
+            notify(
+              "success",
+              "Data Ruangan Diperbarui",
+              "Perubahan atribut ruangan telah tersimpan di Supabase."
+            );
+          }
+        })();
+        return;
+      }
+
+      persistNoticeMode(
         "Data Ruangan Diperbarui",
         "Perubahan atribut ruangan telah disimpan."
       );
     },
-    [notify]
+    [authUser, handleDbError, notify, persistNoticeMode]
   );
 
   const deleteRoom = useCallback(
@@ -356,21 +716,39 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       setAssets((prev) =>
         prev.map((a) => (a.room_id === id ? { ...a, room_id: null } : a))
       );
+
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase.from("rooms").delete().eq("id", id);
+          if (error) {
+            await handleDbError("Menghapus Ruangan", error.message);
+          } else {
+            notify(
+              "info",
+              "Ruangan Dihapus dari Supabase",
+              `Ruang ${target?.code || ""} telah dihapus dari database.`
+            );
+          }
+        })();
+        return;
+      }
+
       notify(
         "info",
         "Ruangan Dihapus",
         `Ruang ${target?.code || ""} telah dihapus dari daftar master.`
       );
     },
-    [rooms, notify]
+    [authUser, handleDbError, notify, rooms]
   );
 
   const previewNextInventoryCode = useCallback(
     (category: AssetCategoryCode, year: number) => {
-      const nextSequence = assets.length + 1;
+      const nextSequence = extractMaxSequence(assets.map((a) => a.inventory_code)) + 1;
       return generateInventoryCode(category, year, nextSequence);
     },
-    [assets.length]
+    [assets]
   );
 
   const addAsset = useCallback(
@@ -380,65 +758,144 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         "id" | "inventory_code" | "category_label" | "created_at"
       >
     ): Asset => {
-      const seq = assets.length + 1;
+      const seq = extractMaxSequence(assets.map((a) => a.inventory_code)) + 1;
       const inventory_code = generateInventoryCode(
         payload.category,
         payload.procurement_year,
         seq
       );
+      const id = generateUuid();
+      const category_label = ASSET_CATEGORY_LABELS[payload.category];
       const newAsset: Asset = {
         ...payload,
-        id: `ast-${Date.now()}`,
+        id,
         inventory_code,
-        category_label: ASSET_CATEGORY_LABELS[payload.category],
+        category_label,
         created_at: new Date().toISOString(),
       };
       setAssets((prev) => [newAsset, ...prev]);
-      notify(
-        "success",
+
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase.from("assets").insert({
+            id,
+            inventory_code,
+            name: payload.name,
+            brand_model: payload.brand_model,
+            category: payload.category,
+            category_label,
+            room_id: payload.room_id || null,
+            procurement_year: payload.procurement_year,
+            funding_source: payload.funding_source,
+            acquisition_cost: payload.acquisition_cost,
+            condition: payload.condition,
+            is_portable: payload.is_portable,
+            serial_number: payload.serial_number || null,
+            photo_url: payload.photo_url || null,
+            notes: payload.notes || null,
+          });
+          if (error) {
+            await handleDbError("Mendaftarkan Aset", error.message);
+          } else {
+            notify(
+              "success",
+              "Aset Tersimpan di Supabase",
+              `${newAsset.inventory_code} (${newAsset.name}) berhasil dicatat ke database.`
+            );
+          }
+        })();
+        return newAsset;
+      }
+
+      persistNoticeMode(
         "Aset Terdaftar",
         `${newAsset.inventory_code} (${newAsset.name}) berhasil dicatat ke inventaris.`
       );
       return newAsset;
     },
-    [assets.length, notify]
+    [assets, authUser, handleDbError, notify, persistNoticeMode]
   );
 
   const updateAsset = useCallback(
     (id: string, payload: Partial<Omit<Asset, "id" | "created_at">>) => {
+      const nextLabel = payload.category
+        ? ASSET_CATEGORY_LABELS[payload.category]
+        : undefined;
+
       setAssets((prev) =>
         prev.map((item) =>
           item.id === id
             ? {
                 ...item,
                 ...payload,
-                category_label: payload.category
-                  ? ASSET_CATEGORY_LABELS[payload.category]
-                  : item.category_label,
+                category_label: nextLabel || item.category_label,
               }
             : item
         )
       );
-      notify(
-        "success",
+
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase
+            .from("assets")
+            .update({
+              ...payload,
+              ...(nextLabel ? { category_label: nextLabel } : {}),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", id);
+          if (error) {
+            await handleDbError("Memperbarui Aset", error.message);
+          } else {
+            notify(
+              "success",
+              "Inventaris Diperbarui",
+              "Perubahan data aset telah tersimpan di Supabase."
+            );
+          }
+        })();
+        return;
+      }
+
+      persistNoticeMode(
         "Inventaris Diperbarui",
         "Perubahan data aset telah disimpan."
       );
     },
-    [notify]
+    [authUser, handleDbError, notify, persistNoticeMode]
   );
 
   const deleteAsset = useCallback(
     (id: string) => {
       const target = assets.find((a) => a.id === id);
       setAssets((prev) => prev.filter((item) => item.id !== id));
+
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase.from("assets").delete().eq("id", id);
+          if (error) {
+            await handleDbError("Menghapus Aset", error.message);
+          } else {
+            notify(
+              "info",
+              "Aset Dihapus dari Supabase",
+              `Aset ${target?.inventory_code || ""} dihapus dari database.`
+            );
+          }
+        })();
+        return;
+      }
+
       notify(
         "info",
         "Aset Dihapus",
         `Aset ${target?.inventory_code || ""} dihapus dari daftar inventaris.`
       );
     },
-    [assets, notify]
+    [assets, authUser, handleDbError, notify]
   );
 
   const addBooking = useCallback(
@@ -467,24 +924,63 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         };
       }
 
-      const seq = String(bookings.length + 1).padStart(3, "0");
+      const seq = String(
+        extractMaxSequence(bookings.map((b) => b.booking_code)) + 1
+      ).padStart(3, "0");
+      const id = generateUuid();
+      const booking_code = `PJM-${getCurrentYearMonth()}-${seq}`;
       const newBooking: Booking = {
         ...payload,
-        id: `bkg-${Date.now()}`,
-        booking_code: `PJM-202611-${seq}`,
+        id,
+        booking_code,
         status: "Menunggu Persetujuan",
         created_at: new Date().toISOString(),
       };
 
       setBookings((prev) => [newBooking, ...prev]);
-      notify(
-        "success",
+
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase.from("bookings").insert({
+            id,
+            booking_code,
+            borrower_name: payload.borrower_name,
+            borrower_role: payload.borrower_role,
+            borrower_unit: payload.borrower_unit,
+            borrower_phone: payload.borrower_phone,
+            target_type: payload.target_type,
+            room_id: payload.room_id || null,
+            asset_id: payload.asset_id || null,
+            activity_name: payload.activity_name,
+            attendees_count: payload.attendees_count,
+            booking_date: payload.booking_date,
+            start_time: payload.start_time,
+            end_time: payload.end_time,
+            status: "Menunggu Persetujuan",
+            approved_by: null,
+            return_condition_notes: null,
+          });
+          if (error) {
+            await handleDbError("Menyimpan Reservasi", error.message);
+          } else {
+            notify(
+              "success",
+              "Reservasi Tersimpan di Supabase",
+              `Tiket ${booking_code} berhasil dicatat dan menunggu persetujuan sarpras.`
+            );
+          }
+        })();
+        return { ok: true };
+      }
+
+      persistNoticeMode(
         "Reservasi Diajukan",
         `Tiket ${newBooking.booking_code} berhasil dibuat dan menunggu persetujuan sarpras.`
       );
       return { ok: true };
     },
-    [bookings, notify]
+    [authUser, bookings, handleDbError, notify, persistNoticeMode]
   );
 
   const updateBookingStatus = useCallback(
@@ -511,8 +1007,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         )
       );
 
+      let nextRoomStatus: Room["status"] | null = null;
       if (target?.room_id) {
         if (status === "Sedang Dipinjam") {
+          nextRoomStatus = "Digunakan";
           setRooms((prev) =>
             prev.map((r) =>
               r.id === target.room_id ? { ...r, status: "Digunakan" } : r
@@ -522,23 +1020,65 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           status === "Selesai / Dikembalikan" ||
           status === "Ditolak"
         ) {
-          setRooms((prev) =>
-            prev.map((r) =>
-              r.id === target.room_id && r.status === "Digunakan"
-                ? { ...r, status: "Tersedia" }
-                : r
-            )
-          );
+          const targetRoom = rooms.find((r) => r.id === target.room_id);
+          if (targetRoom?.status === "Digunakan") {
+            nextRoomStatus = "Tersedia";
+            setRooms((prev) =>
+              prev.map((r) =>
+                r.id === target.room_id && r.status === "Digunakan"
+                  ? { ...r, status: "Tersedia" }
+                  : r
+              )
+            );
+          }
         }
       }
 
-      notify(
-        "success",
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase
+            .from("bookings")
+            .update({
+              status,
+              ...(returnNotes !== undefined
+                ? { return_condition_notes: returnNotes }
+                : {}),
+              ...(approvedBy ? { approved_by: approvedBy } : {}),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", id);
+
+          if (error) {
+            await handleDbError("Memperbarui Status Peminjaman", error.message);
+            return;
+          }
+
+          if (target?.room_id && nextRoomStatus) {
+            await supabase
+              .from("rooms")
+              .update({
+                status: nextRoomStatus,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", target.room_id);
+          }
+
+          notify(
+            "success",
+            "Status Peminjaman Diperbarui di Supabase",
+            `Tiket ${target?.booking_code || ""} kini berstatus "${status}".`
+          );
+        })();
+        return;
+      }
+
+      persistNoticeMode(
         "Status Peminjaman Diperbarui",
         `Tiket ${target?.booking_code || ""} kini berstatus "${status}".`
       );
     },
-    [bookings, notify]
+    [authUser, bookings, handleDbError, notify, persistNoticeMode, rooms]
   );
 
   const addMaintenanceLog = useCallback(
@@ -548,11 +1088,15 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         "id" | "ticket_code" | "status" | "reported_at"
       >
     ) => {
-      const seq = String(maintenanceLogs.length + 1).padStart(3, "0");
+      const seq = String(
+        extractMaxSequence(maintenanceLogs.map((m) => m.ticket_code)) + 1
+      ).padStart(3, "0");
+      const id = generateUuid();
+      const ticket_code = `MNT-${getCurrentYearMonth()}-${seq}`;
       const newTicket: MaintenanceLog = {
         ...payload,
-        id: `mnt-${Date.now()}`,
-        ticket_code: `MNT-202611-${seq}`,
+        id,
+        ticket_code,
         status: "Dilaporkan",
         reported_at: new Date().toISOString(),
       };
@@ -586,8 +1130,53 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
-      notify(
-        "success",
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase.from("maintenance_logs").insert({
+            id,
+            ticket_code,
+            asset_id: payload.asset_id || null,
+            room_id: payload.room_id || null,
+            reporter_name: payload.reporter_name,
+            reporter_role: payload.reporter_role,
+            issue_title: payload.issue_title,
+            issue_description: payload.issue_description,
+            damage_severity: payload.damage_severity,
+            priority: payload.priority,
+            photo_url: payload.photo_url || null,
+            status: "Dilaporkan",
+            technician_vendor: null,
+            repair_cost: payload.repair_cost || 0,
+            resolution_notes: null,
+          });
+          if (error) {
+            await handleDbError("Membuat Tiket Kerusakan", error.message);
+            return;
+          }
+
+          if (payload.room_id && payload.priority === "Tinggi/Darurat") {
+            await supabase
+              .from("rooms")
+              .update({
+                status: "Perbaikan",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", payload.room_id);
+          }
+
+          // Trigger DB trg_sync_asset_condition ikut memperbarui kondisi aset
+          await refreshFromSupabase();
+          notify(
+            "success",
+            "Laporan Kerusakan Tersimpan di Supabase",
+            `Tiket ${ticket_code} berhasil dibuat dan disinkronkan ke database.`
+          );
+        })();
+        return;
+      }
+
+      persistNoticeMode(
         "Laporan Kerusakan Dicatat",
         `Tiket ${newTicket.ticket_code} berhasil dibuat${
           payload.damage_severity === "Rusak Berat"
@@ -596,7 +1185,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         }`
       );
     },
-    [maintenanceLogs.length, notify]
+    [
+      authUser,
+      handleDbError,
+      maintenanceLogs,
+      notify,
+      persistNoticeMode,
+      refreshFromSupabase,
+    ]
   );
 
   const updateMaintenanceStatus = useCallback(
@@ -610,6 +1206,11 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       }
     ) => {
       const target = maintenanceLogs.find((m) => m.id === id);
+      const completedAt =
+        update.status === "Selesai Diperbaiki"
+          ? new Date().toISOString()
+          : target?.completed_at;
+
       setMaintenanceLogs((prev) =>
         prev.map((item) =>
           item.id === id
@@ -628,10 +1229,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
                   update.resolution_notes !== undefined
                     ? update.resolution_notes
                     : item.resolution_notes,
-                completed_at:
-                  update.status === "Selesai Diperbaiki"
-                    ? new Date().toISOString()
-                    : item.completed_at,
+                completed_at: completedAt,
               }
             : item
         )
@@ -657,30 +1255,113 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      notify(
-        "success",
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase
+            .from("maintenance_logs")
+            .update({
+              status: update.status,
+              ...(update.technician_vendor !== undefined
+                ? { technician_vendor: update.technician_vendor }
+                : {}),
+              ...(update.repair_cost !== undefined
+                ? { repair_cost: update.repair_cost }
+                : {}),
+              ...(update.resolution_notes !== undefined
+                ? { resolution_notes: update.resolution_notes }
+                : {}),
+              ...(update.status === "Selesai Diperbaiki"
+                ? { completed_at: completedAt }
+                : {}),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", id);
+
+          if (error) {
+            await handleDbError("Memperbarui Perbaikan", error.message);
+            return;
+          }
+
+          if (update.status === "Selesai Diperbaiki" && target?.room_id) {
+            await supabase
+              .from("rooms")
+              .update({
+                status: "Tersedia",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", target.room_id);
+          }
+
+          await refreshFromSupabase();
+          notify(
+            "success",
+            "Status Pemeliharaan Diperbarui di Supabase",
+            `Tiket ${target?.ticket_code || ""} diperbarui ke "${update.status}".`
+          );
+        })();
+        return;
+      }
+
+      persistNoticeMode(
         "Status Pemeliharaan Diperbarui",
         `Tiket ${target?.ticket_code || ""} diperbarui ke "${update.status}".`
       );
     },
-    [maintenanceLogs, notify]
+    [
+      authUser,
+      handleDbError,
+      maintenanceLogs,
+      notify,
+      persistNoticeMode,
+      refreshFromSupabase,
+    ]
   );
 
   const addConsumable = useCallback(
     (payload: Omit<Consumable, "id" | "last_restocked_at">) => {
+      const id = generateUuid();
+      const nowIso = new Date().toISOString();
       const newItem: Consumable = {
         ...payload,
-        id: `bhp-${Date.now()}`,
-        last_restocked_at: new Date().toISOString(),
+        id,
+        last_restocked_at: nowIso,
       };
       setConsumables((prev) => [newItem, ...prev]);
-      notify(
-        "success",
+
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          const { error } = await supabase.from("consumables").insert({
+            id,
+            code: payload.code,
+            name: payload.name,
+            category: payload.category,
+            unit: payload.unit,
+            current_stock: payload.current_stock,
+            min_stock: payload.min_stock,
+            storage_location: payload.storage_location,
+            last_restocked_at: nowIso,
+          });
+          if (error) {
+            await handleDbError("Menambah Item BHP", error.message);
+          } else {
+            notify(
+              "success",
+              "Item BHP Tersimpan di Supabase",
+              `${newItem.code} (${newItem.name}) berhasil ditambahkan ke database.`
+            );
+          }
+        })();
+        return;
+      }
+
+      persistNoticeMode(
         "Item BHP Ditambahkan",
         `${newItem.code} (${newItem.name}) berhasil ditambahkan ke katalog stok.`
       );
     },
-    [notify]
+    [authUser, handleDbError, notify, persistNoticeMode]
   );
 
   const recordConsumableMutation = useCallback(
@@ -702,10 +1383,12 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         };
       }
 
+      const id = generateUuid();
+      const txDate = new Date().toISOString();
       const newTx: ConsumableTransaction = {
         ...payload,
-        id: `ctx-${Date.now()}`,
-        transaction_date: new Date().toISOString(),
+        id,
+        transaction_date: txDate,
       };
 
       setConsumables((prev) =>
@@ -720,21 +1403,57 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
             current_stock: nextStock,
             last_restocked_at:
               payload.transaction_type === "Masuk"
-                ? new Date().toISOString()
+                ? txDate
                 : item.last_restocked_at,
           };
         })
       );
 
       setConsumableTransactions((prev) => [newTx, ...prev]);
-      notify(
-        "success",
+
+      const supabase = getSupabaseBrowserClient();
+      if (supabase && authUser) {
+        void (async () => {
+          // Trigger PostgreSQL trg_apply_consumable_tx otomatis mengupdate saldo di tabel consumables
+          const { error } = await supabase
+            .from("consumable_transactions")
+            .insert({
+              id,
+              consumable_id: payload.consumable_id,
+              transaction_type: payload.transaction_type,
+              quantity: payload.quantity,
+              actor_name: payload.actor_name,
+              actor_unit: payload.actor_unit,
+              purpose_notes: payload.purpose_notes || null,
+            });
+          if (error) {
+            await handleDbError("Mencatat Mutasi Stok", error.message);
+          } else {
+            await refreshFromSupabase();
+            notify(
+              "success",
+              `Mutasi Stok (${payload.transaction_type}) Tersimpan`,
+              `${payload.quantity} ${target.unit} ${target.name} berhasil dicatat ke database.`
+            );
+          }
+        })();
+        return { ok: true };
+      }
+
+      persistNoticeMode(
         `Mutasi Stok (${payload.transaction_type}) Dicatat`,
         `${payload.quantity} ${target.unit} ${target.name} berhasil dicatat atas nama ${payload.actor_name}.`
       );
       return { ok: true };
     },
-    [consumables, notify]
+    [
+      authUser,
+      consumables,
+      handleDbError,
+      notify,
+      persistNoticeMode,
+      refreshFromSupabase,
+    ]
   );
 
   const value = useMemo<SarprasContextValue>(
@@ -748,6 +1467,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       consumableTransactions:
         uiSimState === "empty" ? [] : consumableTransactions,
       isLiveSupabase,
+      authUser,
+      authLoading,
+      isSyncingDb,
       uiSimState,
       setUiSimState,
       theme,
@@ -756,6 +1478,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       dismissToast,
       notify,
       resetToSeedData,
+      refreshFromSupabase,
+      signInWithPassword,
+      signUpStaff,
+      signOut,
       addBuilding,
       addRoom,
       updateRoom,
@@ -781,12 +1507,19 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       consumables,
       consumableTransactions,
       isLiveSupabase,
+      authUser,
+      authLoading,
+      isSyncingDb,
       theme,
       toggleTheme,
       toasts,
       dismissToast,
       notify,
       resetToSeedData,
+      refreshFromSupabase,
+      signInWithPassword,
+      signUpStaff,
+      signOut,
       addBuilding,
       addRoom,
       updateRoom,

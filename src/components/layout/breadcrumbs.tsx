@@ -12,10 +12,12 @@ const ROUTE_LABELS: Record<string, string> = {
   "/sarpras/peminjaman": "Peminjaman & Reservasi",
   "/sarpras/pemeliharaan": "Pemeliharaan & Laporan Kerusakan",
   "/sarpras/bhp": "Barang Habis Pakai (ATK)",
+  "/login": "Autentikasi & Sesi Staf",
 };
 
 export function Breadcrumbs() {
   const pathname = usePathname();
+  const isLoginRoute = pathname === "/login";
   const currentLabel = ROUTE_LABELS[pathname] || "Sarana Prasarana";
 
   return (
@@ -29,12 +31,16 @@ export function Breadcrumbs() {
             StafCenter
           </Link>
         </li>
-        <li aria-hidden="true">
-          <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-        </li>
-        <li className="font-medium text-slate-700 dark:text-slate-300">
-          Sarana Prasarana
-        </li>
+        {!isLoginRoute ? (
+          <>
+            <li aria-hidden="true">
+              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
+            </li>
+            <li className="font-medium text-slate-700 dark:text-slate-300">
+              Sarana Prasarana
+            </li>
+          </>
+        ) : null}
         <li aria-hidden="true">
           <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
         </li>
