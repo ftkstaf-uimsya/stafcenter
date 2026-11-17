@@ -90,7 +90,7 @@ export function LoginView() {
 
   if (authUser) {
     return (
-      <div className="max-w-xl mx-auto py-6">
+      <div className="w-full max-w-xl mx-auto py-4">
         <div className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-8 space-y-6">
           <div className="flex items-start gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
             <div className="p-2.5 rounded-lg bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
@@ -168,7 +168,7 @@ export function LoginView() {
   }
 
   return (
-    <div className="max-w-lg mx-auto py-4 sm:py-8 space-y-5">
+    <div className="w-full max-w-md mx-auto py-2 sm:py-4 space-y-5">
       <div className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-8 space-y-5">
         <div className="space-y-1.5">
           <p className="text-xs font-mono font-bold uppercase tracking-wider text-[#1E3A5F] dark:text-sky-400">
@@ -286,23 +286,23 @@ export function LoginView() {
             required
           />
 
-          <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          <div className="pt-2 flex flex-col gap-2.5">
             <Button
               type="submit"
               variant="primary"
               disabled={submitting || !isLiveSupabase}
-              className="w-full sm:w-auto"
+              className="w-full"
             >
               {submitting
                 ? "Memproses Autentikasi..."
                 : mode === "login"
-                ? "Masuk & Aktifkan Sinkronisasi DB"
+                ? "Masuk & Aktifkan DB"
                 : "Daftarkan Akun Staf"}
             </Button>
 
             <Link
               href="/sarpras/dashboard"
-              className="min-h-[44px] px-4 py-2 inline-flex items-center justify-center rounded-md border border-slate-400 dark:border-slate-600 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+              className="min-h-[44px] w-full px-4 py-2 inline-flex items-center justify-center rounded-md border border-slate-400 dark:border-slate-600 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
             >
               Lanjut Tanpa Login (Mode Baca)
             </Link>

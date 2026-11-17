@@ -1,15 +1,20 @@
 "use client";
 
 import React, { useState } from "react";
-import { X } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Moon, Sun, X } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { toasts, dismissToast } = useSarpras();
+  const { toasts, dismissToast, theme, toggleTheme } = useSarpras();
+
+  const isAuthPage = pathname === "/login" || pathname?.startsWith("/login/");
 
   return (
     <div className="min-h-dvh flex bg-[#F8FAFC] dark:bg-slate-950 text-slate-900 dark:text-slate-100">
@@ -20,23 +25,79 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         Lewati ke konten utama
       </a>
 
-      <Sidebar
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
-        mobileOpen={mobileMenuOpen}
-        onCloseMobile={() => setMobileMenuOpen(false)}
-      />
+      {isAuthPage ? (
+        <div className="flex-1 flex flex-col min-w-0">
+          <header className="border-b border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 sm:px-8 h-16 flex items-center justify-between">
+            <Link
+              href="/sarpras/dashboard"
+              className="flex items-center gap-2.5 rounded px-1 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+            >
+              <span className="px-2 py-1 text-xs font-mono font-bold tracking-wider bg-[#1E3A5F] text-amber-400 dark:bg-amber-400 dark:text-slate-950 rounded">
+                [LOGO]
+              </span>
+              <div>
+                <span className="block text-base font-bold tracking-tight text-slate-900 dark:text-white leading-none">
+                  STAFCENTER
+                </span>
+                <span className="block text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                  Administrasi & Sarana Prasarana Kampus
+                </span>
+              </div>
+            </Link>
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <Header onOpenMobileMenu={() => setMobileMenuOpen(true)} />
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={
+                theme === "light"
+                  ? "Aktifkan tema gelap"
+                  : "Aktifkan tema terang"
+              }
+              aria-pressed={theme === "dark"}
+              className="min-w-[44px] min-h-[44px] px-3 inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-medium text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+            >
+              {theme === "light" ? (
+                <>
+                  <Moon className="w-4 h-4 text-slate-800" aria-hidden="true" />
+                  <span className="hidden sm:inline">Gelap</span>
+                </>
+              ) : (
+                <>
+                  <Sun className="w-4 h-4 text-amber-300" aria-hidden="true" />
+                  <span className="hidden sm:inline">Terang</span>
+                </>
+              )}
+            </button>
+          </header>
 
-        <main
-          id="main-workspace"
-          className="flex-1 p-4 sm:p-6 lg:p-8 pb-24 lg:pb-10 max-w-7xl w-full mx-auto"
-        >
-          {children}
-        </main>
-      </div>
+          <main
+            id="main-workspace"
+            className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-8"
+          >
+            {children}
+          </main>
+        </div>
+      ) : (
+        <>
+          <Sidebar
+            collapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+            mobileOpen={mobileMenuOpen}
+            onCloseMobile={() => setMobileMenuOpen(false)}
+          />
+
+          <div className="flex-1 flex flex-col min-w-0">
+            <Header onOpenMobileMenu={() => setMobileMenuOpen(true)} />
+
+            <main
+              id="main-workspace"
+              className="flex-1 p-4 sm:p-6 lg:p-8 pb-24 lg:pb-10 max-w-7xl w-full mx-auto"
+            >
+              {children}
+            </main>
+          </div>
+        </>
+      )}
 
       {/* Live Region Notifikasi Aksi (Aksesibilitas Umpan Balik Form) */}
       <div
