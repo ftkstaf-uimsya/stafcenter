@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   type LucideIcon,
   Package,
+  Users,
   Wrench,
   X,
 } from "lucide-react";
@@ -194,6 +195,49 @@ export function Sidebar({
           </ul>
         ) : null}
       </div>
+
+      {authUser?.role === "master_admin" ? (
+        <div className="pt-3 mt-3 border-t border-white/15">
+          {!isCollapsedView ? (
+            <p className="px-3 py-1 text-[11px] font-mono font-bold uppercase tracking-wider text-amber-300">
+              Master Admin
+            </p>
+          ) : null}
+          <ul className="mt-1 space-y-1" role="list">
+            <li>
+              <Link
+                href="/sarpras/akun"
+                onClick={onCloseMobile}
+                aria-current={
+                  pathname === "/sarpras/akun" ? "page" : undefined
+                }
+                title={isCollapsedView ? "Kelola Akun Staf" : undefined}
+                className={`min-h-[44px] flex items-center justify-between gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                  pathname === "/sarpras/akun"
+                    ? "bg-amber-500 text-slate-950 font-bold"
+                    : "text-slate-100 hover:bg-white/10 hover:text-white"
+                }`}
+              >
+                <span className="flex items-center gap-3 min-w-0">
+                  <Users
+                    className={`w-5 h-5 shrink-0 ${
+                      pathname === "/sarpras/akun"
+                        ? "text-slate-950"
+                        : "text-slate-200"
+                    }`}
+                    aria-hidden={true}
+                  />
+                  {!isCollapsedView ? (
+                    <span className="truncate">Kelola Akun Staf</span>
+                  ) : (
+                    <span className="sr-only">Kelola Akun Staf</span>
+                  )}
+                </span>
+              </Link>
+            </li>
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -257,9 +301,15 @@ export function Sidebar({
         <div className="p-3 border-t border-white/15 bg-black/20">
           {!collapsed ? (
             <div className="text-xs text-slate-200 space-y-1">
-              <p className="font-semibold text-white">Biro Umum & Sarpras</p>
+              <p className="font-semibold text-white">
+                {authUser ? authUser.fullName : "Biro Umum & Sarpras"}
+              </p>
               <p className="font-mono text-[11px] text-slate-300 truncate">
-                {authUser ? `Sesi: ${authUser.email}` : "Mode Seed Lokal"}
+                {authUser
+                  ? `${authUser.username} (${
+                      authUser.role === "master_admin" ? "Master Admin" : "Staf"
+                    })`
+                  : "Mode Seed Lokal"}
               </p>
               {authUser ? (
                 <Link
@@ -274,7 +324,11 @@ export function Sidebar({
             <Link
               href="/login"
               className="block text-center font-mono text-xs font-bold text-amber-300 hover:text-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded py-1"
-              title={authUser ? `Sesi aktif: ${authUser.email}` : "Akun Staf"}
+              title={
+                authUser
+                  ? `${authUser.fullName} (@${authUser.username})`
+                  : "Akun Staf"
+              }
             >
               [PIC]
             </Link>
@@ -318,9 +372,15 @@ export function Sidebar({
               {renderNavLinks(false)}
             </nav>
             <div className="p-4 border-t border-white/15 text-xs text-slate-200 space-y-1">
-              <p className="font-semibold text-white">Biro Umum & Sarpras</p>
+              <p className="font-semibold text-white">
+                {authUser ? authUser.fullName : "Biro Umum & Sarpras"}
+              </p>
               <p className="font-mono text-[11px] text-slate-300 truncate">
-                {authUser ? `Sesi: ${authUser.email}` : "Mode Seed Lokal"}
+                {authUser
+                  ? `${authUser.username} (${
+                      authUser.role === "master_admin" ? "Master Admin" : "Staf"
+                    })`
+                  : "Mode Seed Lokal"}
               </p>
               {authUser ? (
                 <Link

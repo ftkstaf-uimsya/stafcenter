@@ -12,6 +12,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/sarpras/peminjaman": "Peminjaman & Reservasi",
   "/sarpras/pemeliharaan": "Pemeliharaan & Laporan Kerusakan",
   "/sarpras/bhp": "Barang Habis Pakai (ATK)",
+  "/sarpras/akun": "Manajemen Akun Staf",
   "/login": "Autentikasi & Sesi Staf",
 };
 

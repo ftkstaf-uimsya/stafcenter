@@ -65,13 +65,14 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
               <Link
                 href="/login"
                 className="min-h-[44px] px-3 py-1.5 inline-flex items-center gap-1.5 rounded-md border border-emerald-700/50 dark:border-emerald-500/60 bg-emerald-50 dark:bg-emerald-950/60 text-xs font-semibold text-emerald-900 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
-                title={`Sesi aktif: ${authUser.email}`}
+                title={`Sesi aktif: ${authUser.fullName} (${authUser.username})`}
               >
                 <UserCheck className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                <span className="hidden xl:inline max-w-[160px] truncate">
-                  {authUser.email}
+                <span className="hidden xl:inline max-w-[180px] truncate">
+                  {authUser.username} (
+                  {authUser.role === "master_admin" ? "Master Admin" : "Staf"})
                 </span>
-                <span className="xl:hidden">Sesi Staf</span>
+                <span className="xl:hidden">{authUser.username}</span>
               </Link>
               <button
                 type="button"

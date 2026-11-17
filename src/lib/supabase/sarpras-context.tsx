@@ -19,6 +19,7 @@ import {
   MaintenanceLog,
   MaintenanceStatus,
   Room,
+  StaffRole,
   UISimulationState,
 } from "@/types/sarpras";
 import {
@@ -26,7 +27,6 @@ import {
   findBookingConflict,
   generateInventoryCode,
   generateUuid,
-  getSupabaseBrowserClient,
   isSupabaseConfigured,
   normalizeTimeHHMM,
 } from "@/lib/supabase/client";
@@ -45,8 +45,10 @@ const THEME_KEY = "stafcenter_theme_v1";
 
 export interface AuthStaffUser {
   id: string;
+  username: string;
+  fullName: string;
   email: string;
-  fullName?: string;
+  role: StaffRole;
 }
 
 export interface ToastNotice {
@@ -65,6 +67,7 @@ interface SarprasContextValue {
   consumables: Consumable[];
   consumableTransactions: ConsumableTransaction[];
   isLiveSupabase: boolean;
+  serverConfigured: boolean;
   authUser: AuthStaffUser | null;
   authLoading: boolean;
   isSyncingDb: boolean;
@@ -78,16 +81,11 @@ interface SarprasContextValue {
   resetToSeedData: () => void;
   refreshFromSupabase: () => Promise<void>;
 
-  // Autentikasi Staf (Supabase Auth)
-  signInWithPassword: (
-    email: string,
+  // Autentikasi Staf (Master Admin & Staf via Server Session)
+  signInWithUsername: (
+    username: string,
     password: string
   ) => Promise<{ ok: boolean; error?: string }>;
-  signUpStaff: (
-    email: string,
-    password: string,
-    fullName: string
-  ) => Promise<{ ok: boolean; error?: string; needsEmailConfirm?: boolean }>;
   signOut: () => Promise<void>;
 
   // Gedung & Ruangan CRUD
@@ -193,6 +191,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ConsumableTransaction[]
   >(() => (isLiveSupabase ? [] : INITIAL_CONSUMABLE_TRANSACTIONS));
 
+  const [serverConfigured, setServerConfigured] = useState<boolean>(true);
   const [authUser, setAuthUser] = useState<AuthStaffUser | null>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(isLiveSupabase);
   const [isSyncingDb, setIsSyncingDb] = useState<boolean>(false);
@@ -228,44 +227,36 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshFromSupabase = useCallback(async () => {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
+    if (!isLiveSupabase) return;
 
     setIsSyncingDb(true);
     try {
-      const [bRes, rRes, aRes, bkRes, mRes, cRes, ctRes] = await Promise.all([
-        supabase.from("buildings").select("*").order("code"),
-        supabase.from("rooms").select("*").order("code"),
-        supabase.from("assets").select("*").order("inventory_code"),
-        supabase
-          .from("bookings")
-          .select("*")
-          .order("booking_date", { ascending: false }),
-        supabase
-          .from("maintenance_logs")
-          .select("*")
-          .order("reported_at", { ascending: false }),
-        supabase.from("consumables").select("*").order("code"),
-        supabase
-          .from("consumable_transactions")
-          .select("*")
-          .order("transaction_date", { ascending: false }),
-      ]);
-
-      if (bRes.data) setBuildings(bRes.data as Building[]);
-      if (rRes.data) setRooms(rRes.data as Room[]);
-      if (aRes.data) {
+      const res = await fetch("/api/sarpras/bootstrap", {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        if (res.status === 401) {
+          setAuthUser(null);
+          clearOperationalData();
+        }
+        return;
+      }
+      const data = await res.json();
+      if (Array.isArray(data.buildings)) setBuildings(data.buildings as Building[]);
+      if (Array.isArray(data.rooms)) setRooms(data.rooms as Room[]);
+      if (Array.isArray(data.assets)) {
         setAssets(
-          (aRes.data as Asset[]).map((item) => ({
+          (data.assets as Asset[]).map((item) => ({
             ...item,
             acquisition_cost: Number(item.acquisition_cost) || 0,
             procurement_year: Number(item.procurement_year) || 2026,
           }))
         );
       }
-      if (bkRes.data) {
+      if (Array.isArray(data.bookings)) {
         setBookings(
-          (bkRes.data as Booking[]).map((item) => ({
+          (data.bookings as Booking[]).map((item) => ({
             ...item,
             attendees_count: Number(item.attendees_count) || 1,
             start_time: normalizeTimeHHMM(item.start_time),
@@ -273,29 +264,31 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           }))
         );
       }
-      if (mRes.data) {
+      if (Array.isArray(data.maintenanceLogs)) {
         setMaintenanceLogs(
-          (mRes.data as MaintenanceLog[]).map((item) => ({
+          (data.maintenanceLogs as MaintenanceLog[]).map((item) => ({
             ...item,
             repair_cost: Number(item.repair_cost) || 0,
           }))
         );
       }
-      if (cRes.data) {
+      if (Array.isArray(data.consumables)) {
         setConsumables(
-          (cRes.data as Consumable[]).map((item) => ({
+          (data.consumables as Consumable[]).map((item) => ({
             ...item,
             current_stock: Number(item.current_stock) || 0,
             min_stock: Number(item.min_stock) || 0,
           }))
         );
       }
-      if (ctRes.data) {
+      if (Array.isArray(data.consumableTransactions)) {
         setConsumableTransactions(
-          (ctRes.data as ConsumableTransaction[]).map((item) => ({
-            ...item,
-            quantity: Number(item.quantity) || 0,
-          }))
+          (data.consumableTransactions as ConsumableTransaction[]).map(
+            (item) => ({
+              ...item,
+              quantity: Number(item.quantity) || 0,
+            })
+          )
         );
       }
     } catch {
@@ -303,9 +296,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsSyncingDb(false);
     }
-  }, []);
+  }, [clearOperationalData, isLiveSupabase]);
 
-  // Hydrate theme, auth session, and Supabase or localStorage data
+  // Hydrate theme & verify server session
   useEffect(() => {
     try {
       const savedTheme = localStorage.getItem(THEME_KEY);
@@ -327,73 +320,48 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           if (parsed.consumableTransactions)
             setConsumableTransactions(parsed.consumableTransactions);
         }
+        setAuthLoading(false);
+        setHydrated(true);
+        return;
       }
     } catch {
-      // Gunakan fallback seed data bila localStorage tidak tersedia
-    }
-
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) {
-      setAuthLoading(false);
-      setHydrated(true);
-      return;
+      // Abaikan fallback localStorage
     }
 
     let active = true;
 
-    supabase.auth
-      .getSession()
-      .then(({ data }) => {
+    fetch("/api/auth/session", { method: "GET", cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
         if (!active) return;
-        const user = data.session?.user;
-        if (user) {
-          setAuthUser({
-            id: user.id,
-            email: user.email || "staf@kampus.ac.id",
-            fullName:
-              (user.user_metadata?.full_name as string | undefined) || undefined,
-          });
+        setServerConfigured(Boolean(data.serverConfigured));
+        if (data.user) {
+          setAuthUser(data.user as AuthStaffUser);
           void refreshFromSupabase();
         } else {
           setAuthUser(null);
           clearOperationalData();
         }
-        setAuthLoading(false);
       })
       .catch(() => {
         if (active) {
-          clearOperationalData();
-          setAuthLoading(false);
-        }
-      });
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        const user = session?.user;
-        if (user) {
-          setAuthUser({
-            id: user.id,
-            email: user.email || "staf@kampus.ac.id",
-            fullName:
-              (user.user_metadata?.full_name as string | undefined) || undefined,
-          });
-          void refreshFromSupabase();
-        } else {
           setAuthUser(null);
           clearOperationalData();
         }
-      }
-    );
-
-    setHydrated(true);
+      })
+      .finally(() => {
+        if (active) {
+          setAuthLoading(false);
+          setHydrated(true);
+        }
+      });
 
     return () => {
       active = false;
-      authListener.subscription.unsubscribe();
     };
   }, [clearOperationalData, isLiveSupabase, refreshFromSupabase]);
 
-  // Persist perubahan ke localStorage hanya bila tidak menggunakan Supabase
+  // Persist perubahan ke localStorage hanya saat mode offline non-Supabase
   useEffect(() => {
     if (!hydrated || isLiveSupabase) return;
     try {
@@ -415,7 +383,6 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
   }, [
     hydrated,
     isLiveSupabase,
-    authUser,
     buildings,
     rooms,
     assets,
@@ -425,116 +392,60 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     consumableTransactions,
   ]);
 
-  const signInWithPassword = useCallback(
+  const signInWithUsername = useCallback(
     async (
-      email: string,
+      username: string,
       password: string
     ): Promise<{ ok: boolean; error?: string }> => {
-      const supabase = getSupabaseBrowserClient();
-      if (!supabase) {
-        return {
-          ok: false,
-          error: "Konfigurasi Supabase (.env.local) belum tersedia.",
-        };
-      }
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-      if (error || !data.user) {
-        return {
-          ok: false,
-          error:
-            error?.message === "Invalid login credentials"
-              ? "Email atau kata sandi staf tidak cocok."
-              : error?.message || "Gagal masuk ke akun staf.",
-        };
-      }
-      setAuthUser({
-        id: data.user.id,
-        email: data.user.email || email.trim(),
-        fullName:
-          (data.user.user_metadata?.full_name as string | undefined) ||
-          undefined,
-      });
-      await refreshFromSupabase();
-      notify(
-        "success",
-        "Berhasil Masuk Staf",
-        `Sesi aktif sebagai ${data.user.email}. Perubahan data kini tersimpan permanen ke Supabase.`
-      );
-      return { ok: true };
-    },
-    [notify, refreshFromSupabase]
-  );
-
-  const signUpStaff = useCallback(
-    async (
-      email: string,
-      password: string,
-      fullName: string
-    ): Promise<{
-      ok: boolean;
-      error?: string;
-      needsEmailConfirm?: boolean;
-    }> => {
-      const supabase = getSupabaseBrowserClient();
-      if (!supabase) {
-        return {
-          ok: false,
-          error: "Konfigurasi Supabase (.env.local) belum tersedia.",
-        };
-      }
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          data: {
-            full_name: fullName.trim(),
-            role: "staff_sarpras",
-          },
-        },
-      });
-      if (error) {
-        return { ok: false, error: error.message };
-      }
-
-      if (data.session && data.user) {
-        setAuthUser({
-          id: data.user.id,
-          email: data.user.email || email.trim(),
-          fullName: fullName.trim(),
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: username.trim(), password }),
         });
+        const data = await res.json();
+        if (!res.ok || !data.user) {
+          return {
+            ok: false,
+            error: data.error || "Username atau kata sandi salah.",
+          };
+        }
+
+        const user = data.user as AuthStaffUser;
+        setAuthUser(user);
+        setServerConfigured(true);
         await refreshFromSupabase();
+
         notify(
           "success",
-          "Akun Staf Terdaftar",
-          `Selamat datang, ${fullName.trim()}. Sinkronisasi tulis Supabase langsung aktif.`
+          "Berhasil Masuk Staf",
+          `Selamat datang, ${user.fullName} (${
+            user.role === "master_admin" ? "Master Admin" : "Staf"
+          }).`
         );
-        return { ok: true, needsEmailConfirm: false };
+        return { ok: true };
+      } catch {
+        return {
+          ok: false,
+          error: "Terjadi gangguan jaringan saat menghubungi server autentikasi.",
+        };
       }
-
-      notify(
-        "info",
-        "Verifikasi Email Diperlukan",
-        `Tautan konfirmasi pendaftaran telah dikirim ke ${email.trim()}.`
-      );
-      return { ok: true, needsEmailConfirm: true };
     },
     [notify, refreshFromSupabase]
   );
 
   const signOut = useCallback(async () => {
-    const supabase = getSupabaseBrowserClient();
-    if (supabase) {
-      await supabase.auth.signOut();
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Abaikan kegagalan jaringan saat logout
     }
     setAuthUser(null);
     clearOperationalData();
     notify(
       "info",
       "Keluar dari Sesi Staf",
-      "Sesi telah diakhiri. Silakan masuk kembali untuk mengakses modul StafCenter."
+      "Sesi telah diakhiri. Masuk kembali untuk mengakses modul StafCenter."
     );
   }, [clearOperationalData, notify]);
 
@@ -597,10 +508,43 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     return true;
   }, [authUser, isLiveSupabase, notify]);
 
-  const handleDbError = useCallback(
-    async (actionLabel: string, errMessage: string) => {
-      notify("error", `Gagal ${actionLabel}`, errMessage);
-      await refreshFromSupabase();
+  const sendMutation = useCallback(
+    async (
+      payload: Record<string, unknown>,
+      actionLabel: string,
+      successTitle: string,
+      successMessage: string,
+      shouldRefreshAfter = false,
+      noticeType: ToastNotice["type"] = "success"
+    ) => {
+      try {
+        const res = await fetch("/api/sarpras/mutate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          notify(
+            "error",
+            `Gagal ${actionLabel}`,
+            result.error || "Terjadi kesalahan saat menyimpan ke Supabase."
+          );
+          await refreshFromSupabase();
+          return;
+        }
+        if (shouldRefreshAfter) {
+          await refreshFromSupabase();
+        }
+        notify(noticeType, successTitle, successMessage);
+      } catch {
+        notify(
+          "error",
+          `Gagal ${actionLabel}`,
+          "Koneksi ke server terputus saat menyimpan perubahan."
+        );
+        await refreshFromSupabase();
+      }
     },
     [notify, refreshFromSupabase]
   );
@@ -617,27 +561,23 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       };
       setBuildings((prev) => [...prev, newBuilding]);
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase.from("buildings").insert({
-            id,
-            code: payload.code,
-            name: payload.name,
-            floors_count: payload.floors_count,
-            zone: payload.zone,
-            description: payload.description || null,
-          });
-          if (error) {
-            await handleDbError("Menyimpan Gedung", error.message);
-          } else {
-            notify(
-              "success",
-              "Gedung Tersimpan di Supabase",
-              `${newBuilding.code} (${newBuilding.name}) berhasil disimpan ke database.`
-            );
-          }
-        })();
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_building",
+            data: {
+              id,
+              code: payload.code,
+              name: payload.name,
+              floors_count: payload.floors_count,
+              zone: payload.zone,
+              description: payload.description || null,
+            },
+          },
+          "Menyimpan Gedung",
+          "Gedung Tersimpan di Supabase",
+          `${newBuilding.code} (${newBuilding.name}) berhasil disimpan ke database.`
+        );
         return;
       }
 
@@ -647,7 +587,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         `${newBuilding.code} (${newBuilding.name}) berhasil dicatat.`
       );
     },
-    [authUser, handleDbError, notify, requireStaffForLiveWrite]
+    [authUser, isLiveSupabase, notify, requireStaffForLiveWrite, sendMutation]
   );
 
   const addRoom = useCallback(
@@ -662,32 +602,28 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       };
       setRooms((prev) => [newRoom, ...prev]);
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase.from("rooms").insert({
-            id,
-            code: payload.code,
-            name: payload.name,
-            building_id: payload.building_id,
-            floor: payload.floor,
-            category: payload.category,
-            capacity: payload.capacity,
-            pic_name: payload.pic_name,
-            pic_contact: payload.pic_contact || null,
-            status: payload.status,
-            facilities_notes: payload.facilities_notes || null,
-          });
-          if (error) {
-            await handleDbError("Menyimpan Ruangan", error.message);
-          } else {
-            notify(
-              "success",
-              "Ruangan Tersimpan di Supabase",
-              `Ruang ${newRoom.code} (${newRoom.name}) berhasil disimpan ke database.`
-            );
-          }
-        })();
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_room",
+            data: {
+              id,
+              code: payload.code,
+              name: payload.name,
+              building_id: payload.building_id,
+              floor: payload.floor,
+              category: payload.category,
+              capacity: payload.capacity,
+              pic_name: payload.pic_name,
+              pic_contact: payload.pic_contact || null,
+              status: payload.status,
+              facilities_notes: payload.facilities_notes || null,
+            },
+          },
+          "Menyimpan Ruangan",
+          "Ruangan Tersimpan di Supabase",
+          `Ruang ${newRoom.code} (${newRoom.name}) berhasil disimpan ke database.`
+        );
         return;
       }
 
@@ -697,7 +633,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         `Ruang ${newRoom.code} (${newRoom.name}) berhasil didaftarkan.`
       );
     },
-    [authUser, handleDbError, notify, requireStaffForLiveWrite]
+    [authUser, isLiveSupabase, notify, requireStaffForLiveWrite, sendMutation]
   );
 
   const updateRoom = useCallback(
@@ -707,23 +643,13 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase
-            .from("rooms")
-            .update({ ...payload, updated_at: new Date().toISOString() })
-            .eq("id", id);
-          if (error) {
-            await handleDbError("Memperbarui Ruangan", error.message);
-          } else {
-            notify(
-              "success",
-              "Data Ruangan Diperbarui",
-              "Perubahan atribut ruangan telah tersimpan di Supabase."
-            );
-          }
-        })();
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_room", id, data: payload },
+          "Memperbarui Ruangan",
+          "Data Ruangan Diperbarui",
+          "Perubahan atribut ruangan telah tersimpan di Supabase."
+        );
         return;
       }
 
@@ -733,7 +659,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         "Perubahan atribut ruangan telah disimpan."
       );
     },
-    [authUser, handleDbError, notify, requireStaffForLiveWrite]
+    [authUser, isLiveSupabase, notify, requireStaffForLiveWrite, sendMutation]
   );
 
   const deleteRoom = useCallback(
@@ -745,20 +671,15 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         prev.map((a) => (a.room_id === id ? { ...a, room_id: null } : a))
       );
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase.from("rooms").delete().eq("id", id);
-          if (error) {
-            await handleDbError("Menghapus Ruangan", error.message);
-          } else {
-            notify(
-              "info",
-              "Ruangan Dihapus dari Supabase",
-              `Ruang ${target?.code || ""} telah dihapus dari database.`
-            );
-          }
-        })();
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "delete_room", id },
+          "Menghapus Ruangan",
+          "Ruangan Dihapus dari Supabase",
+          `Ruang ${target?.code || ""} telah dihapus dari database.`,
+          false,
+          "info"
+        );
         return;
       }
 
@@ -768,12 +689,20 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         `Ruang ${target?.code || ""} telah dihapus dari daftar master.`
       );
     },
-    [authUser, handleDbError, notify, requireStaffForLiveWrite, rooms]
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireStaffForLiveWrite,
+      rooms,
+      sendMutation,
+    ]
   );
 
   const previewNextInventoryCode = useCallback(
     (category: AssetCategoryCode, year: number) => {
-      const nextSequence = extractMaxSequence(assets.map((a) => a.inventory_code)) + 1;
+      const nextSequence =
+        extractMaxSequence(assets.map((a) => a.inventory_code)) + 1;
       return generateInventoryCode(category, year, nextSequence);
     },
     [assets]
@@ -804,36 +733,32 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       if (!requireStaffForLiveWrite()) return newAsset;
       setAssets((prev) => [newAsset, ...prev]);
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase.from("assets").insert({
-            id,
-            inventory_code,
-            name: payload.name,
-            brand_model: payload.brand_model,
-            category: payload.category,
-            category_label,
-            room_id: payload.room_id || null,
-            procurement_year: payload.procurement_year,
-            funding_source: payload.funding_source,
-            acquisition_cost: payload.acquisition_cost,
-            condition: payload.condition,
-            is_portable: payload.is_portable,
-            serial_number: payload.serial_number || null,
-            photo_url: payload.photo_url || null,
-            notes: payload.notes || null,
-          });
-          if (error) {
-            await handleDbError("Mendaftarkan Aset", error.message);
-          } else {
-            notify(
-              "success",
-              "Aset Tersimpan di Supabase",
-              `${newAsset.inventory_code} (${newAsset.name}) berhasil dicatat ke database.`
-            );
-          }
-        })();
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_asset",
+            data: {
+              id,
+              inventory_code,
+              name: payload.name,
+              brand_model: payload.brand_model,
+              category: payload.category,
+              category_label,
+              room_id: payload.room_id || null,
+              procurement_year: payload.procurement_year,
+              funding_source: payload.funding_source,
+              acquisition_cost: payload.acquisition_cost,
+              condition: payload.condition,
+              is_portable: payload.is_portable,
+              serial_number: payload.serial_number || null,
+              photo_url: payload.photo_url || null,
+              notes: payload.notes || null,
+            },
+          },
+          "Mendaftarkan Aset",
+          "Aset Tersimpan di Supabase",
+          `${newAsset.inventory_code} (${newAsset.name}) berhasil dicatat ke database.`
+        );
         return newAsset;
       }
 
@@ -844,7 +769,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       );
       return newAsset;
     },
-    [assets, authUser, handleDbError, notify, requireStaffForLiveWrite]
+    [
+      assets,
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireStaffForLiveWrite,
+      sendMutation,
+    ]
   );
 
   const updateAsset = useCallback(
@@ -866,27 +798,20 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         )
       );
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase
-            .from("assets")
-            .update({
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "update_asset",
+            id,
+            data: {
               ...payload,
               ...(nextLabel ? { category_label: nextLabel } : {}),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", id);
-          if (error) {
-            await handleDbError("Memperbarui Aset", error.message);
-          } else {
-            notify(
-              "success",
-              "Inventaris Diperbarui",
-              "Perubahan data aset telah tersimpan di Supabase."
-            );
-          }
-        })();
+            },
+          },
+          "Memperbarui Aset",
+          "Inventaris Diperbarui",
+          "Perubahan data aset telah tersimpan di Supabase."
+        );
         return;
       }
 
@@ -896,7 +821,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         "Perubahan data aset telah disimpan."
       );
     },
-    [authUser, handleDbError, notify, requireStaffForLiveWrite]
+    [authUser, isLiveSupabase, notify, requireStaffForLiveWrite, sendMutation]
   );
 
   const deleteAsset = useCallback(
@@ -905,20 +830,15 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       const target = assets.find((a) => a.id === id);
       setAssets((prev) => prev.filter((item) => item.id !== id));
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase.from("assets").delete().eq("id", id);
-          if (error) {
-            await handleDbError("Menghapus Aset", error.message);
-          } else {
-            notify(
-              "info",
-              "Aset Dihapus dari Supabase",
-              `Aset ${target?.inventory_code || ""} dihapus dari database.`
-            );
-          }
-        })();
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "delete_asset", id },
+          "Menghapus Aset",
+          "Aset Dihapus dari Supabase",
+          `Aset ${target?.inventory_code || ""} dihapus dari database.`,
+          false,
+          "info"
+        );
         return;
       }
 
@@ -928,7 +848,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         `Aset ${target?.inventory_code || ""} dihapus dari daftar inventaris.`
       );
     },
-    [assets, authUser, handleDbError, notify, requireStaffForLiveWrite]
+    [
+      assets,
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireStaffForLiveWrite,
+      sendMutation,
+    ]
   );
 
   const addBooking = useCallback(
@@ -975,38 +902,34 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
       setBookings((prev) => [newBooking, ...prev]);
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase.from("bookings").insert({
-            id,
-            booking_code,
-            borrower_name: payload.borrower_name,
-            borrower_role: payload.borrower_role,
-            borrower_unit: payload.borrower_unit,
-            borrower_phone: payload.borrower_phone,
-            target_type: payload.target_type,
-            room_id: payload.room_id || null,
-            asset_id: payload.asset_id || null,
-            activity_name: payload.activity_name,
-            attendees_count: payload.attendees_count,
-            booking_date: payload.booking_date,
-            start_time: payload.start_time,
-            end_time: payload.end_time,
-            status: "Menunggu Persetujuan",
-            approved_by: null,
-            return_condition_notes: null,
-          });
-          if (error) {
-            await handleDbError("Menyimpan Reservasi", error.message);
-          } else {
-            notify(
-              "success",
-              "Reservasi Tersimpan di Supabase",
-              `Tiket ${booking_code} berhasil dicatat dan menunggu persetujuan sarpras.`
-            );
-          }
-        })();
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_booking",
+            data: {
+              id,
+              booking_code,
+              borrower_name: payload.borrower_name,
+              borrower_role: payload.borrower_role,
+              borrower_unit: payload.borrower_unit,
+              borrower_phone: payload.borrower_phone,
+              target_type: payload.target_type,
+              room_id: payload.room_id || null,
+              asset_id: payload.asset_id || null,
+              activity_name: payload.activity_name,
+              attendees_count: payload.attendees_count,
+              booking_date: payload.booking_date,
+              start_time: payload.start_time,
+              end_time: payload.end_time,
+              status: "Menunggu Persetujuan",
+              approved_by: null,
+              return_condition_notes: null,
+            },
+          },
+          "Menyimpan Reservasi",
+          "Reservasi Tersimpan di Supabase",
+          `Tiket ${booking_code} berhasil dicatat dan menunggu persetujuan sarpras.`
+        );
         return { ok: true };
       }
 
@@ -1017,7 +940,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       );
       return { ok: true };
     },
-    [authUser, bookings, handleDbError, notify, requireStaffForLiveWrite]
+    [
+      authUser,
+      bookings,
+      isLiveSupabase,
+      notify,
+      requireStaffForLiveWrite,
+      sendMutation,
+    ]
   );
 
   const updateBookingStatus = useCallback(
@@ -1072,42 +1002,25 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase
-            .from("bookings")
-            .update({
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "update_booking_status",
+            id,
+            data: {
               status,
               ...(returnNotes !== undefined
                 ? { return_condition_notes: returnNotes }
                 : {}),
               ...(approvedBy ? { approved_by: approvedBy } : {}),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", id);
-
-          if (error) {
-            await handleDbError("Memperbarui Status Peminjaman", error.message);
-            return;
-          }
-
-          if (target?.room_id && nextRoomStatus) {
-            await supabase
-              .from("rooms")
-              .update({
-                status: nextRoomStatus,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", target.room_id);
-          }
-
-          notify(
-            "success",
-            "Status Peminjaman Diperbarui di Supabase",
-            `Tiket ${target?.booking_code || ""} kini berstatus "${status}".`
-          );
-        })();
+            },
+            roomId: target?.room_id || null,
+            nextRoomStatus,
+          },
+          "Memperbarui Status Peminjaman",
+          "Status Peminjaman Diperbarui di Supabase",
+          `Tiket ${target?.booking_code || ""} kini berstatus "${status}".`
+        );
         return;
       }
 
@@ -1117,7 +1030,15 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         `Tiket ${target?.booking_code || ""} kini berstatus "${status}".`
       );
     },
-    [authUser, bookings, handleDbError, notify, requireStaffForLiveWrite, rooms]
+    [
+      authUser,
+      bookings,
+      isLiveSupabase,
+      notify,
+      requireStaffForLiveWrite,
+      rooms,
+      sendMutation,
+    ]
   );
 
   const addMaintenanceLog = useCallback(
@@ -1143,7 +1064,6 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
       setMaintenanceLogs((prev) => [newTicket, ...prev]);
 
-      // Otomatisasi: perbarui kondisi aset di tabel Inventaris bila rusak berat/ringan
       if (payload.asset_id) {
         setAssets((prev) =>
           prev.map((a) => {
@@ -1162,7 +1082,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
-      if (payload.room_id && payload.priority === "Tinggi/Darurat") {
+      const setRoomRepair = Boolean(
+        payload.room_id && payload.priority === "Tinggi/Darurat"
+      );
+      if (setRoomRepair && payload.room_id) {
         setRooms((prev) =>
           prev.map((r) =>
             r.id === payload.room_id ? { ...r, status: "Perbaikan" } : r
@@ -1170,49 +1093,35 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase.from("maintenance_logs").insert({
-            id,
-            ticket_code,
-            asset_id: payload.asset_id || null,
-            room_id: payload.room_id || null,
-            reporter_name: payload.reporter_name,
-            reporter_role: payload.reporter_role,
-            issue_title: payload.issue_title,
-            issue_description: payload.issue_description,
-            damage_severity: payload.damage_severity,
-            priority: payload.priority,
-            photo_url: payload.photo_url || null,
-            status: "Dilaporkan",
-            technician_vendor: null,
-            repair_cost: payload.repair_cost || 0,
-            resolution_notes: null,
-          });
-          if (error) {
-            await handleDbError("Membuat Tiket Kerusakan", error.message);
-            return;
-          }
-
-          if (payload.room_id && payload.priority === "Tinggi/Darurat") {
-            await supabase
-              .from("rooms")
-              .update({
-                status: "Perbaikan",
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", payload.room_id);
-          }
-
-          // Trigger DB trg_sync_asset_condition ikut memperbarui kondisi aset
-          await refreshFromSupabase();
-          notify(
-            "success",
-            "Laporan Kerusakan Tersimpan di Supabase",
-            `Tiket ${ticket_code} berhasil dibuat dan disinkronkan ke database.`
-          );
-        })();
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_maintenance",
+            data: {
+              id,
+              ticket_code,
+              asset_id: payload.asset_id || null,
+              room_id: payload.room_id || null,
+              reporter_name: payload.reporter_name,
+              reporter_role: payload.reporter_role,
+              issue_title: payload.issue_title,
+              issue_description: payload.issue_description,
+              damage_severity: payload.damage_severity,
+              priority: payload.priority,
+              photo_url: payload.photo_url || null,
+              status: "Dilaporkan",
+              technician_vendor: null,
+              repair_cost: payload.repair_cost || 0,
+              resolution_notes: null,
+            },
+            roomId: payload.room_id || null,
+            setRoomRepair,
+          },
+          "Membuat Tiket Kerusakan",
+          "Laporan Kerusakan Tersimpan di Supabase",
+          `Tiket ${ticket_code} berhasil dibuat dan disinkronkan ke database.`,
+          true
+        );
         return;
       }
 
@@ -1228,11 +1137,11 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     },
     [
       authUser,
-      handleDbError,
+      isLiveSupabase,
       maintenanceLogs,
       notify,
-      refreshFromSupabase,
       requireStaffForLiveWrite,
+      sendMutation,
     ]
   );
 
@@ -1277,8 +1186,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         )
       );
 
-      // Bila perbaikan selesai, kembalikan kondisi aset menjadi Baik dan ruangan menjadi Tersedia
-      if (update.status === "Selesai Diperbaiki") {
+      const isDone = update.status === "Selesai Diperbaiki";
+      if (isDone) {
         if (target?.asset_id) {
           setAssets((prev) =>
             prev.map((a) =>
@@ -1297,12 +1206,12 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase
-            .from("maintenance_logs")
-            .update({
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "update_maintenance",
+            id,
+            data: {
               status: update.status,
               ...(update.technician_vendor !== undefined
                 ? { technician_vendor: update.technician_vendor }
@@ -1313,35 +1222,16 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               ...(update.resolution_notes !== undefined
                 ? { resolution_notes: update.resolution_notes }
                 : {}),
-              ...(update.status === "Selesai Diperbaiki"
-                ? { completed_at: completedAt }
-                : {}),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", id);
-
-          if (error) {
-            await handleDbError("Memperbarui Perbaikan", error.message);
-            return;
-          }
-
-          if (update.status === "Selesai Diperbaiki" && target?.room_id) {
-            await supabase
-              .from("rooms")
-              .update({
-                status: "Tersedia",
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", target.room_id);
-          }
-
-          await refreshFromSupabase();
-          notify(
-            "success",
-            "Status Pemeliharaan Diperbarui di Supabase",
-            `Tiket ${target?.ticket_code || ""} diperbarui ke "${update.status}".`
-          );
-        })();
+              ...(isDone ? { completed_at: completedAt } : {}),
+            },
+            roomId: target?.room_id || null,
+            setRoomAvailable: isDone,
+          },
+          "Memperbarui Perbaikan",
+          "Status Pemeliharaan Diperbarui di Supabase",
+          `Tiket ${target?.ticket_code || ""} diperbarui ke "${update.status}".`,
+          true
+        );
         return;
       }
 
@@ -1353,11 +1243,11 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     },
     [
       authUser,
-      handleDbError,
+      isLiveSupabase,
       maintenanceLogs,
       notify,
-      refreshFromSupabase,
       requireStaffForLiveWrite,
+      sendMutation,
     ]
   );
 
@@ -1373,30 +1263,26 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       };
       setConsumables((prev) => [newItem, ...prev]);
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          const { error } = await supabase.from("consumables").insert({
-            id,
-            code: payload.code,
-            name: payload.name,
-            category: payload.category,
-            unit: payload.unit,
-            current_stock: payload.current_stock,
-            min_stock: payload.min_stock,
-            storage_location: payload.storage_location,
-            last_restocked_at: nowIso,
-          });
-          if (error) {
-            await handleDbError("Menambah Item BHP", error.message);
-          } else {
-            notify(
-              "success",
-              "Item BHP Tersimpan di Supabase",
-              `${newItem.code} (${newItem.name}) berhasil ditambahkan ke database.`
-            );
-          }
-        })();
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_consumable",
+            data: {
+              id,
+              code: payload.code,
+              name: payload.name,
+              category: payload.category,
+              unit: payload.unit,
+              current_stock: payload.current_stock,
+              min_stock: payload.min_stock,
+              storage_location: payload.storage_location,
+              last_restocked_at: nowIso,
+            },
+          },
+          "Menambah Item BHP",
+          "Item BHP Tersimpan di Supabase",
+          `${newItem.code} (${newItem.name}) berhasil ditambahkan ke database.`
+        );
         return;
       }
 
@@ -1406,7 +1292,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         `${newItem.code} (${newItem.name}) berhasil ditambahkan ke katalog stok.`
       );
     },
-    [authUser, handleDbError, notify, requireStaffForLiveWrite]
+    [authUser, isLiveSupabase, notify, requireStaffForLiveWrite, sendMutation]
   );
 
   const recordConsumableMutation = useCallback(
@@ -1459,13 +1345,11 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
       setConsumableTransactions((prev) => [newTx, ...prev]);
 
-      const supabase = getSupabaseBrowserClient();
-      if (supabase && authUser) {
-        void (async () => {
-          // Trigger PostgreSQL trg_apply_consumable_tx otomatis mengupdate saldo di tabel consumables
-          const { error } = await supabase
-            .from("consumable_transactions")
-            .insert({
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_consumable_tx",
+            data: {
               id,
               consumable_id: payload.consumable_id,
               transaction_type: payload.transaction_type,
@@ -1473,18 +1357,13 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               actor_name: payload.actor_name,
               actor_unit: payload.actor_unit,
               purpose_notes: payload.purpose_notes || null,
-            });
-          if (error) {
-            await handleDbError("Mencatat Mutasi Stok", error.message);
-          } else {
-            await refreshFromSupabase();
-            notify(
-              "success",
-              `Mutasi Stok (${payload.transaction_type}) Tersimpan`,
-              `${payload.quantity} ${target.unit} ${target.name} berhasil dicatat ke database.`
-            );
-          }
-        })();
+            },
+          },
+          "Mencatat Mutasi Stok",
+          `Mutasi Stok (${payload.transaction_type}) Tersimpan`,
+          `${payload.quantity} ${target.unit} ${target.name} berhasil dicatat ke database.`,
+          true
+        );
         return { ok: true };
       }
 
@@ -1498,10 +1377,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     [
       authUser,
       consumables,
-      handleDbError,
+      isLiveSupabase,
       notify,
-      refreshFromSupabase,
       requireStaffForLiveWrite,
+      sendMutation,
     ]
   );
 
@@ -1516,6 +1395,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       consumableTransactions:
         uiSimState === "empty" ? [] : consumableTransactions,
       isLiveSupabase,
+      serverConfigured,
       authUser,
       authLoading,
       isSyncingDb,
@@ -1528,8 +1408,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       notify,
       resetToSeedData,
       refreshFromSupabase,
-      signInWithPassword,
-      signUpStaff,
+      signInWithUsername,
       signOut,
       addBuilding,
       addRoom,
@@ -1556,6 +1435,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       consumables,
       consumableTransactions,
       isLiveSupabase,
+      serverConfigured,
       authUser,
       authLoading,
       isSyncingDb,
@@ -1566,8 +1446,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       notify,
       resetToSeedData,
       refreshFromSupabase,
-      signInWithPassword,
-      signUpStaff,
+      signInWithUsername,
       signOut,
       addBuilding,
       addRoom,
