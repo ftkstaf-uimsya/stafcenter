@@ -259,26 +259,24 @@ export function Sidebar({
             <div className="text-xs text-slate-200 space-y-1">
               <p className="font-semibold text-white">Biro Umum & Sarpras</p>
               <p className="font-mono text-[11px] text-slate-300 truncate">
-                {authUser ? `Sesi: ${authUser.email}` : "Belum masuk (Mode Baca)"}
+                {authUser ? `Sesi: ${authUser.email}` : "Mode Seed Lokal"}
               </p>
-              <Link
-                href="/login"
-                className="inline-block text-[11px] font-semibold text-amber-300 hover:text-amber-200 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded"
-              >
-                {authUser ? "Kelola Sesi Staf" : "Masuk Akun Staf"}
-              </Link>
+              {authUser ? (
+                <Link
+                  href="/login"
+                  className="inline-block text-[11px] font-semibold text-amber-300 hover:text-amber-200 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded"
+                >
+                  Kelola Sesi Staf
+                </Link>
+              ) : null}
             </div>
           ) : (
             <Link
               href="/login"
               className="block text-center font-mono text-xs font-bold text-amber-300 hover:text-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded py-1"
-              title={
-                authUser
-                  ? `Sesi aktif: ${authUser.email}`
-                  : "Masuk Akun Staf"
-              }
+              title={authUser ? `Sesi aktif: ${authUser.email}` : "Akun Staf"}
             >
-              {authUser ? "[ON]" : "[AUTH]"}
+              [PIC]
             </Link>
           )}
         </div>
@@ -322,15 +320,17 @@ export function Sidebar({
             <div className="p-4 border-t border-white/15 text-xs text-slate-200 space-y-1">
               <p className="font-semibold text-white">Biro Umum & Sarpras</p>
               <p className="font-mono text-[11px] text-slate-300 truncate">
-                {authUser ? `Sesi: ${authUser.email}` : "Belum masuk (Mode Baca)"}
+                {authUser ? `Sesi: ${authUser.email}` : "Mode Seed Lokal"}
               </p>
-              <Link
-                href="/login"
-                onClick={onCloseMobile}
-                className="inline-block text-[11px] font-semibold text-amber-300 hover:text-amber-200 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded"
-              >
-                {authUser ? "Kelola Sesi Staf" : "Masuk Akun Staf"}
-              </Link>
+              {authUser ? (
+                <Link
+                  href="/login"
+                  onClick={onCloseMobile}
+                  className="inline-block text-[11px] font-semibold text-amber-300 hover:text-amber-200 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded"
+                >
+                  Kelola Sesi Staf
+                </Link>
+              ) : null}
             </div>
           </div>
         </div>

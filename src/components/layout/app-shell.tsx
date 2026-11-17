@@ -1,20 +1,90 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Moon, Sun, X } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
+import { LoadingStateView } from "@/components/ui/data-states";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { toasts, dismissToast, theme, toggleTheme } = useSarpras();
+  const {
+    isLiveSupabase,
+    authUser,
+    authLoading,
+    toasts,
+    dismissToast,
+    theme,
+    toggleTheme,
+  } = useSarpras();
 
   const isAuthPage = pathname === "/login" || pathname?.startsWith("/login/");
+  const requiresAuth = isLiveSupabase && !isAuthPage;
+
+  useEffect(() => {
+    if (requiresAuth && !authLoading && !authUser) {
+      router.replace("/login");
+    }
+  }, [requiresAuth, authLoading, authUser, router]);
+
+  const toastPortal = (
+    <div
+      aria-live="polite"
+      aria-atomic="true"
+      className="fixed bottom-20 lg:bottom-5 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"
+    >
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          role="status"
+          className={`pointer-events-auto flex items-start justify-between gap-3 p-4 rounded-lg border shadow-lg ${
+            toast.type === "error"
+              ? "bg-red-50 border-red-700 text-red-950 dark:bg-red-950 dark:border-red-500 dark:text-red-100"
+              : toast.type === "info"
+              ? "bg-sky-50 border-sky-700 text-sky-950 dark:bg-sky-950 dark:border-sky-500 dark:text-sky-100"
+              : "bg-emerald-50 border-emerald-700 text-emerald-950 dark:bg-emerald-950 dark:border-emerald-500 dark:text-emerald-100"
+          }`}
+        >
+          <div className="text-xs space-y-0.5">
+            <p className="font-bold">{toast.title}</p>
+            <p>{toast.message}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => dismissToast(toast.id)}
+            aria-label="Tutup notifikasi"
+            className="min-w-[36px] min-h-[36px] -mr-1 -mt-1 inline-flex items-center justify-center rounded hover:bg-black/10 dark:hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
+          >
+            <X className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+
+  // Blokir akses ke rute operasional sampai sesi autentikasi Staf terverifikasi
+  if (requiresAuth && (authLoading || !authUser)) {
+    return (
+      <div className="min-h-dvh flex items-center justify-center p-4 bg-[#F8FAFC] dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+        <div className="w-full max-w-md">
+          <LoadingStateView
+            message={
+              authLoading
+                ? "Memeriksa sesi autentikasi StafCenter..."
+                : "Mengalihkan ke halaman masuk akun staf..."
+            }
+          />
+        </div>
+        {toastPortal}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-dvh flex bg-[#F8FAFC] dark:bg-slate-950 text-slate-900 dark:text-slate-100">
@@ -27,9 +97,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {isAuthPage ? (
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="border-b border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 sm:px-8 h-16 flex items-center justify-between">
+          <header className="sticky top-0 z-30 border-b border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 sm:px-8 h-16 flex items-center justify-between shrink-0">
             <Link
-              href="/sarpras/dashboard"
+              href="/login"
               className="flex items-center gap-2.5 rounded px-1 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
             >
               <span className="px-2 py-1 text-xs font-mono font-bold tracking-wider bg-[#1E3A5F] text-amber-400 dark:bg-amber-400 dark:text-slate-950 rounded">
@@ -72,7 +142,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <main
             id="main-workspace"
-            className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-8"
+            className="flex-1 flex items-center justify-center p-4 sm:p-6"
           >
             {children}
           </main>
@@ -99,39 +169,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </>
       )}
 
-      {/* Live Region Notifikasi Aksi (Aksesibilitas Umpan Balik Form) */}
-      <div
-        aria-live="polite"
-        aria-atomic="true"
-        className="fixed bottom-20 lg:bottom-5 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"
-      >
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            role="status"
-            className={`pointer-events-auto flex items-start justify-between gap-3 p-4 rounded-lg border shadow-lg ${
-              toast.type === "error"
-                ? "bg-red-50 border-red-700 text-red-950 dark:bg-red-950 dark:border-red-500 dark:text-red-100"
-                : toast.type === "info"
-                ? "bg-sky-50 border-sky-700 text-sky-950 dark:bg-sky-950 dark:border-sky-500 dark:text-sky-100"
-                : "bg-emerald-50 border-emerald-700 text-emerald-950 dark:bg-emerald-950 dark:border-emerald-500 dark:text-emerald-100"
-            }`}
-          >
-            <div className="text-xs space-y-0.5">
-              <p className="font-bold">{toast.title}</p>
-              <p>{toast.message}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => dismissToast(toast.id)}
-              aria-label="Tutup notifikasi"
-              className="min-w-[36px] min-h-[36px] -mr-1 -mt-1 inline-flex items-center justify-center rounded hover:bg-black/10 dark:hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
-            >
-              <X className="w-4 h-4" aria-hidden="true" />
-            </button>
-          </div>
-        ))}
-      </div>
+      {toastPortal}
     </div>
   );
 }

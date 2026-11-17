@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { LogIn, LogOut, Menu, Moon, RotateCcw, Sun, UserCheck } from "lucide-react";
+import { LogOut, Menu, Moon, RotateCcw, Sun, UserCheck } from "lucide-react";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 import { UISimulationState } from "@/types/sarpras";
@@ -41,31 +41,25 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Indikator Jujur Sumber Data & Mode Sinkronisasi */}
+          {/* Indikator Jujur Sumber Data */}
           <span
             className={`px-2.5 py-1 text-xs font-mono font-semibold rounded border ${
-              isLiveSupabase && authUser
+              isLiveSupabase
                 ? "bg-emerald-50 text-emerald-900 border-emerald-700/60 dark:bg-emerald-950 dark:text-emerald-200 dark:border-emerald-500"
-                : isLiveSupabase
-                ? "bg-sky-50 text-sky-900 border-sky-700/60 dark:bg-sky-950 dark:text-sky-200 dark:border-sky-500"
                 : "bg-amber-50 text-amber-900 border-amber-700/60 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-500"
             }`}
             title={
-              isLiveSupabase && authUser
-                ? "Terhubung ke Supabase PostgreSQL dengan sesi Staf aktif (simpan permanen)"
-                : isLiveSupabase
-                ? "Terhubung ke Supabase (Mode Baca). Masuk sebagai Staf untuk menyimpan perubahan ke database."
+              isLiveSupabase
+                ? "Terhubung langsung ke database PostgreSQL Supabase"
                 : "Menggunakan data simulasi awal kampus (Seed Data)"
             }
           >
             {isLiveSupabase
-              ? authUser
-                ? "[SUPABASE TERHUBUNG • TULIS AKTIF]"
-                : "[SUPABASE TERHUBUNG • MODE BACA]"
+              ? "[SUPABASE TERHUBUNG]"
               : "[REAL DATA: MODE SEED KAMPUS]"}
           </span>
 
-          {/* Kontrol Autentikasi Staf */}
+          {/* Info Sesi Staf & Tombol Keluar */}
           {authUser ? (
             <div className="flex items-center gap-1.5">
               <Link
@@ -90,15 +84,7 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
                 <span className="hidden sm:inline">Keluar</span>
               </button>
             </div>
-          ) : (
-            <Link
-              href="/login"
-              className="min-h-[44px] px-3 py-1.5 inline-flex items-center gap-1.5 rounded-md bg-[#1E3A5F] hover:bg-[#162C49] dark:bg-sky-400 dark:hover:bg-sky-300 text-xs font-bold text-white dark:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
-            >
-              <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Masuk Staf</span>
-            </Link>
-          )}
+          ) : null}
 
           {/* Pengalih State UI untuk Verifikasi Ketahanan (Empty, Loading, Error) */}
           <div className="flex items-center gap-1.5">

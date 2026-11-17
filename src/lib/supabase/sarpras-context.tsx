@@ -169,21 +169,32 @@ function getCurrentYearMonth(): string {
 }
 
 export function SarprasProvider({ children }: { children: React.ReactNode }) {
-  const [buildings, setBuildings] = useState<Building[]>(INITIAL_BUILDINGS);
-  const [rooms, setRooms] = useState<Room[]>(INITIAL_ROOMS);
-  const [assets, setAssets] = useState<Asset[]>(INITIAL_ASSETS);
-  const [bookings, setBookings] = useState<Booking[]>(INITIAL_BOOKINGS);
-  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>(
-    INITIAL_MAINTENANCE_LOGS
+  const isLiveSupabase = isSupabaseConfigured();
+
+  const [buildings, setBuildings] = useState<Building[]>(() =>
+    isLiveSupabase ? [] : INITIAL_BUILDINGS
   );
-  const [consumables, setConsumables] =
-    useState<Consumable[]>(INITIAL_CONSUMABLES);
+  const [rooms, setRooms] = useState<Room[]>(() =>
+    isLiveSupabase ? [] : INITIAL_ROOMS
+  );
+  const [assets, setAssets] = useState<Asset[]>(() =>
+    isLiveSupabase ? [] : INITIAL_ASSETS
+  );
+  const [bookings, setBookings] = useState<Booking[]>(() =>
+    isLiveSupabase ? [] : INITIAL_BOOKINGS
+  );
+  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>(
+    () => (isLiveSupabase ? [] : INITIAL_MAINTENANCE_LOGS)
+  );
+  const [consumables, setConsumables] = useState<Consumable[]>(() =>
+    isLiveSupabase ? [] : INITIAL_CONSUMABLES
+  );
   const [consumableTransactions, setConsumableTransactions] = useState<
     ConsumableTransaction[]
-  >(INITIAL_CONSUMABLE_TRANSACTIONS);
+  >(() => (isLiveSupabase ? [] : INITIAL_CONSUMABLE_TRANSACTIONS));
 
   const [authUser, setAuthUser] = useState<AuthStaffUser | null>(null);
-  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [authLoading, setAuthLoading] = useState<boolean>(isLiveSupabase);
   const [isSyncingDb, setIsSyncingDb] = useState<boolean>(false);
 
   const [uiSimState, setUiSimState] = useState<UISimulationState>("normal");
@@ -191,7 +202,15 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastNotice[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
-  const isLiveSupabase = isSupabaseConfigured();
+  const clearOperationalData = useCallback(() => {
+    setBuildings([]);
+    setRooms([]);
+    setAssets([]);
+    setBookings([]);
+    setMaintenanceLogs([]);
+    setConsumables([]);
+    setConsumableTransactions([]);
+  }, []);
 
   const notify = useCallback(
     (type: ToastNotice["type"], title: string, message: string) => {
@@ -334,13 +353,18 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
             fullName:
               (user.user_metadata?.full_name as string | undefined) || undefined,
           });
+          void refreshFromSupabase();
         } else {
           setAuthUser(null);
+          clearOperationalData();
         }
         setAuthLoading(false);
       })
       .catch(() => {
-        if (active) setAuthLoading(false);
+        if (active) {
+          clearOperationalData();
+          setAuthLoading(false);
+        }
       });
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
@@ -353,25 +377,25 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
             fullName:
               (user.user_metadata?.full_name as string | undefined) || undefined,
           });
+          void refreshFromSupabase();
         } else {
           setAuthUser(null);
+          clearOperationalData();
         }
-        void refreshFromSupabase();
       }
     );
 
-    void refreshFromSupabase();
     setHydrated(true);
 
     return () => {
       active = false;
       authListener.subscription.unsubscribe();
     };
-  }, [isLiveSupabase, refreshFromSupabase]);
+  }, [clearOperationalData, isLiveSupabase, refreshFromSupabase]);
 
-  // Persist perubahan ke localStorage hanya saat mode seed offline atau belum login
+  // Persist perubahan ke localStorage hanya bila tidak menggunakan Supabase
   useEffect(() => {
-    if (!hydrated || (isLiveSupabase && authUser)) return;
+    if (!hydrated || isLiveSupabase) return;
     try {
       localStorage.setItem(
         STORAGE_KEY,
@@ -506,13 +530,13 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       await supabase.auth.signOut();
     }
     setAuthUser(null);
-    await refreshFromSupabase();
+    clearOperationalData();
     notify(
       "info",
       "Keluar dari Sesi Staf",
-      "Anda kini berada di mode baca/pratinjau. Masuk kembali untuk menulis data ke Supabase."
+      "Sesi telah diakhiri. Silakan masuk kembali untuk mengakses modul StafCenter."
     );
-  }, [notify, refreshFromSupabase]);
+  }, [clearOperationalData, notify]);
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
@@ -561,20 +585,17 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     );
   }, [isLiveSupabase, notify, refreshFromSupabase]);
 
-  const persistNoticeMode = useCallback(
-    (title: string, message: string) => {
-      if (isLiveSupabase && !authUser) {
-        notify(
-          "info",
-          `${title} (Pratinjau Lokal)`,
-          `${message} Masuk akun Staf agar tersimpan ke Supabase.`
-        );
-      } else {
-        notify("success", title, message);
-      }
-    },
-    [authUser, isLiveSupabase, notify]
-  );
+  const requireStaffForLiveWrite = useCallback((): boolean => {
+    if (isLiveSupabase && !authUser) {
+      notify(
+        "error",
+        "Autentikasi Staf Diperlukan",
+        "Silakan masuk terlebih dahulu sebelum mengubah data operasional."
+      );
+      return false;
+    }
+    return true;
+  }, [authUser, isLiveSupabase, notify]);
 
   const handleDbError = useCallback(
     async (actionLabel: string, errMessage: string) => {
@@ -586,6 +607,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addBuilding = useCallback(
     (payload: Omit<Building, "id" | "created_at">) => {
+      if (!requireStaffForLiveWrite()) return;
       const id = generateUuid();
       const createdAt = new Date().toISOString();
       const newBuilding: Building = {
@@ -619,16 +641,18 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      persistNoticeMode(
+      notify(
+        "success",
         "Gedung Ditambahkan",
         `${newBuilding.code} (${newBuilding.name}) berhasil dicatat.`
       );
     },
-    [authUser, handleDbError, notify, persistNoticeMode]
+    [authUser, handleDbError, notify, requireStaffForLiveWrite]
   );
 
   const addRoom = useCallback(
     (payload: Omit<Room, "id" | "created_at">) => {
+      if (!requireStaffForLiveWrite()) return;
       const id = generateUuid();
       const createdAt = new Date().toISOString();
       const newRoom: Room = {
@@ -667,16 +691,18 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      persistNoticeMode(
+      notify(
+        "success",
         "Ruangan Ditambahkan",
         `Ruang ${newRoom.code} (${newRoom.name}) berhasil didaftarkan.`
       );
     },
-    [authUser, handleDbError, notify, persistNoticeMode]
+    [authUser, handleDbError, notify, requireStaffForLiveWrite]
   );
 
   const updateRoom = useCallback(
     (id: string, payload: Partial<Omit<Room, "id" | "created_at">>) => {
+      if (!requireStaffForLiveWrite()) return;
       setRooms((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -701,16 +727,18 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      persistNoticeMode(
+      notify(
+        "success",
         "Data Ruangan Diperbarui",
         "Perubahan atribut ruangan telah disimpan."
       );
     },
-    [authUser, handleDbError, notify, persistNoticeMode]
+    [authUser, handleDbError, notify, requireStaffForLiveWrite]
   );
 
   const deleteRoom = useCallback(
     (id: string) => {
+      if (!requireStaffForLiveWrite()) return;
       const target = rooms.find((r) => r.id === id);
       setRooms((prev) => prev.filter((item) => item.id !== id));
       setAssets((prev) =>
@@ -740,7 +768,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         `Ruang ${target?.code || ""} telah dihapus dari daftar master.`
       );
     },
-    [authUser, handleDbError, notify, rooms]
+    [authUser, handleDbError, notify, requireStaffForLiveWrite, rooms]
   );
 
   const previewNextInventoryCode = useCallback(
@@ -773,6 +801,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         category_label,
         created_at: new Date().toISOString(),
       };
+      if (!requireStaffForLiveWrite()) return newAsset;
       setAssets((prev) => [newAsset, ...prev]);
 
       const supabase = getSupabaseBrowserClient();
@@ -808,17 +837,19 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return newAsset;
       }
 
-      persistNoticeMode(
+      notify(
+        "success",
         "Aset Terdaftar",
         `${newAsset.inventory_code} (${newAsset.name}) berhasil dicatat ke inventaris.`
       );
       return newAsset;
     },
-    [assets, authUser, handleDbError, notify, persistNoticeMode]
+    [assets, authUser, handleDbError, notify, requireStaffForLiveWrite]
   );
 
   const updateAsset = useCallback(
     (id: string, payload: Partial<Omit<Asset, "id" | "created_at">>) => {
+      if (!requireStaffForLiveWrite()) return;
       const nextLabel = payload.category
         ? ASSET_CATEGORY_LABELS[payload.category]
         : undefined;
@@ -859,16 +890,18 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      persistNoticeMode(
+      notify(
+        "success",
         "Inventaris Diperbarui",
         "Perubahan data aset telah disimpan."
       );
     },
-    [authUser, handleDbError, notify, persistNoticeMode]
+    [authUser, handleDbError, notify, requireStaffForLiveWrite]
   );
 
   const deleteAsset = useCallback(
     (id: string) => {
+      if (!requireStaffForLiveWrite()) return;
       const target = assets.find((a) => a.id === id);
       setAssets((prev) => prev.filter((item) => item.id !== id));
 
@@ -895,13 +928,16 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         `Aset ${target?.inventory_code || ""} dihapus dari daftar inventaris.`
       );
     },
-    [assets, authUser, handleDbError, notify]
+    [assets, authUser, handleDbError, notify, requireStaffForLiveWrite]
   );
 
   const addBooking = useCallback(
     (
       payload: Omit<Booking, "id" | "booking_code" | "status" | "created_at">
     ): { ok: boolean; error?: string } => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
       if (payload.end_time <= payload.start_time) {
         return {
           ok: false,
@@ -974,13 +1010,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: true };
       }
 
-      persistNoticeMode(
+      notify(
+        "success",
         "Reservasi Diajukan",
         `Tiket ${newBooking.booking_code} berhasil dibuat dan menunggu persetujuan sarpras.`
       );
       return { ok: true };
     },
-    [authUser, bookings, handleDbError, notify, persistNoticeMode]
+    [authUser, bookings, handleDbError, notify, requireStaffForLiveWrite]
   );
 
   const updateBookingStatus = useCallback(
@@ -990,6 +1027,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       returnNotes?: string,
       approvedBy?: string
     ) => {
+      if (!requireStaffForLiveWrite()) return;
       const target = bookings.find((b) => b.id === id);
       setBookings((prev) =>
         prev.map((item) =>
@@ -1073,12 +1111,13 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      persistNoticeMode(
+      notify(
+        "success",
         "Status Peminjaman Diperbarui",
         `Tiket ${target?.booking_code || ""} kini berstatus "${status}".`
       );
     },
-    [authUser, bookings, handleDbError, notify, persistNoticeMode, rooms]
+    [authUser, bookings, handleDbError, notify, requireStaffForLiveWrite, rooms]
   );
 
   const addMaintenanceLog = useCallback(
@@ -1088,6 +1127,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         "id" | "ticket_code" | "status" | "reported_at"
       >
     ) => {
+      if (!requireStaffForLiveWrite()) return;
       const seq = String(
         extractMaxSequence(maintenanceLogs.map((m) => m.ticket_code)) + 1
       ).padStart(3, "0");
@@ -1176,7 +1216,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      persistNoticeMode(
+      notify(
+        "success",
         "Laporan Kerusakan Dicatat",
         `Tiket ${newTicket.ticket_code} berhasil dibuat${
           payload.damage_severity === "Rusak Berat"
@@ -1190,8 +1231,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       handleDbError,
       maintenanceLogs,
       notify,
-      persistNoticeMode,
       refreshFromSupabase,
+      requireStaffForLiveWrite,
     ]
   );
 
@@ -1205,6 +1246,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         resolution_notes?: string;
       }
     ) => {
+      if (!requireStaffForLiveWrite()) return;
       const target = maintenanceLogs.find((m) => m.id === id);
       const completedAt =
         update.status === "Selesai Diperbaiki"
@@ -1303,7 +1345,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      persistNoticeMode(
+      notify(
+        "success",
         "Status Pemeliharaan Diperbarui",
         `Tiket ${target?.ticket_code || ""} diperbarui ke "${update.status}".`
       );
@@ -1313,13 +1356,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       handleDbError,
       maintenanceLogs,
       notify,
-      persistNoticeMode,
       refreshFromSupabase,
+      requireStaffForLiveWrite,
     ]
   );
 
   const addConsumable = useCallback(
     (payload: Omit<Consumable, "id" | "last_restocked_at">) => {
+      if (!requireStaffForLiveWrite()) return;
       const id = generateUuid();
       const nowIso = new Date().toISOString();
       const newItem: Consumable = {
@@ -1356,18 +1400,22 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      persistNoticeMode(
+      notify(
+        "success",
         "Item BHP Ditambahkan",
         `${newItem.code} (${newItem.name}) berhasil ditambahkan ke katalog stok.`
       );
     },
-    [authUser, handleDbError, notify, persistNoticeMode]
+    [authUser, handleDbError, notify, requireStaffForLiveWrite]
   );
 
   const recordConsumableMutation = useCallback(
     (
       payload: Omit<ConsumableTransaction, "id" | "transaction_date">
     ): { ok: boolean; error?: string } => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
       const target = consumables.find((c) => c.id === payload.consumable_id);
       if (!target) {
         return { ok: false, error: "Barang habis pakai tidak ditemukan." };
@@ -1440,7 +1488,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: true };
       }
 
-      persistNoticeMode(
+      notify(
+        "success",
         `Mutasi Stok (${payload.transaction_type}) Dicatat`,
         `${payload.quantity} ${target.unit} ${target.name} berhasil dicatat atas nama ${payload.actor_name}.`
       );
@@ -1451,8 +1500,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       consumables,
       handleDbError,
       notify,
-      persistNoticeMode,
       refreshFromSupabase,
+      requireStaffForLiveWrite,
     ]
   );
 
