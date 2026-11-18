@@ -34,6 +34,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [requiresAuth, authLoading, authUser, router]);
 
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [mobileMenuOpen]);
+
   const toastPortal = (
     <div
       aria-live="polite"
