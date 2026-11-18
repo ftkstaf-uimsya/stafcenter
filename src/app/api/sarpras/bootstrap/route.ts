@@ -53,6 +53,18 @@ export async function GET() {
     return NextResponse.json({ error: firstError.message }, { status: 500 });
   }
 
+  // Ambil catatan & lampiran secara opsional (tidak menggagalkan aplikasi bila migrasi 003 belum dijalankan)
+  const [notesRes, attachRes] = await Promise.all([
+    supabase
+      .from("sarpras_notes")
+      .select("*")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("sarpras_attachments")
+      .select("*")
+      .order("created_at", { ascending: false }),
+  ]);
+
   return NextResponse.json(
     {
       buildings: bRes.data || [],
@@ -62,6 +74,8 @@ export async function GET() {
       maintenanceLogs: mRes.data || [],
       consumables: cRes.data || [],
       consumableTransactions: ctRes.data || [],
+      notes: notesRes.error ? [] : notesRes.data || [],
+      attachments: attachRes.error ? [] : attachRes.data || [],
     },
     { status: 200 }
   );

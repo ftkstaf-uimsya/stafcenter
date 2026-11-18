@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowDownLeft,
@@ -20,7 +20,13 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
+import { Drawer } from "@/components/ui/drawer";
 import { DataTable, DataTableColumn } from "@/components/ui/data-table";
+import {
+  ColumnsTogglePopover,
+  FilterPopover,
+} from "@/components/ui/filter-popover";
+import { EntityDrawerSections } from "@/components/ui/entity-drawer-sections";
 import {
   ErrorStateView,
   LoadingStateView,
@@ -56,6 +62,12 @@ export function BhpView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterCategory, setFilterCategory] = useState("ALL");
   const [filterStockStatus, setFilterStockStatus] = useState("ALL");
+  const [hiddenColumnKeys, setHiddenColumnKeys] = useState<string[]>([]);
+
+  // Slide-over detail drawer item BHP
+  const [selectedConsumableId, setSelectedConsumableId] = useState<
+    string | null
+  >(null);
 
   // Modal Tambah Item BHP Baru
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -79,6 +91,19 @@ export function BhpView() {
   const [purposeNotes, setPurposeNotes] = useState("");
   const [mutationError, setMutationError] = useState("");
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const inspect = new URLSearchParams(window.location.search).get("inspect");
+    if (inspect && consumables.some((c) => c.id === inspect)) {
+      setSelectedConsumableId(inspect);
+    }
+  }, [consumables]);
+
+  const selectedConsumable = useMemo(
+    () => consumables.find((c) => c.id === selectedConsumableId) || null,
+    [consumables, selectedConsumableId]
+  );
+
   const filteredConsumables = useMemo(() => {
     return consumables.filter((c) => {
       const q = searchQuery.trim().toLowerCase();
@@ -97,6 +122,9 @@ export function BhpView() {
       return matchSearch && matchCat && matchStock;
     });
   }, [consumables, searchQuery, filterCategory, filterStockStatus]);
+
+  const activeFilterCount =
+    (filterCategory !== "ALL" ? 1 : 0) + (filterStockStatus !== "ALL" ? 1 : 0);
 
   if (uiSimState === "loading") {
     return (
@@ -179,6 +207,12 @@ export function BhpView() {
     setMutationTarget(null);
   };
 
+  const toggleColumnKey = (key: string) => {
+    setHiddenColumnKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
   const columns: DataTableColumn<Consumable>[] = [
     {
       key: "code_name",
@@ -242,7 +276,10 @@ export function BhpView() {
       key: "actions",
       header: "Catat Mutasi Stok",
       render: (row) => (
-        <div className="flex flex-wrap items-center gap-2">
+        <div
+          className="flex flex-wrap items-center gap-2"
+          onClick={(e) => e.stopPropagation()}
+        >
           <Button
             type="button"
             variant="primary"
@@ -266,8 +303,14 @@ export function BhpView() {
     },
   ];
 
+  const selectedItemTransactions = selectedConsumable
+    ? consumableTransactions.filter(
+        (tx) => tx.consumable_id === selectedConsumable.id
+      )
+    : [];
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-slate-300 dark:border-slate-800">
         <div>
           <p className="text-xs font-mono font-bold uppercase tracking-wider text-[#1E3A5F] dark:text-sky-400">
@@ -278,8 +321,8 @@ export function BhpView() {
           </h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
             Pemantauan stok operasional harian dengan indikator peringatan merah
-            otomatis apabila stok berada di bawah batas minimum (
-            <em>Minimum Threshold</em>).
+            bila di bawah batas minimum. Klik baris item untuk membuka kartu
+            riwayat mutasi.
           </p>
         </div>
 
@@ -296,35 +339,58 @@ export function BhpView() {
         </Button>
       </section>
 
-      {/* Bar Pencarian & Filter */}
+      {/* Toolbar Ringkas */}
       <section
         aria-label="Filter Barang Habis Pakai"
-        className="p-4 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 grid grid-cols-1 sm:grid-cols-3 gap-3"
+        className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900"
       >
-        <Input
-          label="Cari Kode / Nama Barang / Rak"
-          placeholder="Contoh: Spidol, HVS, atau BHP-ATK..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-        <Select
-          label="Filter Kategori BHP"
-          value={filterCategory}
-          onChange={(e) => setFilterCategory(e.target.value)}
-          options={[
-            { value: "ALL", label: "Semua Kategori BHP" },
-            ...BHP_CATEGORIES.map((c) => ({ value: c, label: c })),
-          ]}
-        />
-        <Select
-          label="Filter Kesehatan Stok"
-          value={filterStockStatus}
-          onChange={(e) => setFilterStockStatus(e.target.value)}
-          options={[
-            { value: "ALL", label: "Semua Status Stok" },
-            { value: "LOW", label: "Stok Kritis (Di Bawah Minimum)" },
-            { value: "SAFE", label: "Stok Aman" },
-          ]}
+        <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[240px]">
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Cari kode BHP-, nama barang, atau rak..."
+            aria-label="Cari barang habis pakai"
+            className="min-h-[44px] w-full sm:w-72 px-3 py-2 text-xs rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+          />
+
+          <FilterPopover
+            title="Filter Persediaan BHP"
+            activeCount={activeFilterCount}
+            onResetAll={() => {
+              setFilterCategory("ALL");
+              setFilterStockStatus("ALL");
+            }}
+            groups={[
+              {
+                key: "category",
+                label: "Kategori BHP",
+                value: filterCategory,
+                onChange: setFilterCategory,
+                options: [
+                  { value: "ALL", label: "Semua Kategori" },
+                  ...BHP_CATEGORIES.map((c) => ({ value: c, label: c })),
+                ],
+              },
+              {
+                key: "stock",
+                label: "Kesehatan Stok",
+                value: filterStockStatus,
+                onChange: setFilterStockStatus,
+                options: [
+                  { value: "ALL", label: "Semua Status Stok" },
+                  { value: "LOW", label: "Stok Kritis (Di Bawah Minimum)" },
+                  { value: "SAFE", label: "Stok Aman" },
+                ],
+              },
+            ]}
+          />
+        </div>
+
+        <ColumnsTogglePopover
+          columns={columns.map((c) => ({ key: c.key, label: c.header }))}
+          hiddenKeys={hiddenColumnKeys}
+          onToggleKey={toggleColumnKey}
         />
       </section>
 
@@ -333,6 +399,9 @@ export function BhpView() {
         columns={columns}
         data={filteredConsumables}
         rowKey={(c) => c.id}
+        hiddenColumnKeys={hiddenColumnKeys}
+        activeRowKey={selectedConsumableId}
+        onRowClick={(row) => setSelectedConsumableId(row.id)}
         emptyTitle="Tidak Ada Item BHP yang Ditemukan"
         emptyDescription="Belum ada barang habis pakai yang cocok dengan kriteria pencarian atau filter."
         emptyActionLabel="Tambah Item BHP Baru"
@@ -393,6 +462,128 @@ export function BhpView() {
           })}
         </div>
       </section>
+
+      {/* Slide-Over Detail Drawer Item BHP */}
+      <Drawer
+        isOpen={Boolean(selectedConsumable)}
+        onClose={() => setSelectedConsumableId(null)}
+        title={selectedConsumable?.name || ""}
+        subtitle={
+          selectedConsumable
+            ? `${selectedConsumable.code} • ${selectedConsumable.storage_location}`
+            : undefined
+        }
+        headerBadge={
+          selectedConsumable ? (
+            <>
+              <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+                {selectedConsumable.code}
+              </span>
+              {selectedConsumable.current_stock <
+              selectedConsumable.min_stock ? (
+                <Badge tone="danger">
+                  <span>Di Bawah Minimum</span>
+                </Badge>
+              ) : (
+                <Badge tone="success">
+                  <span>Stok Aman</span>
+                </Badge>
+              )}
+            </>
+          ) : null
+        }
+        footer={
+          selectedConsumable ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => openMutationModal(selectedConsumable, "Keluar")}
+              >
+                <ArrowUpRight className="w-4 h-4" aria-hidden="true" />
+                <span>Barang Keluar</span>
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => openMutationModal(selectedConsumable, "Masuk")}
+              >
+                <ArrowDownLeft className="w-4 h-4" aria-hidden="true" />
+                <span>Barang Masuk (Restock)</span>
+              </Button>
+            </div>
+          ) : null
+        }
+      >
+        {selectedConsumable ? (
+          <div className="space-y-5">
+            <div className="p-4 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 space-y-2 text-xs">
+              <div className="flex items-baseline justify-between">
+                <span className="text-slate-600 dark:text-slate-400">
+                  Saldo Persediaan Saat Ini
+                </span>
+                <span className="text-xl font-mono font-extrabold text-slate-900 dark:text-slate-100">
+                  {selectedConsumable.current_stock} {selectedConsumable.unit}
+                </span>
+              </div>
+              <p className="font-mono text-slate-600 dark:text-slate-400">
+                Batas Minimum: {selectedConsumable.min_stock}{" "}
+                {selectedConsumable.unit} • Kategori:{" "}
+                {selectedConsumable.category}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Riwayat Mutasi Item ({selectedItemTransactions.length})
+              </h3>
+              {selectedItemTransactions.length === 0 ? (
+                <p className="p-3 text-xs text-slate-600 dark:text-slate-400 rounded border border-dashed border-slate-300 dark:border-slate-700 text-center">
+                  Belum ada transaksi mutasi untuk barang ini.
+                </p>
+              ) : (
+                <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-md">
+                  {selectedItemTransactions.map((tx) => (
+                    <li key={tx.id} className="p-3 space-y-1 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <Badge
+                          tone={
+                            tx.transaction_type === "Masuk"
+                              ? "success"
+                              : "warning"
+                          }
+                        >
+                          <span>
+                            {tx.transaction_type === "Masuk" ? "+" : "-"}
+                            {tx.quantity} {selectedConsumable.unit}
+                          </span>
+                        </Badge>
+                        <span className="font-mono text-slate-500">
+                          {tx.transaction_date.slice(0, 10)}
+                        </span>
+                      </div>
+                      <p className="font-semibold text-slate-900 dark:text-slate-100">
+                        {tx.actor_name} ({tx.actor_unit})
+                      </p>
+                      <p className="text-slate-600 dark:text-slate-400">
+                        {tx.purpose_notes}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <EntityDrawerSections
+              entityType="consumable"
+              entityId={selectedConsumable.id}
+              baseEventDates={selectedItemTransactions.map(
+                (t) => t.transaction_date
+              )}
+            />
+          </div>
+        ) : null}
+      </Drawer>
 
       {/* Modal Tambah Item BHP Baru */}
       <Modal

@@ -1,13 +1,11 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Building2,
-  DoorOpen,
   Edit3,
   Eye,
   Plus,
-  Search,
   Trash2,
 } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
@@ -16,13 +14,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
+import { Drawer } from "@/components/ui/drawer";
 import { DataTable, DataTableColumn } from "@/components/ui/data-table";
+import {
+  ColumnsTogglePopover,
+  FilterPopover,
+} from "@/components/ui/filter-popover";
+import { EntityDrawerSections } from "@/components/ui/entity-drawer-sections";
 import {
   ErrorStateView,
   LoadingStateView,
 } from "@/components/ui/data-states";
 import {
   AssetConditionBadge,
+  BookingStatusBadge,
   RoomStatusBadge,
 } from "@/components/sarpras/status-badges";
 import { formatCurrencyIDR } from "@/lib/supabase/client";
@@ -41,6 +46,7 @@ export function RuanganView() {
     buildings,
     rooms,
     assets,
+    bookings,
     uiSimState,
     setUiSimState,
     addBuilding,
@@ -53,6 +59,7 @@ export function RuanganView() {
   const [filterBuilding, setFilterBuilding] = useState("ALL");
   const [filterCategory, setFilterCategory] = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
+  const [hiddenColumnKeys, setHiddenColumnKeys] = useState<string[]>([]);
 
   // Modal Tambah/Edit Ruangan
   const [roomModalOpen, setRoomModalOpen] = useState(false);
@@ -79,9 +86,23 @@ export function RuanganView() {
   const [bldDesc, setBldDesc] = useState("");
   const [bldError, setBldError] = useState("");
 
-  // Modal Detail Ruangan & Daftar Aset di Dalamnya
-  const [selectedRoomDetail, setSelectedRoomDetail] = useState<Room | null>(
-    null
+  // Slide-Over Detail Drawer Ruangan
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [drawerTab, setDrawerTab] = useState<"assets" | "bookings" | "notes">(
+    "assets"
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const inspect = new URLSearchParams(window.location.search).get("inspect");
+    if (inspect && rooms.some((r) => r.id === inspect)) {
+      setSelectedRoomId(inspect);
+    }
+  }, [rooms]);
+
+  const selectedRoomDetail = useMemo(
+    () => rooms.find((r) => r.id === selectedRoomId) || null,
+    [rooms, selectedRoomId]
   );
 
   const filteredRooms = useMemo(() => {
@@ -100,6 +121,11 @@ export function RuanganView() {
       return matchSearch && matchBld && matchCat && matchStatus;
     });
   }, [rooms, searchQuery, filterBuilding, filterCategory, filterStatus]);
+
+  const activeFilterCount =
+    (filterBuilding !== "ALL" ? 1 : 0) +
+    (filterCategory !== "ALL" ? 1 : 0) +
+    (filterStatus !== "ALL" ? 1 : 0);
 
   if (uiSimState === "loading") {
     return (
@@ -199,6 +225,12 @@ export function RuanganView() {
     setBuildingModalOpen(false);
   };
 
+  const toggleColumnKey = (key: string) => {
+    setHiddenColumnKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
   const columns: DataTableColumn<Room>[] = [
     {
       key: "code",
@@ -291,11 +323,14 @@ export function RuanganView() {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setSelectedRoomDetail(row)}
+            onClick={() => {
+              setDrawerTab("assets");
+              setSelectedRoomId(row.id);
+            }}
             aria-label={`Lihat aset di ruang ${row.code}`}
           >
             <Eye className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Aset</span>
+            <span>Inspeksi</span>
           </Button>
           <Button
             type="button"
@@ -324,6 +359,9 @@ export function RuanganView() {
   const detailRoomAssets = selectedRoomDetail
     ? assets.filter((a) => a.room_id === selectedRoomDetail.id)
     : [];
+  const detailRoomBookings = selectedRoomDetail
+    ? bookings.filter((b) => b.room_id === selectedRoomDetail.id)
+    : [];
 
   return (
     <div className="space-y-6">
@@ -336,8 +374,8 @@ export function RuanganView() {
             Master Gedung & Ruangan Kampus
           </h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Kelola data gedung, atribut ruangan, penanggung jawab (PIC), serta
-            klik baris ruangan untuk menginspeksi daftar aset di dalamnya.
+            Kelola data gedung, atribut ruangan, PIC, serta klik baris ruangan
+            untuk menginspeksi aset, jadwal, dan catatan ruang.
           </p>
         </div>
 
@@ -408,48 +446,71 @@ export function RuanganView() {
         })}
       </section>
 
-      {/* Bar Pencarian & Filter */}
+      {/* Toolbar Ringkas: Cari + Filter Popover + Kolom */}
       <section
         aria-label="Filter dan Pencarian Ruangan"
-        className="p-4 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+        className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900"
       >
-        <div className="relative">
-          <Input
-            label="Cari Kode / Nama Ruang / PIC"
-            placeholder="Contoh: 1-SM6 atau LAB-KOM1"
+        <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[240px]">
+          <input
+            type="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Cari kode ruang (1-SM6), nama ruang, atau PIC..."
+            aria-label="Cari ruangan kampus"
+            className="min-h-[44px] w-full sm:w-72 px-3 py-2 text-xs rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+          />
+
+          <FilterPopover
+            title="Filter Gedung & Ruangan"
+            activeCount={activeFilterCount}
+            onResetAll={() => {
+              setFilterBuilding("ALL");
+              setFilterCategory("ALL");
+              setFilterStatus("ALL");
+            }}
+            groups={[
+              {
+                key: "building",
+                label: "Gedung",
+                value: filterBuilding,
+                onChange: setFilterBuilding,
+                options: [
+                  { value: "ALL", label: "Semua Gedung" },
+                  ...buildings.map((b) => ({
+                    value: b.id,
+                    label: `${b.code} - ${b.name}`,
+                  })),
+                ],
+              },
+              {
+                key: "category",
+                label: "Kategori Ruang",
+                value: filterCategory,
+                onChange: setFilterCategory,
+                options: [
+                  { value: "ALL", label: "Semua Kategori" },
+                  ...ROOM_CATEGORIES.map((c) => ({ value: c, label: c })),
+                ],
+              },
+              {
+                key: "status",
+                label: "Status Operasional",
+                value: filterStatus,
+                onChange: setFilterStatus,
+                options: [
+                  { value: "ALL", label: "Semua Status" },
+                  ...ROOM_STATUSES.map((s) => ({ value: s, label: s })),
+                ],
+              },
+            ]}
           />
         </div>
-        <Select
-          label="Filter Gedung"
-          value={filterBuilding}
-          onChange={(e) => setFilterBuilding(e.target.value)}
-          options={[
-            { value: "ALL", label: "Semua Gedung Kampus" },
-            ...buildings.map((b) => ({
-              value: b.id,
-              label: `${b.code} - ${b.name}`,
-            })),
-          ]}
-        />
-        <Select
-          label="Filter Kategori Ruang"
-          value={filterCategory}
-          onChange={(e) => setFilterCategory(e.target.value)}
-          options={[
-            { value: "ALL", label: "Semua Kategori" },
-            ...ROOM_CATEGORIES.map((c) => ({ value: c, label: c })),
-          ]}
-        />
-        <Select
-          label="Filter Status Ketersediaan"
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          options={[
-            { value: "ALL", label: "Semua Status" },
-            ...ROOM_STATUSES.map((s) => ({ value: s, label: s })),
-          ]}
+
+        <ColumnsTogglePopover
+          columns={columns.map((c) => ({ key: c.key, label: c.header }))}
+          hiddenKeys={hiddenColumnKeys}
+          onToggleKey={toggleColumnKey}
         />
       </section>
 
@@ -458,28 +519,63 @@ export function RuanganView() {
         columns={columns}
         data={filteredRooms}
         rowKey={(r) => r.id}
-        onRowClick={(r) => setSelectedRoomDetail(r)}
-        emptyTitle="Tidak Ada Ruangan yang Sesuai Kriteria"
-        emptyDescription="Belum ada ruangan yang cocok dengan kata kunci atau filter yang dipilih. Ubah filter atau tambahkan ruangan baru."
+        hiddenColumnKeys={hiddenColumnKeys}
+        activeRowKey={selectedRoomId}
+        onRowClick={(row) => {
+          setDrawerTab("assets");
+          setSelectedRoomId(row.id);
+        }}
+        emptyTitle="Tidak Ada Ruangan yang Ditemukan"
+        emptyDescription="Belum ada data ruangan yang cocok dengan kata kunci atau filter yang dipilih."
         emptyActionLabel="Tambah Ruangan Baru"
         onEmptyAction={openAddRoomModal}
       />
 
-      {/* Modal Detail Ruangan & Aset di Dalamnya */}
-      <Modal
+      {/* Slide-Over Detail Drawer Ruangan */}
+      <Drawer
         isOpen={Boolean(selectedRoomDetail)}
-        onClose={() => setSelectedRoomDetail(null)}
-        title={
+        onClose={() => setSelectedRoomId(null)}
+        title={selectedRoomDetail ? selectedRoomDetail.name : ""}
+        subtitle={
           selectedRoomDetail
-            ? `Detail Ruang ${selectedRoomDetail.code}: ${selectedRoomDetail.name}`
-            : "Detail Ruangan"
+            ? `Kode: ${selectedRoomDetail.code} • PIC: ${selectedRoomDetail.pic_name} (${selectedRoomDetail.pic_contact})`
+            : undefined
         }
-        description="Daftar seluruh aset dan inventaris yang ditempatkan di dalam ruangan ini."
-        maxWidthClass="max-w-2xl"
+        headerBadge={
+          selectedRoomDetail ? (
+            <>
+              <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-[#1E3A5F] text-white dark:bg-sky-400 dark:text-slate-950">
+                {selectedRoomDetail.code}
+              </span>
+              <RoomStatusBadge status={selectedRoomDetail.status} />
+            </>
+          ) : null
+        }
+        footer={
+          selectedRoomDetail ? (
+            <div className="flex items-center justify-between gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSelectedRoomId(null)}
+              >
+                Tutup Panel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => openEditRoomModal(selectedRoomDetail)}
+              >
+                <Edit3 className="w-4 h-4" aria-hidden="true" />
+                <span>Edit Atribut Ruang</span>
+              </Button>
+            </div>
+          ) : null
+        }
       >
         {selectedRoomDetail ? (
           <div className="space-y-4">
-            <div className="p-3.5 rounded-md bg-slate-100 dark:bg-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="grid grid-cols-3 gap-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs">
               <div>
                 <span className="text-slate-600 dark:text-slate-400 block">
                   Kategori
@@ -490,40 +586,73 @@ export function RuanganView() {
               </div>
               <div>
                 <span className="text-slate-600 dark:text-slate-400 block">
-                  Lantai / Kapasitas
+                  Kapasitas
                 </span>
                 <strong className="font-mono text-slate-900 dark:text-slate-100">
-                  Lt. {selectedRoomDetail.floor} / {selectedRoomDetail.capacity}{" "}
-                  Kursi
+                  {selectedRoomDetail.capacity} orang
                 </strong>
               </div>
               <div>
                 <span className="text-slate-600 dark:text-slate-400 block">
-                  Penanggung Jawab
+                  Lantai
                 </span>
-                <strong className="text-slate-900 dark:text-slate-100">
-                  {selectedRoomDetail.pic_name}
+                <strong className="font-mono text-slate-900 dark:text-slate-100">
+                  Lantai {selectedRoomDetail.floor}
                 </strong>
-              </div>
-              <div>
-                <span className="text-slate-600 dark:text-slate-400 block">
-                  Status Saat Ini
-                </span>
-                <div className="mt-0.5">
-                  <RoomStatusBadge status={selectedRoomDetail.status} />
-                </div>
               </div>
             </div>
 
-            <div>
-              <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
-                Inventaris Terpasang di Ruang {selectedRoomDetail.code} (
-                {detailRoomAssets.length} Unit)
-              </h3>
-              {detailRoomAssets.length === 0 ? (
+            {/* Tab Internal Drawer */}
+            <div
+              role="tablist"
+              aria-label="Detail inspeksi ruangan"
+              className="grid grid-cols-3 gap-1.5 p-1 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={drawerTab === "assets"}
+                onClick={() => setDrawerTab("assets")}
+                className={`min-h-[40px] rounded text-xs font-bold transition-colors ${
+                  drawerTab === "assets"
+                    ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
+                    : "text-slate-700 dark:text-slate-300"
+                }`}
+              >
+                Aset ({detailRoomAssets.length})
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={drawerTab === "bookings"}
+                onClick={() => setDrawerTab("bookings")}
+                className={`min-h-[40px] rounded text-xs font-bold transition-colors ${
+                  drawerTab === "bookings"
+                    ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
+                    : "text-slate-700 dark:text-slate-300"
+                }`}
+              >
+                Jadwal ({detailRoomBookings.length})
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={drawerTab === "notes"}
+                onClick={() => setDrawerTab("notes")}
+                className={`min-h-[40px] rounded text-xs font-bold transition-colors ${
+                  drawerTab === "notes"
+                    ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
+                    : "text-slate-700 dark:text-slate-300"
+                }`}
+              >
+                Catatan & File
+              </button>
+            </div>
+
+            {drawerTab === "assets" ? (
+              detailRoomAssets.length === 0 ? (
                 <p className="p-4 text-xs text-slate-600 dark:text-slate-400 rounded border border-dashed border-slate-300 dark:border-slate-700 text-center">
-                  Belum ada aset yang ditempatkan di ruangan ini. Tambahkan aset
-                  melalui menu Inventaris Aset & Barang.
+                  Belum ada aset yang ditempatkan di ruangan ini.
                 </p>
               ) : (
                 <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-md">
@@ -542,29 +671,50 @@ export function RuanganView() {
                           </span>
                         </div>
                         <p className="text-slate-600 dark:text-slate-400">
-                          {ast.brand_model} • Pengadaan {ast.procurement_year} •{" "}
-                          {formatCurrencyIDR(ast.acquisition_cost)}
+                          {ast.brand_model} • {formatCurrencyIDR(ast.acquisition_cost)}
                         </p>
                       </div>
                       <AssetConditionBadge condition={ast.condition} />
                     </li>
                   ))}
                 </ul>
-              )}
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setSelectedRoomDetail(null)}
-              >
-                Tutup Detail
-              </Button>
-            </div>
+              )
+            ) : drawerTab === "bookings" ? (
+              detailRoomBookings.length === 0 ? (
+                <p className="p-4 text-xs text-slate-600 dark:text-slate-400 rounded border border-dashed border-slate-300 dark:border-slate-700 text-center">
+                  Belum ada jadwal peminjaman untuk ruangan ini.
+                </p>
+              ) : (
+                <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-md">
+                  {detailRoomBookings.map((bk) => (
+                    <li key={bk.id} className="p-3 space-y-1 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono font-bold text-[#1E3A5F] dark:text-sky-400">
+                          {bk.booking_code}
+                        </span>
+                        <BookingStatusBadge status={bk.status} />
+                      </div>
+                      <p className="font-bold text-slate-900 dark:text-slate-100">
+                        {bk.activity_name}
+                      </p>
+                      <p className="text-slate-600 dark:text-slate-400 font-mono">
+                        {bk.booking_date} • {bk.start_time}-{bk.end_time} WIB •{" "}
+                        {bk.borrower_name}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : (
+              <EntityDrawerSections
+                entityType="room"
+                entityId={selectedRoomDetail.id}
+                baseEventDates={[selectedRoomDetail.created_at]}
+              />
+            )}
           </div>
         ) : null}
-      </Modal>
+      </Drawer>
 
       {/* Modal Form Tambah / Edit Ruangan */}
       <Modal

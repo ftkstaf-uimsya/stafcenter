@@ -7,6 +7,7 @@ import { Moon, Sun, X } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { LoadingStateView } from "@/components/ui/data-states";
+import { CommandSearch } from "@/components/ui/command-search";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -166,6 +167,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {children}
             </main>
           </div>
+
+          <CommandSearch />
         </>
       )}
 

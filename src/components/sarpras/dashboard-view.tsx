@@ -385,8 +385,8 @@ export function DashboardView() {
                       </div>
                       <div className="shrink-0">
                         <Link
-                          href={`/sarpras/ruangan?highlight=${encodeURIComponent(
-                            room.code
+                          href={`/sarpras/ruangan?inspect=${encodeURIComponent(
+                            room.id
                           )}`}
                           className="min-h-[44px] px-3 py-2 inline-flex items-center justify-center text-xs font-semibold rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F]"
                         >
@@ -409,9 +409,10 @@ export function DashboardView() {
                   const room = rooms.find((r) => r.id === bk.room_id);
                   const asset = assets.find((a) => a.id === bk.asset_id);
                   return (
-                    <div
+                    <Link
                       key={bk.id}
-                      className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 rounded border border-slate-200 dark:border-slate-800 text-xs"
+                      href={`/sarpras/peminjaman?inspect=${encodeURIComponent(bk.id)}`}
+                      className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 rounded border border-slate-200 dark:border-slate-800 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F]"
                     >
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-2">
@@ -430,7 +431,7 @@ export function DashboardView() {
                         </p>
                       </div>
                       <BookingStatusBadge status={bk.status} />
-                    </div>
+                    </Link>
                   );
                 })}
               </div>
@@ -467,9 +468,12 @@ export function DashboardView() {
                   className="p-4 rounded-md border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-200">
+                    <Link
+                      href={`/sarpras/pemeliharaan?inspect=${encodeURIComponent(ticket.id)}`}
+                      className="font-mono text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-0.5"
+                    >
                       {ticket.ticket_code}
-                    </span>
+                    </Link>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <PriorityBadge priority={ticket.priority} />
                       <MaintenanceStatusBadge status={ticket.status} />

@@ -19,6 +19,9 @@ import {
   MaintenanceLog,
   MaintenanceStatus,
   Room,
+  SarprasAttachment,
+  SarprasEntityType,
+  SarprasNote,
   StaffRole,
   UISimulationState,
 } from "@/types/sarpras";
@@ -66,6 +69,8 @@ interface SarprasContextValue {
   maintenanceLogs: MaintenanceLog[];
   consumables: Consumable[];
   consumableTransactions: ConsumableTransaction[];
+  notes: SarprasNote[];
+  attachments: SarprasAttachment[];
   isLiveSupabase: boolean;
   serverConfigured: boolean;
   authUser: AuthStaffUser | null;
@@ -73,6 +78,8 @@ interface SarprasContextValue {
   isSyncingDb: boolean;
   uiSimState: UISimulationState;
   setUiSimState: (state: UISimulationState) => void;
+  commandSearchOpen: boolean;
+  setCommandSearchOpen: (open: boolean) => void;
   theme: "light" | "dark";
   toggleTheme: () => void;
   toasts: ToastNotice[];
@@ -125,7 +132,7 @@ interface SarprasContextValue {
       MaintenanceLog,
       "id" | "ticket_code" | "status" | "reported_at"
     >
-  ) => void;
+  ) => MaintenanceLog;
   updateMaintenanceStatus: (
     id: string,
     update: {
@@ -143,6 +150,22 @@ interface SarprasContextValue {
   recordConsumableMutation: (
     payload: Omit<ConsumableTransaction, "id" | "transaction_date">
   ) => { ok: boolean; error?: string };
+
+  // Catatan Aktivitas & Lampiran Berkas (Drawer & Storage)
+  addEntityNote: (
+    entityType: SarprasEntityType,
+    entityId: string,
+    noteText: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  uploadEntityFile: (
+    entityType: SarprasEntityType,
+    entityId: string,
+    file: File
+  ) => Promise<{ ok: boolean; attachment?: SarprasAttachment; error?: string }>;
+  deleteEntityAttachment: (
+    id: string,
+    filePath?: string
+  ) => Promise<void>;
 }
 
 const SarprasContext = createContext<SarprasContextValue | null>(null);
@@ -190,6 +213,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
   const [consumableTransactions, setConsumableTransactions] = useState<
     ConsumableTransaction[]
   >(() => (isLiveSupabase ? [] : INITIAL_CONSUMABLE_TRANSACTIONS));
+  const [notes, setNotes] = useState<SarprasNote[]>([]);
+  const [attachments, setAttachments] = useState<SarprasAttachment[]>([]);
 
   const [serverConfigured, setServerConfigured] = useState<boolean>(true);
   const [authUser, setAuthUser] = useState<AuthStaffUser | null>(null);
@@ -197,6 +222,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
   const [isSyncingDb, setIsSyncingDb] = useState<boolean>(false);
 
   const [uiSimState, setUiSimState] = useState<UISimulationState>("normal");
+  const [commandSearchOpen, setCommandSearchOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [toasts, setToasts] = useState<ToastNotice[]>([]);
   const [hydrated, setHydrated] = useState(false);
@@ -209,6 +235,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     setMaintenanceLogs([]);
     setConsumables([]);
     setConsumableTransactions([]);
+    setNotes([]);
+    setAttachments([]);
   }, []);
 
   const notify = useCallback(
@@ -290,6 +318,12 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
             })
           )
         );
+      }
+      if (Array.isArray(data.notes)) {
+        setNotes(data.notes as SarprasNote[]);
+      }
+      if (Array.isArray(data.attachments)) {
+        setAttachments(data.attachments as SarprasAttachment[]);
       }
     } catch {
       // Tetap gunakan state sebelumnya bila koneksi terputus
@@ -1047,8 +1081,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         MaintenanceLog,
         "id" | "ticket_code" | "status" | "reported_at"
       >
-    ) => {
-      if (!requireStaffForLiveWrite()) return;
+    ): MaintenanceLog => {
       const seq = String(
         extractMaxSequence(maintenanceLogs.map((m) => m.ticket_code)) + 1
       ).padStart(3, "0");
@@ -1061,6 +1094,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         status: "Dilaporkan",
         reported_at: new Date().toISOString(),
       };
+      if (!requireStaffForLiveWrite()) return newTicket;
 
       setMaintenanceLogs((prev) => [newTicket, ...prev]);
 
@@ -1122,7 +1156,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           `Tiket ${ticket_code} berhasil dibuat dan disinkronkan ke database.`,
           true
         );
-        return;
+        return newTicket;
       }
 
       notify(
@@ -1134,6 +1168,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
             : "."
         }`
       );
+      return newTicket;
     },
     [
       authUser,
@@ -1384,6 +1419,159 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  const addEntityNote = useCallback(
+    async (
+      entityType: SarprasEntityType,
+      entityId: string,
+      noteText: string
+    ): Promise<{ ok: boolean; error?: string }> => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const cleanText = noteText.trim();
+      if (!cleanText) {
+        return { ok: false, error: "Isi catatan tidak boleh kosong." };
+      }
+      const id = generateUuid();
+      const newNote: SarprasNote = {
+        id,
+        entity_type: entityType,
+        entity_id: entityId,
+        author_id: authUser?.id || null,
+        author_name: authUser?.fullName || authUser?.username || "Staf Kampus",
+        note_text: cleanText,
+        created_at: new Date().toISOString(),
+      };
+      setNotes((prev) => [newNote, ...prev]);
+
+      if (isLiveSupabase && authUser) {
+        try {
+          const res = await fetch("/api/sarpras/mutate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "insert_note",
+              data: {
+                id,
+                entity_type: entityType,
+                entity_id: entityId,
+                note_text: cleanText,
+              },
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setNotes((prev) => prev.filter((n) => n.id !== id));
+            notify("error", "Gagal Menyimpan Catatan", data.error || "Error database");
+            return { ok: false, error: data.error };
+          }
+          notify("success", "Catatan Ditambahkan", "Catatan progres tersimpan.");
+          return { ok: true };
+        } catch {
+          setNotes((prev) => prev.filter((n) => n.id !== id));
+          return { ok: false, error: "Koneksi server terputus." };
+        }
+      }
+
+      notify("success", "Catatan Ditambahkan", "Catatan progres tersimpan.");
+      return { ok: true };
+    },
+    [authUser, isLiveSupabase, notify, requireStaffForLiveWrite]
+  );
+
+  const uploadEntityFile = useCallback(
+    async (
+      entityType: SarprasEntityType,
+      entityId: string,
+      file: File
+    ): Promise<{
+      ok: boolean;
+      attachment?: SarprasAttachment;
+      error?: string;
+    }> => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+
+      if (isLiveSupabase && authUser) {
+        try {
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("entityType", entityType);
+          formData.append("entityId", entityId);
+
+          const res = await fetch("/api/sarpras/upload", {
+            method: "POST",
+            body: formData,
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.attachment) {
+            const errMsg = data.error || "Gagal mengunggah berkas.";
+            notify("error", "Gagal Mengunggah Berkas", errMsg);
+            return { ok: false, error: errMsg };
+          }
+          const uploaded = data.attachment as SarprasAttachment;
+          setAttachments((prev) => [uploaded, ...prev]);
+          if (
+            entityType === "maintenance" &&
+            uploaded.mime_type.startsWith("image/")
+          ) {
+            setMaintenanceLogs((prev) =>
+              prev.map((m) =>
+                m.id === entityId && !m.photo_url
+                  ? { ...m, photo_url: uploaded.file_url }
+                  : m
+              )
+            );
+          }
+          notify(
+            "success",
+            "Berkas Terunggah",
+            `${uploaded.file_name} berhasil disimpan ke Supabase Storage.`
+          );
+          return { ok: true, attachment: uploaded };
+        } catch {
+          notify("error", "Gagal Mengunggah Berkas", "Koneksi server terputus.");
+          return { ok: false, error: "Koneksi server terputus." };
+        }
+      }
+
+      const fallbackAtt: SarprasAttachment = {
+        id: generateUuid(),
+        entity_type: entityType,
+        entity_id: entityId,
+        file_name: file.name,
+        file_path: file.name,
+        file_url: URL.createObjectURL(file),
+        mime_type: file.type || "application/octet-stream",
+        file_size_bytes: file.size,
+        uploaded_by: "Staf Lokal",
+        created_at: new Date().toISOString(),
+      };
+      setAttachments((prev) => [fallbackAtt, ...prev]);
+      return { ok: true, attachment: fallbackAtt };
+    },
+    [authUser, isLiveSupabase, notify, requireStaffForLiveWrite]
+  );
+
+  const deleteEntityAttachment = useCallback(
+    async (id: string, filePath?: string) => {
+      if (!requireStaffForLiveWrite()) return;
+      setAttachments((prev) => prev.filter((a) => a.id !== id));
+      if (isLiveSupabase && authUser) {
+        await sendMutation(
+          { action: "delete_attachment", id, filePath },
+          "Menghapus Lampiran",
+          "Lampiran Dihapus",
+          "Berkas lampiran telah dihapus.",
+          false,
+          "info"
+        );
+      }
+    },
+    [authUser, isLiveSupabase, requireStaffForLiveWrite, sendMutation]
+  );
+
   const value = useMemo<SarprasContextValue>(
     () => ({
       buildings: uiSimState === "empty" ? [] : buildings,
@@ -1394,6 +1582,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       consumables: uiSimState === "empty" ? [] : consumables,
       consumableTransactions:
         uiSimState === "empty" ? [] : consumableTransactions,
+      notes: uiSimState === "empty" ? [] : notes,
+      attachments: uiSimState === "empty" ? [] : attachments,
       isLiveSupabase,
       serverConfigured,
       authUser,
@@ -1401,6 +1591,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       isSyncingDb,
       uiSimState,
       setUiSimState,
+      commandSearchOpen,
+      setCommandSearchOpen,
       theme,
       toggleTheme,
       toasts,
@@ -1424,6 +1616,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       updateMaintenanceStatus,
       addConsumable,
       recordConsumableMutation,
+      addEntityNote,
+      uploadEntityFile,
+      deleteEntityAttachment,
     }),
     [
       uiSimState,
@@ -1434,11 +1629,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       maintenanceLogs,
       consumables,
       consumableTransactions,
+      notes,
+      attachments,
       isLiveSupabase,
       serverConfigured,
       authUser,
       authLoading,
       isSyncingDb,
+      commandSearchOpen,
       theme,
       toggleTheme,
       toasts,
@@ -1462,6 +1660,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       updateMaintenanceStatus,
       addConsumable,
       recordConsumableMutation,
+      addEntityNote,
+      uploadEntityFile,
+      deleteEntityAttachment,
     ]
   );
 

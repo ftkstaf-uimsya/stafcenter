@@ -17,6 +17,8 @@ interface DataTableProps<T> {
   emptyActionLabel?: string;
   onEmptyAction?: () => void;
   onRowClick?: (row: T) => void;
+  hiddenColumnKeys?: string[];
+  activeRowKey?: string | null;
 }
 
 export function DataTable<T>({
@@ -28,7 +30,13 @@ export function DataTable<T>({
   emptyActionLabel,
   onEmptyAction,
   onRowClick,
+  hiddenColumnKeys = [],
+  activeRowKey = null,
 }: DataTableProps<T>) {
+  const visibleColumns = columns.filter(
+    (col) => !hiddenColumnKeys.includes(col.key)
+  );
+
   if (data.length === 0) {
     return (
       <EmptyStateView
@@ -45,7 +53,7 @@ export function DataTable<T>({
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="border-b border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/90">
-            {columns.map((col) => (
+            {visibleColumns.map((col) => (
               <th
                 key={col.key}
                 scope="col"
@@ -57,37 +65,43 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-sm text-slate-900 dark:text-slate-100">
-          {data.map((row) => (
-            <tr
-              key={rowKey(row)}
-              onClick={onRowClick ? () => onRowClick(row) : undefined}
-              tabIndex={onRowClick ? 0 : undefined}
-              onKeyDown={
-                onRowClick
-                  ? (e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onRowClick(row);
+          {data.map((row) => {
+            const key = rowKey(row);
+            const isSelected = activeRowKey === key;
+            return (
+              <tr
+                key={key}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
+                onKeyDown={
+                  onRowClick
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onRowClick(row);
+                        }
                       }
-                    }
-                  : undefined
-              }
-              className={`transition-colors ${
-                onRowClick
-                  ? "cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/70 focus-visible:outline-none focus-visible:bg-sky-50 dark:focus-visible:bg-slate-800"
-                  : "hover:bg-slate-50/70 dark:hover:bg-slate-800/40"
-              }`}
-            >
-              {columns.map((col) => (
-                <td
-                  key={col.key}
-                  className={`px-4 py-3.5 align-top ${col.className || ""}`}
-                >
-                  {col.render(row)}
-                </td>
-              ))}
-            </tr>
-          ))}
+                    : undefined
+                }
+                className={`transition-colors ${
+                  isSelected
+                    ? "bg-sky-50/90 dark:bg-sky-950/40"
+                    : onRowClick
+                    ? "cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/70 focus-visible:outline-none focus-visible:bg-sky-50 dark:focus-visible:bg-slate-800"
+                    : "hover:bg-slate-50/70 dark:hover:bg-slate-800/40"
+                }`}
+              >
+                {visibleColumns.map((col) => (
+                  <td
+                    key={col.key}
+                    className={`px-4 py-3.5 align-top ${col.className || ""}`}
+                  >
+                    {col.render(row)}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

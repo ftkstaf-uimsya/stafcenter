@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Edit3,
-  Package,
   Plus,
   Printer,
   QrCode,
@@ -23,12 +22,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
+import { Drawer } from "@/components/ui/drawer";
 import { DataTable, DataTableColumn } from "@/components/ui/data-table";
+import {
+  ColumnsTogglePopover,
+  FilterPopover,
+} from "@/components/ui/filter-popover";
+import { EntityDrawerSections } from "@/components/ui/entity-drawer-sections";
 import {
   ErrorStateView,
   LoadingStateView,
 } from "@/components/ui/data-states";
-import { AssetConditionBadge } from "@/components/sarpras/status-badges";
+import {
+  AssetConditionBadge,
+  MaintenanceStatusBadge,
+} from "@/components/sarpras/status-badges";
 
 const CATEGORY_CODES: AssetCategoryCode[] = [
   "ELK",
@@ -56,13 +64,15 @@ function buildDeterministicMatrix(code: string): boolean[][] {
   );
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
-      // Finder corners
       const isCorner =
         (r < 3 && c < 3) ||
         (r < 3 && c >= size - 3) ||
         (r >= size - 3 && c < 3);
       if (isCorner) {
-        grid[r][c] = !(r === 1 && c === 1) && !(r === 1 && c === size - 2) && !(r === size - 2 && c === 1);
+        grid[r][c] =
+          !(r === 1 && c === 1) &&
+          !(r === 1 && c === size - 2) &&
+          !(r === size - 2 && c === 1);
       } else {
         const charIndex = (r * size + c) % code.length;
         const charCode = code.charCodeAt(charIndex);
@@ -77,6 +87,7 @@ export function InventarisView() {
   const {
     rooms,
     assets,
+    maintenanceLogs,
     uiSimState,
     setUiSimState,
     addAsset,
@@ -90,6 +101,10 @@ export function InventarisView() {
   const [filterRoom, setFilterRoom] = useState("ALL");
   const [filterCondition, setFilterCondition] = useState("ALL");
   const [filterCategory, setFilterCategory] = useState("ALL");
+  const [hiddenColumnKeys, setHiddenColumnKeys] = useState<string[]>([]);
+
+  // Slide-over detail drawer aset
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
 
   // Modal Tambah/Edit Aset
   const [assetModalOpen, setAssetModalOpen] = useState(false);
@@ -111,6 +126,19 @@ export function InventarisView() {
   // Modal Cetak Label / QR Code Inventaris
   const [qrLabelAsset, setQrLabelAsset] = useState<Asset | null>(null);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const inspect = new URLSearchParams(window.location.search).get("inspect");
+    if (inspect && assets.some((a) => a.id === inspect)) {
+      setSelectedAssetId(inspect);
+    }
+  }, [assets]);
+
+  const selectedAsset = useMemo(
+    () => assets.find((a) => a.id === selectedAssetId) || null,
+    [assets, selectedAssetId]
+  );
+
   const filteredAssets = useMemo(() => {
     return assets.filter((a) => {
       const q = searchQuery.trim().toLowerCase();
@@ -130,6 +158,11 @@ export function InventarisView() {
       return matchSearch && matchRoom && matchCond && matchCat;
     });
   }, [assets, searchQuery, filterRoom, filterCondition, filterCategory]);
+
+  const activeFilterCount =
+    (filterRoom !== "ALL" ? 1 : 0) +
+    (filterCondition !== "ALL" ? 1 : 0) +
+    (filterCategory !== "ALL" ? 1 : 0);
 
   if (uiSimState === "loading") {
     return (
@@ -224,6 +257,12 @@ export function InventarisView() {
     setAssetModalOpen(false);
   };
 
+  const toggleColumnKey = (key: string) => {
+    setHiddenColumnKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
   const previewCode = editingAsset
     ? editingAsset.inventory_code
     : previewNextInventoryCode(category, Number(procurementYear) || 2026);
@@ -297,7 +336,10 @@ export function InventarisView() {
       key: "actions",
       header: "Label QR & Aksi",
       render: (row) => (
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          onClick={(e) => e.stopPropagation()}
+        >
           <Button
             type="button"
             variant="outline"
@@ -332,8 +374,15 @@ export function InventarisView() {
     },
   ];
 
+  const assetMaintLogs = selectedAsset
+    ? maintenanceLogs.filter((m) => m.asset_id === selectedAsset.id)
+    : [];
+  const assetRoom = selectedAsset
+    ? rooms.find((r) => r.id === selectedAsset.room_id)
+    : null;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-slate-300 dark:border-slate-800">
         <div>
           <p className="text-xs font-mono font-bold uppercase tracking-wider text-[#1E3A5F] dark:text-sky-400">
@@ -343,11 +392,12 @@ export function InventarisView() {
             Inventaris Aset & Barang
           </h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Penomoran inventaris otomatis (
+            Penomoran otomatis (
             <code className="font-mono font-bold">
               INV-[KATEGORI]-[TAHUN]-[URUT]
             </code>
-            ), pelacakan kondisi fisik, dan pencetakan stiker QR aset.
+            ). Klik baris aset untuk melihat riwayat servis, catatan, dan dokumen
+            BAST.
           </p>
         </div>
 
@@ -357,50 +407,75 @@ export function InventarisView() {
         </Button>
       </section>
 
-      {/* Bar Pencarian & Filter */}
+      {/* Toolbar Ringkas */}
       <section
-        aria-label="Filter Inventaris"
-        className="p-4 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+        aria-label="Filter dan Pencarian Aset"
+        className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900"
       >
-        <Input
-          label="Cari Kode / Nama / Merk / Serial"
-          placeholder="Ketik INV-ELK atau Proyektor..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-        <Select
-          label="Filter Lokasi Ruangan"
-          value={filterRoom}
-          onChange={(e) => setFilterRoom(e.target.value)}
-          options={[
-            { value: "ALL", label: "Semua Lokasi Ruangan" },
-            ...rooms.map((r) => ({
-              value: r.id,
-              label: `${r.code} - ${r.name}`,
-            })),
-            { value: "UNASSIGNED", label: "Gudang / Belum Ditempatkan" },
-          ]}
-        />
-        <Select
-          label="Filter Kondisi Fisik"
-          value={filterCondition}
-          onChange={(e) => setFilterCondition(e.target.value)}
-          options={[
-            { value: "ALL", label: "Semua Kondisi" },
-            ...ASSET_CONDITIONS.map((c) => ({ value: c, label: c })),
-          ]}
-        />
-        <Select
-          label="Filter Kategori Aset"
-          value={filterCategory}
-          onChange={(e) => setFilterCategory(e.target.value)}
-          options={[
-            { value: "ALL", label: "Semua Kategori" },
-            ...CATEGORY_CODES.map((code) => ({
-              value: code,
-              label: `${code} - ${ASSET_CATEGORY_LABELS[code]}`,
-            })),
-          ]}
+        <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[240px]">
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Ketik INV-ELK, nama barang, merk, atau serial..."
+            aria-label="Cari inventaris aset"
+            className="min-h-[44px] w-full sm:w-72 px-3 py-2 text-xs rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+          />
+
+          <FilterPopover
+            title="Filter Inventaris Aset"
+            activeCount={activeFilterCount}
+            onResetAll={() => {
+              setFilterRoom("ALL");
+              setFilterCondition("ALL");
+              setFilterCategory("ALL");
+            }}
+            groups={[
+              {
+                key: "condition",
+                label: "Kondisi Fisik",
+                value: filterCondition,
+                onChange: setFilterCondition,
+                options: [
+                  { value: "ALL", label: "Semua Kondisi" },
+                  ...ASSET_CONDITIONS.map((c) => ({ value: c, label: c })),
+                ],
+              },
+              {
+                key: "category",
+                label: "Kategori Barang",
+                value: filterCategory,
+                onChange: setFilterCategory,
+                options: [
+                  { value: "ALL", label: "Semua Kategori" },
+                  ...CATEGORY_CODES.map((c) => ({
+                    value: c,
+                    label: `${c} - ${ASSET_CATEGORY_LABELS[c]}`,
+                  })),
+                ],
+              },
+              {
+                key: "room",
+                label: "Lokasi Penempatan",
+                value: filterRoom,
+                onChange: setFilterRoom,
+                options: [
+                  { value: "ALL", label: "Semua Ruangan" },
+                  ...rooms.map((r) => ({
+                    value: r.id,
+                    label: `${r.code} - ${r.name}`,
+                  })),
+                  { value: "UNASSIGNED", label: "Gudang / Belum Ditempatkan" },
+                ],
+              },
+            ]}
+          />
+        </div>
+
+        <ColumnsTogglePopover
+          columns={columns.map((c) => ({ key: c.key, label: c.header }))}
+          hiddenKeys={hiddenColumnKeys}
+          onToggleKey={toggleColumnKey}
         />
       </section>
 
@@ -409,11 +484,148 @@ export function InventarisView() {
         columns={columns}
         data={filteredAssets}
         rowKey={(a) => a.id}
+        hiddenColumnKeys={hiddenColumnKeys}
+        activeRowKey={selectedAssetId}
+        onRowClick={(row) => setSelectedAssetId(row.id)}
         emptyTitle="Tidak Ada Aset yang Ditemukan"
-        emptyDescription="Belum ada barang inventaris yang sesuai dengan filter ruangan atau kondisi yang dipilih."
+        emptyDescription="Belum ada barang inventaris yang sesuai dengan filter yang dipilih."
         emptyActionLabel="Registrasi Aset Baru"
         onEmptyAction={openAddModal}
       />
+
+      {/* Slide-Over Detail Drawer Aset */}
+      <Drawer
+        isOpen={Boolean(selectedAsset)}
+        onClose={() => setSelectedAssetId(null)}
+        title={selectedAsset?.name || ""}
+        subtitle={
+          selectedAsset
+            ? `${selectedAsset.inventory_code} • ${selectedAsset.brand_model}`
+            : undefined
+        }
+        headerBadge={
+          selectedAsset ? (
+            <>
+              <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+                {selectedAsset.inventory_code}
+              </span>
+              <AssetConditionBadge condition={selectedAsset.condition} />
+            </>
+          ) : null
+        }
+        footer={
+          selectedAsset ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setQrLabelAsset(selectedAsset)}
+              >
+                <QrCode className="w-4 h-4" aria-hidden="true" />
+                <span>Label QR</span>
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => openEditModal(selectedAsset)}
+              >
+                <Edit3 className="w-4 h-4" aria-hidden="true" />
+                <span>Edit Data Aset</span>
+              </Button>
+            </div>
+          ) : null
+        }
+      >
+        {selectedAsset ? (
+          <div className="space-y-5">
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 text-xs">
+              <div>
+                <dt className="text-slate-600 dark:text-slate-400">
+                  Lokasi Ruangan
+                </dt>
+                <dd className="mt-0.5 font-mono font-bold text-slate-900 dark:text-slate-100">
+                  {assetRoom
+                    ? `${assetRoom.code} (${assetRoom.name})`
+                    : "Gudang Cadangan"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-600 dark:text-slate-400">
+                  Nilai Perolehan
+                </dt>
+                <dd className="mt-0.5 font-mono font-bold text-slate-900 dark:text-slate-100">
+                  {formatCurrencyIDR(selectedAsset.acquisition_cost)} (
+                  {selectedAsset.procurement_year})
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-600 dark:text-slate-400">
+                  Sumber Dana
+                </dt>
+                <dd className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
+                  {selectedAsset.funding_source}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-600 dark:text-slate-400">
+                  Nomor Seri
+                </dt>
+                <dd className="mt-0.5 font-mono text-slate-900 dark:text-slate-100">
+                  {selectedAsset.serial_number || "-"}
+                </dd>
+              </div>
+              {selectedAsset.notes ? (
+                <div className="sm:col-span-2">
+                  <dt className="text-slate-600 dark:text-slate-400">
+                    Catatan Teknis
+                  </dt>
+                  <dd className="mt-0.5 text-slate-800 dark:text-slate-200">
+                    {selectedAsset.notes}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+
+            {/* Riwayat Pemeliharaan Aset */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Riwayat Pemeliharaan Aset ({assetMaintLogs.length})
+              </h3>
+              {assetMaintLogs.length === 0 ? (
+                <p className="p-3 text-xs text-slate-600 dark:text-slate-400 rounded border border-dashed border-slate-300 dark:border-slate-700 text-center">
+                  Belum ada laporan kerusakan untuk unit inventaris ini.
+                </p>
+              ) : (
+                <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-md">
+                  {assetMaintLogs.map((log) => (
+                    <li key={log.id} className="p-3 space-y-1 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono font-bold text-[#1E3A5F] dark:text-sky-400">
+                          {log.ticket_code}
+                        </span>
+                        <MaintenanceStatusBadge status={log.status} />
+                      </div>
+                      <p className="font-bold text-slate-900 dark:text-slate-100">
+                        {log.issue_title}
+                      </p>
+                      <p className="text-slate-600 dark:text-slate-400 font-mono">
+                        {log.reported_at.slice(0, 10)} •{" "}
+                        {formatCurrencyIDR(log.repair_cost)}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <EntityDrawerSections
+              entityType="asset"
+              entityId={selectedAsset.id}
+              baseEventDates={[selectedAsset.created_at]}
+            />
+          </div>
+        ) : null}
+      </Drawer>
 
       {/* Modal Tambah / Edit Aset */}
       <Modal
@@ -580,7 +792,6 @@ export function InventarisView() {
         {qrLabelAsset ? (
           <div className="space-y-4">
             <div className="p-5 rounded-lg border-2 border-slate-900 dark:border-slate-200 bg-white text-slate-950 flex flex-col sm:flex-row items-center gap-5">
-              {/* SVG QR Matrix */}
               <div className="p-2 border border-slate-900 rounded bg-white shrink-0">
                 <svg
                   width="108"

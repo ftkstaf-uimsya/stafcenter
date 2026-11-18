@@ -32,7 +32,9 @@ type MutationPayload =
       setRoomAvailable?: boolean;
     }
   | { action: "insert_consumable"; data: Record<string, unknown> }
-  | { action: "insert_consumable_tx"; data: Record<string, unknown> };
+  | { action: "insert_consumable_tx"; data: Record<string, unknown> }
+  | { action: "insert_note"; data: Record<string, unknown> }
+  | { action: "delete_attachment"; id: string; filePath?: string };
 
 export async function POST(request: NextRequest) {
   const session = await getVerifiedServerSession();
@@ -155,6 +157,38 @@ export async function POST(request: NextRequest) {
         const { error } = await supabase
           .from("consumable_transactions")
           .insert(body.data);
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_note": {
+        const { error } = await supabase.from("sarpras_notes").insert({
+          ...body.data,
+          author_id: session.id,
+          author_name: session.fullName || session.username,
+        });
+        if (error) {
+          const msg = error.message || "";
+          if (msg.includes("sarpras_notes")) {
+            return NextResponse.json(
+              {
+                error:
+                  "Tabel catatan belum dibuat. Jalankan migrasi supabase/migrations/003_notes_and_attachments.sql di SQL Editor Supabase.",
+              },
+              { status: 400 }
+            );
+          }
+          return NextResponse.json({ error: msg }, { status: 400 });
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_attachment": {
+        if (body.filePath) {
+          await supabase.storage.from("sarpras-files").remove([body.filePath]);
+        }
+        const { error } = await supabase
+          .from("sarpras_attachments")
+          .delete()
+          .eq("id", body.id);
         if (error) return NextResponse.json({ error: error.message }, { status: 400 });
         return NextResponse.json({ ok: true });
       }

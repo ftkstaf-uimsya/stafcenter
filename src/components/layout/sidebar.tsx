@@ -49,6 +49,7 @@ export function Sidebar({
     maintenanceLogs,
     consumables,
     authUser,
+    setCommandSearchOpen,
   } = useSarpras();
   const [sarprasExpanded, setSarprasExpanded] = useState(true);
 
@@ -124,7 +125,23 @@ export function Sidebar({
   };
 
   const renderNavLinks = (isCollapsedView: boolean) => (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      {!isCollapsedView ? (
+        <button
+          type="button"
+          onClick={() => {
+            onCloseMobile();
+            setCommandSearchOpen(true);
+          }}
+          className="w-full min-h-[40px] flex items-center justify-between px-3 py-2 rounded-md bg-white/10 hover:bg-white/15 border border-white/10 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+        >
+          <span>Cari ruang, aset, tiket...</span>
+          <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-black/30 text-slate-200">
+            Ctrl+K
+          </kbd>
+        </button>
+      ) : null}
+
       <div>
         {!isCollapsedView ? (
           <button

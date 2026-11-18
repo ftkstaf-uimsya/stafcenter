@@ -58,6 +58,36 @@ export interface StaffAccount {
   updated_at: string;
 }
 
+export type SarprasEntityType =
+  | "booking"
+  | "maintenance"
+  | "asset"
+  | "room"
+  | "consumable";
+
+export interface SarprasNote {
+  id: string;
+  entity_type: SarprasEntityType;
+  entity_id: string;
+  author_id?: string | null;
+  author_name: string;
+  note_text: string;
+  created_at: string;
+}
+
+export interface SarprasAttachment {
+  id: string;
+  entity_type: SarprasEntityType;
+  entity_id: string;
+  file_name: string;
+  file_path: string;
+  file_url: string;
+  mime_type: string;
+  file_size_bytes: number;
+  uploaded_by: string;
+  created_at: string;
+}
+
 export type UISimulationState = "normal" | "loading" | "empty" | "error";
 
 export interface Building {

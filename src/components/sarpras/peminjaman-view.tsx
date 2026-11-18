@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   CalendarClock,
   CheckCircle2,
+  KanbanSquare,
   Plus,
   RotateCcw,
+  Table2,
   XCircle,
 } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
@@ -21,7 +23,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
+import { Drawer } from "@/components/ui/drawer";
 import { DataTable, DataTableColumn } from "@/components/ui/data-table";
+import {
+  ColumnsTogglePopover,
+  FilterPopover,
+} from "@/components/ui/filter-popover";
+import { KanbanBoard, KanbanColumnDef } from "@/components/ui/kanban-board";
+import { ProgressRing } from "@/components/ui/progress-ring";
+import { EntityDrawerSections } from "@/components/ui/entity-drawer-sections";
 import {
   ErrorStateView,
   LoadingStateView,
@@ -42,20 +52,48 @@ const BOOKING_STATUSES: BookingStatus[] = [
   "Ditolak",
 ];
 
+function getBookingProgress(status: BookingStatus): {
+  percent: number;
+  tone: "navy" | "emerald" | "amber" | "danger";
+  barClass: string;
+} {
+  switch (status) {
+    case "Menunggu Persetujuan":
+      return { percent: 25, tone: "amber", barClass: "bg-amber-500" };
+    case "Disetujui":
+      return { percent: 55, tone: "navy", barClass: "bg-[#1E3A5F] dark:bg-sky-400" };
+    case "Sedang Dipinjam":
+      return { percent: 80, tone: "amber", barClass: "bg-sky-600 dark:bg-sky-400" };
+    case "Selesai / Dikembalikan":
+      return { percent: 100, tone: "emerald", barClass: "bg-emerald-600 dark:bg-emerald-400" };
+    case "Ditolak":
+      return { percent: 100, tone: "danger", barClass: "bg-red-600 dark:bg-red-400" };
+  }
+}
+
 export function PeminjamanView() {
   const {
     rooms,
     assets,
     bookings,
+    notes,
+    attachments,
     uiSimState,
     setUiSimState,
     addBooking,
     updateBookingStatus,
   } = useSarpras();
 
+  const [viewMode, setViewMode] = useState<"board" | "table">("board");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
-  const [filterDate, setFilterDate] = useState("");
+  const [filterRole, setFilterRole] = useState("ALL");
+  const [hiddenColumnKeys, setHiddenColumnKeys] = useState<string[]>([]);
+
+  // Slide-over detail drawer
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(
+    null
+  );
 
   // Modal Form Pengajuan Peminjaman
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
@@ -79,6 +117,19 @@ export function PeminjamanView() {
   );
   const [returnNotes, setReturnNotes] = useState("");
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const inspect = new URLSearchParams(window.location.search).get("inspect");
+    if (inspect && bookings.some((b) => b.id === inspect)) {
+      setSelectedBookingId(inspect);
+    }
+  }, [bookings]);
+
+  const selectedBooking = useMemo(
+    () => bookings.find((b) => b.id === selectedBookingId) || null,
+    [bookings, selectedBookingId]
+  );
+
   const portableAssets = useMemo(
     () => assets.filter((a) => a.is_portable && a.condition !== "Hilang"),
     [assets]
@@ -94,10 +145,13 @@ export function PeminjamanView() {
         b.activity_name.toLowerCase().includes(q) ||
         b.borrower_unit.toLowerCase().includes(q);
       const matchStatus = filterStatus === "ALL" || b.status === filterStatus;
-      const matchDate = !filterDate || b.booking_date === filterDate;
-      return matchSearch && matchStatus && matchDate;
+      const matchRole = filterRole === "ALL" || b.borrower_role === filterRole;
+      return matchSearch && matchStatus && matchRole;
     });
-  }, [bookings, searchQuery, filterStatus, filterDate]);
+  }, [bookings, searchQuery, filterStatus, filterRole]);
+
+  const activeFilterCount =
+    (filterStatus !== "ALL" ? 1 : 0) + (filterRole !== "ALL" ? 1 : 0);
 
   if (uiSimState === "loading") {
     return (
@@ -190,11 +244,56 @@ export function PeminjamanView() {
     updateBookingStatus(
       returningBooking.id,
       "Selesai / Dikembalikan",
-      returnNotes.trim() || "Dikembalikan tepat waktu dalam kondisi lengkap & baik."
+      returnNotes.trim() ||
+        "Dikembalikan tepat waktu dalam kondisi lengkap & baik."
     );
     setReturningBooking(null);
     setReturnNotes("");
   };
+
+  const toggleColumnKey = (key: string) => {
+    setHiddenColumnKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
+  const kanbanColumns: KanbanColumnDef<Booking>[] = [
+    {
+      id: "Menunggu Persetujuan",
+      title: "Menunggu Persetujuan",
+      dotColorClass: "bg-amber-500",
+      items: filteredBookings.filter(
+        (b) => b.status === "Menunggu Persetujuan"
+      ),
+      onQuickAdd: openBookingModal,
+    },
+    {
+      id: "Disetujui",
+      title: "Disetujui",
+      dotColorClass: "bg-[#1E3A5F] dark:bg-sky-400",
+      items: filteredBookings.filter((b) => b.status === "Disetujui"),
+    },
+    {
+      id: "Sedang Dipinjam",
+      title: "Sedang Dipinjam",
+      dotColorClass: "bg-sky-600 dark:bg-sky-400",
+      items: filteredBookings.filter((b) => b.status === "Sedang Dipinjam"),
+    },
+    {
+      id: "Selesai / Dikembalikan",
+      title: "Selesai / Dikembalikan",
+      dotColorClass: "bg-emerald-600 dark:bg-emerald-400",
+      items: filteredBookings.filter(
+        (b) => b.status === "Selesai / Dikembalikan"
+      ),
+    },
+    {
+      id: "Ditolak",
+      title: "Ditolak",
+      dotColorClass: "bg-red-600",
+      items: filteredBookings.filter((b) => b.status === "Ditolak"),
+    },
+  ];
 
   const columns: DataTableColumn<Booking>[] = [
     {
@@ -294,7 +393,10 @@ export function PeminjamanView() {
       key: "actions",
       header: "Kendali Sirkulasi",
       render: (row) => (
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          onClick={(e) => e.stopPropagation()}
+        >
           {row.status === "Menunggu Persetujuan" ? (
             <>
               <Button
@@ -363,8 +465,18 @@ export function PeminjamanView() {
     },
   ];
 
+  const selectedProgress = selectedBooking
+    ? getBookingProgress(selectedBooking.status)
+    : null;
+  const selectedRoom = selectedBooking
+    ? rooms.find((r) => r.id === selectedBooking.room_id)
+    : null;
+  const selectedAsset = selectedBooking
+    ? assets.find((a) => a.id === selectedBooking.asset_id)
+    : null;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-slate-300 dark:border-slate-800">
         <div>
           <p className="text-xs font-mono font-bold uppercase tracking-wider text-[#1E3A5F] dark:text-sky-400">
@@ -374,8 +486,9 @@ export function PeminjamanView() {
             Peminjaman & Reservasi Fasilitas
           </h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Dilengkapi validasi deteksi bentrok jadwal otomatis (
-            <em>Conflict Detection</em>) pada tanggal dan rentang jam yang sama.
+            Alur sirkulasi dengan validasi deteksi bentrok jadwal otomatis (
+            <em>Conflict Detection</em>). Klik kartu atau baris untuk membuka
+            panel detail.
           </p>
         </div>
 
@@ -385,44 +498,399 @@ export function PeminjamanView() {
         </Button>
       </section>
 
-      {/* Filter Sirkulasi */}
+      {/* Toolbar Ringkas Tunggal: Cari + Filter Popover + Pengalih Tampilan + Kolom */}
       <section
-        aria-label="Filter Peminjaman"
-        className="p-4 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 grid grid-cols-1 sm:grid-cols-3 gap-3"
+        aria-label="Toolbar Sirkulasi Peminjaman"
+        className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900"
       >
-        <Input
-          label="Cari Peminjam / Kegiatan / Kode Tiket"
-          placeholder="Ketik nama dosen, BEM, atau PJM-..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-        <Select
-          label="Filter Status Peminjaman"
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          options={[
-            { value: "ALL", label: "Semua Status Sirkulasi" },
-            ...BOOKING_STATUSES.map((s) => ({ value: s, label: s })),
-          ]}
-        />
-        <Input
-          label="Filter Tanggal Kegiatan"
-          type="date"
-          value={filterDate}
-          onChange={(e) => setFilterDate(e.target.value)}
-        />
+        <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[240px]">
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Cari tiket PJM-, peminjam, unit, atau kegiatan..."
+            aria-label="Cari peminjaman"
+            className="min-h-[44px] w-full sm:w-72 px-3 py-2 text-xs rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+          />
+
+          <FilterPopover
+            title="Filter Sirkulasi Peminjaman"
+            activeCount={activeFilterCount}
+            onResetAll={() => {
+              setFilterStatus("ALL");
+              setFilterRole("ALL");
+            }}
+            groups={[
+              {
+                key: "status",
+                label: "Status Alur",
+                value: filterStatus,
+                onChange: setFilterStatus,
+                options: [
+                  { value: "ALL", label: "Semua Status" },
+                  ...BOOKING_STATUSES.map((s) => ({ value: s, label: s })),
+                ],
+              },
+              {
+                key: "role",
+                label: "Kategori Peminjam",
+                value: filterRole,
+                onChange: setFilterRole,
+                options: [
+                  { value: "ALL", label: "Semua Kategori" },
+                  ...BORROWER_ROLES.map((r) => ({ value: r, label: r })),
+                ],
+              },
+            ]}
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          {viewMode === "table" ? (
+            <ColumnsTogglePopover
+              columns={columns.map((c) => ({ key: c.key, label: c.header }))}
+              hiddenKeys={hiddenColumnKeys}
+              onToggleKey={toggleColumnKey}
+            />
+          ) : null}
+
+          <div
+            role="group"
+            aria-label="Pilih tampilan daftar peminjaman"
+            className="inline-flex rounded-md border border-slate-400 dark:border-slate-600 p-0.5 bg-slate-100 dark:bg-slate-800"
+          >
+            <button
+              type="button"
+              onClick={() => setViewMode("board")}
+              aria-pressed={viewMode === "board"}
+              className={`min-h-[40px] px-3 inline-flex items-center gap-1.5 rounded text-xs font-bold transition-colors ${
+                viewMode === "board"
+                  ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
+                  : "text-slate-700 dark:text-slate-300"
+              }`}
+            >
+              <KanbanSquare className="w-4 h-4" aria-hidden="true" />
+              <span>Board</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              aria-pressed={viewMode === "table"}
+              className={`min-h-[40px] px-3 inline-flex items-center gap-1.5 rounded text-xs font-bold transition-colors ${
+                viewMode === "table"
+                  ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
+                  : "text-slate-700 dark:text-slate-300"
+              }`}
+            >
+              <Table2 className="w-4 h-4" aria-hidden="true" />
+              <span>Tabel</span>
+            </button>
+          </div>
+        </div>
       </section>
 
-      {/* Tabel Data Peminjaman */}
-      <DataTable
-        columns={columns}
-        data={filteredBookings}
-        rowKey={(b) => b.id}
-        emptyTitle="Tidak Ada Jadwal Peminjaman"
-        emptyDescription="Belum ada reservasi ruangan atau alat pada kriteria tanggal dan status yang dipilih."
-        emptyActionLabel="Ajukan Peminjaman Baru"
-        onEmptyAction={openBookingModal}
-      />
+      {/* Konten Utama: Kanban Board atau DataTable */}
+      {viewMode === "board" ? (
+        <KanbanBoard
+          columns={kanbanColumns}
+          rowKey={(b) => b.id}
+          activeItemId={selectedBookingId}
+          onCardClick={(item) => setSelectedBookingId(item.id)}
+          renderCard={(row) => {
+            const room = rooms.find((r) => r.id === row.room_id);
+            const asset = assets.find((a) => a.id === row.asset_id);
+            const prog = getBookingProgress(row.status);
+            const noteCount = notes.filter(
+              (n) => n.entity_type === "booking" && n.entity_id === row.id
+            ).length;
+            const attCount = attachments.filter(
+              (a) => a.entity_type === "booking" && a.entity_id === row.id
+            ).length;
+
+            const facilityLine = [
+              room ? `Ruang ${room.code}` : "",
+              asset ? asset.inventory_code : "",
+            ]
+              .filter(Boolean)
+              .join(" + ");
+
+            return {
+              code: row.booking_code,
+              title: row.activity_name,
+              subtitle: facilityLine || row.target_type,
+              description: `${row.borrower_unit} • ${row.booking_date} (${row.start_time}-${row.end_time})`,
+              valueBadge: `${row.attendees_count} org`,
+              assigneeName: row.borrower_name,
+              progressPercent: prog.percent,
+              progressColorClass: prog.barClass,
+              notesCount: noteCount,
+              attachmentsCount: attCount,
+              ageLabel: `${row.start_time}-${row.end_time}`,
+              footerAction:
+                row.status === "Menunggu Persetujuan" ? (
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() =>
+                        updateBookingStatus(
+                          row.id,
+                          "Disetujui",
+                          undefined,
+                          "Kepala Biro Sarpras"
+                        )
+                      }
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Setujui</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      onClick={() => updateBookingStatus(row.id, "Ditolak")}
+                    >
+                      <XCircle className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Tolak</span>
+                    </Button>
+                  </div>
+                ) : row.status === "Disetujui" ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full"
+                    onClick={() =>
+                      updateBookingStatus(row.id, "Sedang Dipinjam")
+                    }
+                  >
+                    <CalendarClock className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Serah Terima Kunci/Alat</span>
+                  </Button>
+                ) : row.status === "Sedang Dipinjam" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => {
+                      setReturningBooking(row);
+                      setReturnNotes("");
+                    }}
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Catat Pengembalian</span>
+                  </Button>
+                ) : null,
+            };
+          }}
+        />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={filteredBookings}
+          rowKey={(b) => b.id}
+          hiddenColumnKeys={hiddenColumnKeys}
+          activeRowKey={selectedBookingId}
+          onRowClick={(row) => setSelectedBookingId(row.id)}
+          emptyTitle="Tidak Ada Jadwal Peminjaman"
+          emptyDescription="Belum ada reservasi ruangan atau alat pada kriteria filter yang dipilih."
+          emptyActionLabel="Ajukan Peminjaman Baru"
+          onEmptyAction={openBookingModal}
+        />
+      )}
+
+      {/* Slide-Over Detail Drawer */}
+      <Drawer
+        isOpen={Boolean(selectedBooking)}
+        onClose={() => setSelectedBookingId(null)}
+        title={selectedBooking?.activity_name || ""}
+        subtitle={
+          selectedBooking
+            ? `${selectedBooking.booking_code} • ${selectedBooking.borrower_name} (${selectedBooking.borrower_unit})`
+            : undefined
+        }
+        headerBadge={
+          selectedBooking ? (
+            <>
+              <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+                {selectedBooking.booking_code}
+              </span>
+              <BookingStatusBadge status={selectedBooking.status} />
+            </>
+          ) : null
+        }
+        footer={
+          selectedBooking ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSelectedBookingId(null)}
+              >
+                Tutup Panel
+              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedBooking.status === "Menunggu Persetujuan" ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      onClick={() =>
+                        updateBookingStatus(selectedBooking.id, "Ditolak")
+                      }
+                    >
+                      Tolak Pengajuan
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      onClick={() =>
+                        updateBookingStatus(
+                          selectedBooking.id,
+                          "Disetujui",
+                          undefined,
+                          "Kepala Biro Sarpras"
+                        )
+                      }
+                    >
+                      Setujui Peminjaman
+                    </Button>
+                  </>
+                ) : null}
+                {selectedBooking.status === "Disetujui" ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      updateBookingStatus(selectedBooking.id, "Sedang Dipinjam")
+                    }
+                  >
+                    Serah Terima Kunci / Alat
+                  </Button>
+                ) : null}
+                {selectedBooking.status === "Sedang Dipinjam" ? (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => {
+                      setReturningBooking(selectedBooking);
+                      setReturnNotes("");
+                    }}
+                  >
+                    Catat Pengembalian Selesai
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null
+        }
+      >
+        {selectedBooking && selectedProgress ? (
+          <div className="space-y-5">
+            {/* Peringatan Tindakan Berikutnya */}
+            {selectedBooking.status === "Menunggu Persetujuan" ? (
+              <div className="p-3.5 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-700 text-xs text-amber-950 dark:text-amber-200">
+                <strong>Menunggu Persetujuan Sarpras:</strong> Tinjau jadwal{" "}
+                <span className="font-mono font-bold">
+                  {selectedBooking.booking_date} ({selectedBooking.start_time}-
+                  {selectedBooking.end_time} WIB)
+                </span>{" "}
+                sebelum melakukan persetujuan agar ruang/alat siap dipakai.
+              </div>
+            ) : null}
+
+            {/* Ring Progres & Ringkasan Sirkulasi */}
+            <div className="p-4 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 flex items-center gap-4">
+              <ProgressRing
+                percent={selectedProgress.percent}
+                tone={selectedProgress.tone}
+              />
+              <div className="space-y-1 text-xs min-w-0">
+                <p className="font-bold text-slate-900 dark:text-slate-100">
+                  Tahap Sirkulasi: {selectedBooking.status}
+                </p>
+                <p className="font-mono text-slate-700 dark:text-slate-300">
+                  Jadwal: {selectedBooking.booking_date} •{" "}
+                  {selectedBooking.start_time} - {selectedBooking.end_time} WIB
+                </p>
+                <p className="text-slate-600 dark:text-slate-400">
+                  Peserta: {selectedBooking.attendees_count} orang • Kontak:{" "}
+                  {selectedBooking.borrower_phone}
+                </p>
+              </div>
+            </div>
+
+            {/* Rincian Fasilitas */}
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs p-4 rounded-lg border border-slate-200 dark:border-slate-800">
+              <div>
+                <dt className="text-slate-600 dark:text-slate-400">
+                  Peminjam & Peran
+                </dt>
+                <dd className="mt-0.5 font-bold text-slate-900 dark:text-slate-100">
+                  {selectedBooking.borrower_name} ({selectedBooking.borrower_role})
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-600 dark:text-slate-400">
+                  Unit / Ormawa
+                </dt>
+                <dd className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
+                  {selectedBooking.borrower_unit}
+                </dd>
+              </div>
+              {selectedRoom ? (
+                <div>
+                  <dt className="text-slate-600 dark:text-slate-400">
+                    Ruangan Kampus
+                  </dt>
+                  <dd className="mt-0.5 font-mono font-bold text-slate-900 dark:text-slate-100">
+                    {selectedRoom.code} ({selectedRoom.name})
+                  </dd>
+                </div>
+              ) : null}
+              {selectedAsset ? (
+                <div>
+                  <dt className="text-slate-600 dark:text-slate-400">
+                    Alat Portabel
+                  </dt>
+                  <dd className="mt-0.5 font-mono font-bold text-slate-900 dark:text-slate-100">
+                    {selectedAsset.inventory_code} ({selectedAsset.name})
+                  </dd>
+                </div>
+              ) : null}
+              {selectedBooking.approved_by ? (
+                <div>
+                  <dt className="text-slate-600 dark:text-slate-400">
+                    Disetujui Oleh
+                  </dt>
+                  <dd className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
+                    {selectedBooking.approved_by}
+                  </dd>
+                </div>
+              ) : null}
+              {selectedBooking.return_condition_notes ? (
+                <div className="sm:col-span-2">
+                  <dt className="text-slate-600 dark:text-slate-400">
+                    Catatan Kondisi Pengembalian
+                  </dt>
+                  <dd className="mt-0.5 font-medium text-emerald-800 dark:text-emerald-300">
+                    {selectedBooking.return_condition_notes}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+
+            <EntityDrawerSections
+              entityType="booking"
+              entityId={selectedBooking.id}
+              baseEventDates={[selectedBooking.created_at]}
+            />
+          </div>
+        ) : null}
+      </Drawer>
 
       {/* Modal Form Pengajuan Peminjaman (Dengan Conflict Detection) */}
       <Modal
