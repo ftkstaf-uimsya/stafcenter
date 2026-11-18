@@ -36,6 +36,10 @@ import {
   normalizeTimeHHMM,
 } from "@/lib/supabase/client";
 import {
+  NormalizedImportAssetPayload,
+  normalizeSerialKey,
+} from "@/lib/sarpras/asset-import-shared";
+import {
   INITIAL_ASSETS,
   INITIAL_BOOKINGS,
   INITIAL_BUILDINGS,
@@ -118,6 +122,7 @@ interface SarprasContextValue {
       "id" | "inventory_code" | "category_label" | "created_at"
     >
   ) => Asset;
+  importAssets: (items: NormalizedImportAssetPayload[]) => Promise<ActionResult>;
   updateAsset: (
     id: string,
     payload: Partial<Omit<Asset, "id" | "created_at">>
@@ -299,6 +304,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
             ...item,
             acquisition_cost: Number(item.acquisition_cost) || 0,
             procurement_year: Number(item.procurement_year) || 2026,
+            is_portable: Boolean(item.is_portable),
+            serial_number: item.serial_number || "-",
+            notes: item.notes || "",
           }))
         );
       }
@@ -990,6 +998,122 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       notify,
       requireStaffForLiveWrite,
       sendMutation,
+    ]
+  );
+
+  const importAssets = useCallback(
+    async (items: NormalizedImportAssetPayload[]): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      if (items.length === 0) {
+        return { ok: false, error: "Tidak ada data aset untuk diimport." };
+      }
+
+      if (isLiveSupabase && authUser) {
+        try {
+          const res = await fetch("/api/sarpras/mutate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "bulk_insert_assets",
+              items,
+            }),
+          });
+          const result = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            const errMsg =
+              result.error || "Terjadi kesalahan saat mengimport aset ke Supabase.";
+            notify("error", "Gagal Mengimport Aset", errMsg);
+            return { ok: false, error: errMsg };
+          }
+          await refreshFromSupabase();
+          notify(
+            "success",
+            "Import Inventaris Berhasil",
+            `${items.length} unit aset berhasil didaftarkan ke database.`
+          );
+          return { ok: true };
+        } catch {
+          const errMsg =
+            "Koneksi ke server terputus saat mengimport data inventaris.";
+          notify("error", "Gagal Mengimport Aset", errMsg);
+          return { ok: false, error: errMsg };
+        }
+      }
+
+      // Mode offline / seed: cek duplikat serial & generate nomor urut berantai
+      const existingSerials = new Map<string, string>();
+      for (const a of assets) {
+        const key = normalizeSerialKey(a.serial_number);
+        if (key && !existingSerials.has(key)) {
+          existingSerials.set(key, a.inventory_code);
+        }
+      }
+
+      const batchSerials = new Set<string>();
+      let seq = extractMaxSequence(assets.map((a) => a.inventory_code));
+      const nowIso = new Date().toISOString();
+      const createdAssets: Asset[] = [];
+
+      for (const item of items) {
+        const serialKey = normalizeSerialKey(item.serial_number);
+        if (serialKey) {
+          const existingCode = existingSerials.get(serialKey);
+          if (existingCode) {
+            return {
+              ok: false,
+              error: `Nomor seri "${item.serial_number}" sudah terdaftar pada aset ${existingCode}.`,
+            };
+          }
+          if (batchSerials.has(serialKey)) {
+            return {
+              ok: false,
+              error: `Nomor seri "${item.serial_number}" duplikat di dalam batch import.`,
+            };
+          }
+          batchSerials.add(serialKey);
+        }
+
+        seq += 1;
+        createdAssets.push({
+          id: generateUuid(),
+          inventory_code: generateInventoryCode(
+            item.category,
+            item.procurement_year,
+            seq
+          ),
+          name: item.name,
+          brand_model: item.brand_model,
+          category: item.category,
+          category_label: ASSET_CATEGORY_LABELS[item.category],
+          room_id: item.room_id,
+          procurement_year: item.procurement_year,
+          funding_source: item.funding_source,
+          acquisition_cost: item.acquisition_cost,
+          condition: item.condition,
+          is_portable: item.is_portable,
+          serial_number: item.serial_number || "-",
+          notes: item.notes,
+          created_at: nowIso,
+        });
+      }
+
+      setAssets((prev) => [...createdAssets.reverse(), ...prev]);
+      notify(
+        "success",
+        "Import Inventaris Berhasil",
+        `${createdAssets.length} unit aset berhasil ditambahkan ke inventaris.`
+      );
+      return { ok: true };
+    },
+    [
+      assets,
+      authUser,
+      isLiveSupabase,
+      notify,
+      refreshFromSupabase,
+      requireStaffForLiveWrite,
     ]
   );
 
@@ -2029,6 +2153,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       updateRoom,
       deleteRoom,
       addAsset,
+      importAssets,
       updateAsset,
       deleteAsset,
       previewNextInventoryCode,
@@ -2079,6 +2204,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       updateRoom,
       deleteRoom,
       addAsset,
+      importAssets,
       updateAsset,
       deleteAsset,
       previewNextInventoryCode,

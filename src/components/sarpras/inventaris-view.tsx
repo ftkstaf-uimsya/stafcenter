@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Edit3,
+  FileSpreadsheet,
   Plus,
   Printer,
   QrCode,
@@ -39,6 +40,7 @@ import {
   AssetConditionBadge,
   MaintenanceStatusBadge,
 } from "@/components/sarpras/status-badges";
+import { AssetImportModal } from "@/components/sarpras/asset-import-modal";
 
 const CATEGORY_CODES: AssetCategoryCode[] = [
   "ELK",
@@ -113,6 +115,7 @@ export function InventarisView() {
 
   // Modal Tambah/Edit Aset
   const [assetModalOpen, setAssetModalOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [formError, setFormError] = useState("");
 
@@ -162,7 +165,7 @@ export function InventarisView() {
         a.inventory_code.toLowerCase().includes(q) ||
         a.name.toLowerCase().includes(q) ||
         a.brand_model.toLowerCase().includes(q) ||
-        a.serial_number.toLowerCase().includes(q);
+        (a.serial_number || "").toLowerCase().includes(q);
       const matchRoom =
         filterRoom === "ALL" ||
         (filterRoom === "UNASSIGNED" ? !a.room_id : a.room_id === filterRoom);
@@ -223,7 +226,7 @@ export function InventarisView() {
     setAcquisitionCost(String(asset.acquisition_cost));
     setCondition(asset.condition);
     setIsPortable(asset.is_portable);
-    setSerialNumber(asset.serial_number);
+    setSerialNumber(asset.serial_number || "");
     setNotes(asset.notes || "");
     setFormError("");
     setAssetModalOpen(true);
@@ -303,7 +306,7 @@ export function InventarisView() {
           </p>
           <p className="text-xs text-slate-600 dark:text-slate-400">
             {row.brand_model} • SN:{" "}
-            <span className="font-mono">{row.serial_number}</span>
+            <span className="font-mono">{row.serial_number || "-"}</span>
           </p>
         </div>
       ),
@@ -416,10 +419,20 @@ export function InventarisView() {
           </p>
         </div>
 
-        <Button type="button" variant="primary" onClick={openAddModal}>
-          <Plus className="w-4 h-4" aria-hidden="true" />
-          <span>Registrasi Aset Baru</span>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setImportModalOpen(true)}
+          >
+            <FileSpreadsheet className="w-4 h-4" aria-hidden="true" />
+            <span>Import Excel</span>
+          </Button>
+          <Button type="button" variant="primary" onClick={openAddModal}>
+            <Plus className="w-4 h-4" aria-hidden="true" />
+            <span>Registrasi Aset Baru</span>
+          </Button>
+        </div>
       </section>
 
       {/* Toolbar Ringkas */}
@@ -999,6 +1012,11 @@ export function InventarisView() {
           }
           setDeletingAsset(null);
         }}
+      />
+
+      <AssetImportModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
       />
     </div>
   );

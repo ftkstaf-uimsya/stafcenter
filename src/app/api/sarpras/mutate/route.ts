@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getVerifiedServerSession } from "@/lib/auth/session";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  ASSET_CATEGORY_LABELS,
+  generateInventoryCode,
+} from "@/lib/supabase/client";
+import {
+  ASSET_CATEGORY_CODES,
+  ASSET_CONDITION_LIST,
+  extractMaxInventorySequence,
+  MAX_IMPORT_ROWS,
+  NormalizedImportAssetPayload,
+  normalizeSerialKey,
+} from "@/lib/sarpras/asset-import-shared";
 import { DeleteStrategyMode, SarprasEntityType } from "@/types/sarpras";
 
 type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseServerClient>>;
@@ -18,6 +30,7 @@ type MutationPayload =
       forceActive?: boolean;
     }
   | { action: "insert_asset"; data: Record<string, unknown> }
+  | { action: "bulk_insert_assets"; items: NormalizedImportAssetPayload[] }
   | { action: "update_asset"; id: string; data: Record<string, unknown> }
   | {
       action: "delete_asset";
@@ -388,6 +401,172 @@ export async function POST(request: NextRequest) {
         const { error } = await supabase.from("assets").insert(body.data);
         if (error) return NextResponse.json({ error: error.message }, { status: 400 });
         return NextResponse.json({ ok: true });
+      }
+      case "bulk_insert_assets": {
+        const items = Array.isArray(body.items) ? body.items : [];
+        if (items.length === 0) {
+          return NextResponse.json(
+            { error: "Tidak ada data aset yang dikirim untuk diimport." },
+            { status: 400 }
+          );
+        }
+        if (items.length > MAX_IMPORT_ROWS) {
+          return NextResponse.json(
+            { error: `Maksimal ${MAX_IMPORT_ROWS} aset per sekali import.` },
+            { status: 400 }
+          );
+        }
+
+        const [roomsRes, assetsRes] = await Promise.all([
+          supabase.from("rooms").select("id"),
+          supabase.from("assets").select("inventory_code, serial_number"),
+        ]);
+
+        if (roomsRes.error || assetsRes.error) {
+          return NextResponse.json(
+            {
+              error:
+                roomsRes.error?.message ||
+                assetsRes.error?.message ||
+                "Gagal memverifikasi data referensi aset.",
+            },
+            { status: 500 }
+          );
+        }
+
+        const validRoomIds = new Set(
+          (roomsRes.data || []).map((r) => String(r.id))
+        );
+        const existingSerialMap = new Map<string, string>();
+        const existingCodes: string[] = [];
+
+        for (const row of assetsRes.data || []) {
+          const code = String(row.inventory_code || "");
+          if (code) existingCodes.push(code);
+          const serialKey = normalizeSerialKey(row.serial_number as string | null);
+          if (serialKey && !existingSerialMap.has(serialKey)) {
+            existingSerialMap.set(serialKey, code);
+          }
+        }
+
+        let seq = extractMaxInventorySequence(existingCodes);
+        const batchSerials = new Set<string>();
+        const dbRows: Array<Record<string, unknown>> = [];
+
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const rowLabel = `Baris data ke-${i + 1}`;
+
+          if (!ASSET_CATEGORY_CODES.includes(item.category)) {
+            return NextResponse.json(
+              { error: `${rowLabel}: Kategori inventaris tidak valid.` },
+              { status: 400 }
+            );
+          }
+          if (!ASSET_CONDITION_LIST.includes(item.condition)) {
+            return NextResponse.json(
+              { error: `${rowLabel}: Kondisi barang tidak valid.` },
+              { status: 400 }
+            );
+          }
+          if (item.room_id !== null && !validRoomIds.has(String(item.room_id))) {
+            return NextResponse.json(
+              {
+                error: `${rowLabel}: Ruangan penempatan tidak ditemukan di database.`,
+              },
+              { status: 400 }
+            );
+          }
+
+          const name = String(item.name ?? "").trim();
+          const brandModel = String(item.brand_model ?? "").trim();
+          const fundingSource = String(item.funding_source ?? "").trim();
+          const year = Number(item.procurement_year);
+          const cost = Number(item.acquisition_cost);
+          const serial = String(item.serial_number ?? "").trim() || "-";
+          const notes = String(item.notes ?? "").trim();
+
+          if (!name || name.length > 180 || !brandModel || brandModel.length > 150 || !fundingSource || fundingSource.length > 100) {
+            return NextResponse.json(
+              {
+                error: `${rowLabel}: Nama barang, merk/tipe, dan sumber dana wajib diisi sesuai batas karakter.`,
+              },
+              { status: 400 }
+            );
+          }
+          if (!Number.isInteger(year) || year < 1990 || year > 2100) {
+            return NextResponse.json(
+              { error: `${rowLabel}: Tahun pengadaan tidak valid.` },
+              { status: 400 }
+            );
+          }
+          if (!Number.isFinite(cost) || cost < 0) {
+            return NextResponse.json(
+              { error: `${rowLabel}: Harga perolehan tidak valid.` },
+              { status: 400 }
+            );
+          }
+          if (serial.length > 100) {
+            return NextResponse.json(
+              { error: `${rowLabel}: Nomor seri melebihi 100 karakter.` },
+              { status: 400 }
+            );
+          }
+
+          const serialKey = normalizeSerialKey(serial);
+          if (serialKey) {
+            const existingCode = existingSerialMap.get(serialKey);
+            if (existingCode) {
+              return NextResponse.json(
+                {
+                  error: `${rowLabel}: Nomor seri "${serial}" sudah terdaftar pada aset ${existingCode}.`,
+                },
+                { status: 409 }
+              );
+            }
+            if (batchSerials.has(serialKey)) {
+              return NextResponse.json(
+                {
+                  error: `${rowLabel}: Nomor seri "${serial}" duplikat di dalam batch import.`,
+                },
+                { status: 409 }
+              );
+            }
+            batchSerials.add(serialKey);
+          }
+
+          seq += 1;
+          const inventoryCode = generateInventoryCode(item.category, year, seq);
+
+          dbRows.push({
+            id: crypto.randomUUID(),
+            inventory_code: inventoryCode,
+            name,
+            brand_model: brandModel,
+            category: item.category,
+            category_label: ASSET_CATEGORY_LABELS[item.category],
+            room_id: item.room_id || null,
+            procurement_year: year,
+            funding_source: fundingSource,
+            acquisition_cost: Math.round(cost),
+            condition: item.condition,
+            is_portable: Boolean(item.is_portable),
+            serial_number: serial === "-" ? null : serial,
+            photo_url: null,
+            notes: notes || null,
+          });
+        }
+
+        const { error } = await supabase.from("assets").insert(dbRows);
+        if (error) {
+          return NextResponse.json({ error: error.message }, { status: 400 });
+        }
+
+        return NextResponse.json({
+          ok: true,
+          count: dbRows.length,
+          codes: dbRows.map((r) => r.inventory_code),
+        });
       }
       case "update_asset": {
         const { error } = await supabase

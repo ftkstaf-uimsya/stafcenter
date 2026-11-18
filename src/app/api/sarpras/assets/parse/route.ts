@@ -1,0 +1,134 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getVerifiedServerSession } from "@/lib/auth/session";
+import {
+  getSupabaseServerClient,
+  isServerSupabaseConfigured,
+} from "@/lib/supabase/server";
+import { INITIAL_ASSETS, INITIAL_ROOMS } from "@/lib/supabase/seed-data";
+import { parseAssetImportWorkbook } from "@/lib/sarpras/asset-excel";
+import {
+  ExistingAssetRef,
+  MAX_IMPORT_FILE_BYTES,
+  RoomLookupRef,
+} from "@/lib/sarpras/asset-import-shared";
+
+export const dynamic = "force-dynamic";
+
+export async function POST(request: NextRequest) {
+  try {
+    const formData = await request.formData();
+    const file = formData.get("file");
+
+    if (!(file instanceof File)) {
+      return NextResponse.json(
+        { error: "Berkas Excel tidak ditemukan pada permintaan." },
+        { status: 400 }
+      );
+    }
+
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      return NextResponse.json(
+        { error: "Format berkas harus Excel (.xlsx) sesuai template." },
+        { status: 400 }
+      );
+    }
+
+    if (file.size === 0) {
+      return NextResponse.json(
+        { error: "Berkas Excel kosong." },
+        { status: 400 }
+      );
+    }
+
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      return NextResponse.json(
+        { error: "Ukuran berkas maksimal 5 MB." },
+        { status: 400 }
+      );
+    }
+
+    let rooms: RoomLookupRef[] = [];
+    let existingAssets: ExistingAssetRef[] = [];
+
+    if (isServerSupabaseConfigured()) {
+      const session = await getVerifiedServerSession();
+      if (!session) {
+        return NextResponse.json(
+          { error: "Sesi staf tidak valid. Silakan masuk kembali." },
+          { status: 401 }
+        );
+      }
+
+      const supabase = getSupabaseServerClient();
+      if (!supabase) {
+        return NextResponse.json(
+          { error: "Konfigurasi server Supabase belum lengkap." },
+          { status: 503 }
+        );
+      }
+
+      const [roomsRes, assetsRes] = await Promise.all([
+        supabase.from("rooms").select("id, code, name").order("code"),
+        supabase.from("assets").select("id, inventory_code, serial_number"),
+      ]);
+
+      if (roomsRes.error || assetsRes.error) {
+        return NextResponse.json(
+          {
+            error:
+              roomsRes.error?.message ||
+              assetsRes.error?.message ||
+              "Gagal membaca referensi ruangan dan aset.",
+          },
+          { status: 500 }
+        );
+      }
+
+      rooms = (roomsRes.data || []) as RoomLookupRef[];
+      existingAssets = (assetsRes.data || []) as ExistingAssetRef[];
+    } else {
+      const roomsJson = formData.get("roomsJson");
+      const assetsJson = formData.get("assetsJson");
+
+      try {
+        rooms =
+          typeof roomsJson === "string"
+            ? (JSON.parse(roomsJson) as RoomLookupRef[])
+            : INITIAL_ROOMS.map((r) => ({ id: r.id, code: r.code, name: r.name }));
+      } catch {
+        rooms = INITIAL_ROOMS.map((r) => ({ id: r.id, code: r.code, name: r.name }));
+      }
+
+      try {
+        existingAssets =
+          typeof assetsJson === "string"
+            ? (JSON.parse(assetsJson) as ExistingAssetRef[])
+            : INITIAL_ASSETS.map((a) => ({
+                id: a.id,
+                inventory_code: a.inventory_code,
+                serial_number: a.serial_number,
+              }));
+      } catch {
+        existingAssets = INITIAL_ASSETS.map((a) => ({
+          id: a.id,
+          inventory_code: a.inventory_code,
+          serial_number: a.serial_number,
+        }));
+      }
+    }
+
+    const buffer = await file.arrayBuffer();
+    const result = await parseAssetImportWorkbook(buffer, rooms, existingAssets);
+
+    if (!result.ok) {
+      return NextResponse.json(result, { status: 400 });
+    }
+
+    return NextResponse.json(result, { status: 200 });
+  } catch {
+    return NextResponse.json(
+      { error: "Terjadi gangguan saat membaca berkas Excel." },
+      { status: 500 }
+    );
+  }
+}
