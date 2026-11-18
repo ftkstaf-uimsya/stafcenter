@@ -6,7 +6,9 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   CheckCircle2,
+  Edit3,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 import {
@@ -21,6 +23,7 @@ import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Drawer } from "@/components/ui/drawer";
+import { ConfirmDeleteModal } from "@/components/ui/confirm-delete-modal";
 import { DataTable, DataTableColumn } from "@/components/ui/data-table";
 import {
   ColumnsTogglePopover,
@@ -53,9 +56,13 @@ export function BhpView() {
   const {
     consumables,
     consumableTransactions,
+    notes,
+    attachments,
     uiSimState,
     setUiSimState,
     addConsumable,
+    updateConsumable,
+    deleteConsumable,
     recordConsumableMutation,
   } = useSarpras();
 
@@ -69,8 +76,11 @@ export function BhpView() {
     string | null
   >(null);
 
-  // Modal Tambah Item BHP Baru
+  // Modal Tambah / Edit Item BHP
   const [addModalOpen, setAddModalOpen] = useState(false);
+  const [editingConsumable, setEditingConsumable] = useState<Consumable | null>(
+    null
+  );
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [category, setCategory] = useState<ConsumableCategory>("ATK & Kelas");
@@ -81,6 +91,12 @@ export function BhpView() {
     "Lemari ATK A1 - Biro Sarpras"
   );
   const [addError, setAddError] = useState("");
+
+  // Modal Konfirmasi Hapus Item BHP
+  const [deletingConsumable, setDeletingConsumable] =
+    useState<Consumable | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   // Modal Catat Mutasi Masuk (Restock) / Keluar (Pengambilan)
   const [mutationTarget, setMutationTarget] = useState<Consumable | null>(null);
@@ -152,13 +168,39 @@ export function BhpView() {
     setMutationError("");
   };
 
+  const openAddConsumableModal = () => {
+    setEditingConsumable(null);
+    setCode("");
+    setName("");
+    setCategory("ATK & Kelas");
+    setUnit("Box");
+    setCurrentStock("20");
+    setMinStock("10");
+    setStorageLocation("Lemari ATK A1 - Biro Sarpras");
+    setAddError("");
+    setAddModalOpen(true);
+  };
+
+  const openEditConsumableModal = (item: Consumable) => {
+    setEditingConsumable(item);
+    setCode(item.code);
+    setName(item.name);
+    setCategory(item.category);
+    setUnit(item.unit);
+    setCurrentStock(String(item.current_stock));
+    setMinStock(String(item.min_stock));
+    setStorageLocation(item.storage_location);
+    setAddError("");
+    setAddModalOpen(true);
+  };
+
   const handleAddConsumable = (e: React.FormEvent) => {
     e.preventDefault();
     if (!code.trim() || !name.trim()) {
       setAddError("Kode Barang dan Nama Barang wajib diisi.");
       return;
     }
-    addConsumable({
+    const basePayload = {
       code: code.trim().toUpperCase(),
       name: name.trim(),
       category,
@@ -166,10 +208,16 @@ export function BhpView() {
       current_stock: Math.max(0, Number(currentStock) || 0),
       min_stock: Math.max(0, Number(minStock) || 0),
       storage_location: storageLocation.trim() || "Gudang Utama Sarpras",
-    });
+    };
+    if (editingConsumable) {
+      updateConsumable(editingConsumable.id, basePayload);
+    } else {
+      addConsumable(basePayload);
+    }
     setCode("");
     setName("");
     setAddError("");
+    setEditingConsumable(null);
     setAddModalOpen(false);
   };
 
@@ -298,6 +346,18 @@ export function BhpView() {
             <ArrowUpRight className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Barang Keluar</span>
           </Button>
+          <Button
+            type="button"
+            variant="danger"
+            size="sm"
+            onClick={() => {
+              setDeleteError("");
+              setDeletingConsumable(row);
+            }}
+            aria-label={`Hapus item BHP ${row.code}`}
+          >
+            <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+          </Button>
         </div>
       ),
     },
@@ -329,10 +389,7 @@ export function BhpView() {
         <Button
           type="button"
           variant="primary"
-          onClick={() => {
-            setAddError("");
-            setAddModalOpen(true);
-          }}
+          onClick={openAddConsumableModal}
         >
           <Plus className="w-4 h-4" aria-hidden="true" />
           <span>Tambah Item BHP Baru</span>
@@ -495,22 +552,47 @@ export function BhpView() {
         footer={
           selectedConsumable ? (
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => openMutationModal(selectedConsumable, "Keluar")}
-              >
-                <ArrowUpRight className="w-4 h-4" aria-hidden="true" />
-                <span>Barang Keluar</span>
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                onClick={() => openMutationModal(selectedConsumable, "Masuk")}
-              >
-                <ArrowDownLeft className="w-4 h-4" aria-hidden="true" />
-                <span>Barang Masuk (Restock)</span>
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openEditConsumableModal(selectedConsumable)}
+                >
+                  <Edit3 className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Edit</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={() => {
+                    setDeleteError("");
+                    setDeletingConsumable(selectedConsumable);
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Hapus</span>
+                </Button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => openMutationModal(selectedConsumable, "Keluar")}
+                >
+                  <ArrowUpRight className="w-4 h-4" aria-hidden="true" />
+                  <span>Keluar</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => openMutationModal(selectedConsumable, "Masuk")}
+                >
+                  <ArrowDownLeft className="w-4 h-4" aria-hidden="true" />
+                  <span>Restock</span>
+                </Button>
+              </div>
             </div>
           ) : null
         }
@@ -585,11 +667,15 @@ export function BhpView() {
         ) : null}
       </Drawer>
 
-      {/* Modal Tambah Item BHP Baru */}
+      {/* Modal Tambah / Edit Item BHP */}
       <Modal
         isOpen={addModalOpen}
         onClose={() => setAddModalOpen(false)}
-        title="Tambah Katalog Barang Habis Pakai (BHP)"
+        title={
+          editingConsumable
+            ? `Edit Item BHP ${editingConsumable.code}`
+            : "Tambah Katalog Barang Habis Pakai (BHP)"
+        }
         description="Tetapkan batas minimum stok agar sistem memberi peringatan saat stok menipis."
       >
         <form onSubmit={handleAddConsumable} className="space-y-4">
@@ -761,6 +847,61 @@ export function BhpView() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(deletingConsumable)}
+        onClose={() => {
+          if (!deleting) {
+            setDeletingConsumable(null);
+            setDeleteError("");
+          }
+        }}
+        title="Konfirmasi Hapus Item BHP / ATK"
+        targetBadge={deletingConsumable?.code}
+        targetName={deletingConsumable?.name || ""}
+        errorMessage={deleteError}
+        isSubmitting={deleting}
+        impactNotes={
+          deletingConsumable
+            ? [
+                `Saldo saat ini: ${deletingConsumable.current_stock} ${deletingConsumable.unit} di ${deletingConsumable.storage_location}.`,
+                `PERINGATAN AUDIT: Seluruh riwayat mutasi masuk/keluar (${
+                  consumableTransactions.filter(
+                    (t) => t.consumable_id === deletingConsumable.id
+                  ).length
+                } transaksi) untuk item ini akan ikut terhapus permanen.`,
+                `Catatan & lampiran terkait (${
+                  notes.filter(
+                    (n) =>
+                      n.entity_type === "consumable" &&
+                      n.entity_id === deletingConsumable.id
+                  ).length
+                } catatan, ${
+                  attachments.filter(
+                    (a) =>
+                      a.entity_type === "consumable" &&
+                      a.entity_id === deletingConsumable.id
+                  ).length
+                } file) ikut dibersihkan.`,
+              ]
+            : []
+        }
+        onConfirm={async () => {
+          if (!deletingConsumable) return;
+          setDeleting(true);
+          setDeleteError("");
+          const res = await deleteConsumable(deletingConsumable.id);
+          setDeleting(false);
+          if (!res.ok) {
+            setDeleteError(res.error || "Gagal menghapus item BHP.");
+            return;
+          }
+          if (selectedConsumableId === deletingConsumable.id) {
+            setSelectedConsumableId(null);
+          }
+          setDeletingConsumable(null);
+        }}
+      />
     </div>
   );
 }

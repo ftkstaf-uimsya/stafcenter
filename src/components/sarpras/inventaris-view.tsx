@@ -13,6 +13,7 @@ import {
   Asset,
   AssetCategoryCode,
   AssetCondition,
+  DeleteStrategyMode,
 } from "@/types/sarpras";
 import {
   ASSET_CATEGORY_LABELS,
@@ -23,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
 import { Drawer } from "@/components/ui/drawer";
+import { ConfirmDeleteModal } from "@/components/ui/confirm-delete-modal";
 import { DataTable, DataTableColumn } from "@/components/ui/data-table";
 import {
   ColumnsTogglePopover,
@@ -87,7 +89,10 @@ export function InventarisView() {
   const {
     rooms,
     assets,
+    bookings,
     maintenanceLogs,
+    notes: entityNotes,
+    attachments,
     uiSimState,
     setUiSimState,
     addAsset,
@@ -125,6 +130,16 @@ export function InventarisView() {
 
   // Modal Cetak Label / QR Code Inventaris
   const [qrLabelAsset, setQrLabelAsset] = useState<Asset | null>(null);
+
+  // Modal Konfirmasi Hapus Aset
+  const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  const openDeleteConfirm = (asset: Asset) => {
+    setDeleteError("");
+    setDeletingAsset(asset);
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -364,7 +379,7 @@ export function InventarisView() {
             type="button"
             variant="danger"
             size="sm"
-            onClick={() => deleteAsset(row.id)}
+            onClick={() => openDeleteConfirm(row)}
             aria-label={`Hapus aset ${row.inventory_code}`}
           >
             <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
@@ -516,14 +531,24 @@ export function InventarisView() {
         footer={
           selectedAsset ? (
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setQrLabelAsset(selectedAsset)}
-              >
-                <QrCode className="w-4 h-4" aria-hidden="true" />
-                <span>Label QR</span>
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setQrLabelAsset(selectedAsset)}
+                >
+                  <QrCode className="w-4 h-4" aria-hidden="true" />
+                  <span>Label QR</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => openDeleteConfirm(selectedAsset)}
+                >
+                  <Trash2 className="w-4 h-4" aria-hidden="true" />
+                  <span>Hapus</span>
+                </Button>
+              </div>
               <Button
                 type="button"
                 variant="primary"
@@ -872,6 +897,109 @@ export function InventarisView() {
           </div>
         ) : null}
       </Modal>
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(deletingAsset)}
+        onClose={() => {
+          if (!deleting) {
+            setDeletingAsset(null);
+            setDeleteError("");
+          }
+        }}
+        title="Konfirmasi Hapus Aset Inventaris"
+        targetBadge={deletingAsset?.inventory_code}
+        targetName={deletingAsset?.name || ""}
+        errorMessage={deleteError}
+        isSubmitting={deleting}
+        showStrategySelector={Boolean(
+          deletingAsset &&
+            (bookings.some((b) => b.asset_id === deletingAsset.id) ||
+              maintenanceLogs.some((m) => m.asset_id === deletingAsset.id))
+        )}
+        impactNotes={
+          deletingAsset
+            ? (() => {
+                const bkCount = bookings.filter(
+                  (b) => b.asset_id === deletingAsset.id
+                ).length;
+                const mtCount = maintenanceLogs.filter(
+                  (m) => m.asset_id === deletingAsset.id
+                ).length;
+                const noteCount = entityNotes.filter(
+                  (n) =>
+                    n.entity_type === "asset" && n.entity_id === deletingAsset.id
+                ).length;
+                const attCount = attachments.filter(
+                  (a) =>
+                    a.entity_type === "asset" && a.entity_id === deletingAsset.id
+                ).length;
+                const lines: string[] = [];
+                if (bkCount > 0) {
+                  lines.push(`Terhubung ke ${bkCount} tiket peminjaman / reservasi.`);
+                }
+                if (mtCount > 0) {
+                  lines.push(
+                    `Terhubung ke ${mtCount} tiket pemeliharaan / laporan kerusakan.`
+                  );
+                }
+                if (noteCount > 0 || attCount > 0) {
+                  lines.push(
+                    `${noteCount} catatan & ${attCount} berkas lampiran aset ini akan ikut dihapus permanen.`
+                  );
+                }
+                if (lines.length === 0) {
+                  lines.push(
+                    "Tidak ada tiket peminjaman maupun laporan kerusakan yang terikat pada unit ini."
+                  );
+                }
+                return lines;
+              })()
+            : []
+        }
+        activeBlockers={
+          deletingAsset
+            ? [
+                ...bookings
+                  .filter(
+                    (b) =>
+                      b.asset_id === deletingAsset.id &&
+                      (b.status === "Menunggu Persetujuan" ||
+                        b.status === "Disetujui" ||
+                        b.status === "Sedang Dipinjam")
+                  )
+                  .map((b) => `Peminjaman ${b.booking_code} (${b.status})`),
+                ...maintenanceLogs
+                  .filter(
+                    (m) =>
+                      m.asset_id === deletingAsset.id &&
+                      m.status !== "Selesai Diperbaiki"
+                  )
+                  .map((m) => `Perbaikan ${m.ticket_code} (${m.status})`),
+              ]
+            : []
+        }
+        onConfirm={async ({
+          mode,
+          forceActive,
+        }: {
+          mode: DeleteStrategyMode;
+          forceActive: boolean;
+        }) => {
+          if (!deletingAsset) return;
+          setDeleting(true);
+          setDeleteError("");
+          const res = await deleteAsset(deletingAsset.id, { mode, forceActive });
+          setDeleting(false);
+          if (!res.ok) {
+            setDeleteError(res.error || "Gagal menghapus aset.");
+            return;
+          }
+          if (selectedAssetId === deletingAsset.id) {
+            setSelectedAssetId(null);
+          }
+          setDeletingAsset(null);
+        }}
+      />
     </div>
   );
 }

@@ -9,12 +9,19 @@ import {
   Trash2,
 } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
-import { Room, RoomCategory, RoomStatus } from "@/types/sarpras";
+import {
+  Building,
+  DeleteStrategyMode,
+  Room,
+  RoomCategory,
+  RoomStatus,
+} from "@/types/sarpras";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
 import { Drawer } from "@/components/ui/drawer";
+import { ConfirmDeleteModal } from "@/components/ui/confirm-delete-modal";
 import { DataTable, DataTableColumn } from "@/components/ui/data-table";
 import {
   ColumnsTogglePopover,
@@ -47,9 +54,14 @@ export function RuanganView() {
     rooms,
     assets,
     bookings,
+    maintenanceLogs,
+    notes,
+    attachments,
     uiSimState,
     setUiSimState,
     addBuilding,
+    updateBuilding,
+    deleteBuilding,
     addRoom,
     updateRoom,
     deleteRoom,
@@ -77,14 +89,23 @@ export function RuanganView() {
   const [status, setStatus] = useState<RoomStatus>("Tersedia");
   const [facilitiesNotes, setFacilitiesNotes] = useState("");
 
-  // Modal Tambah Gedung
+  // Modal Tambah/Edit Gedung
   const [buildingModalOpen, setBuildingModalOpen] = useState(false);
+  const [editingBuilding, setEditingBuilding] = useState<Building | null>(null);
   const [bldCode, setBldCode] = useState("");
   const [bldName, setBldName] = useState("");
   const [bldFloors, setBldFloors] = useState("3");
   const [bldZone, setBldZone] = useState("Zona Utama");
   const [bldDesc, setBldDesc] = useState("");
   const [bldError, setBldError] = useState("");
+
+  // Modal Konfirmasi Hapus Ruangan & Gedung
+  const [deletingRoom, setDeletingRoom] = useState<Room | null>(null);
+  const [deletingBuilding, setDeletingBuilding] = useState<Building | null>(
+    null
+  );
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   // Slide-Over Detail Drawer Ruangan
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
@@ -205,23 +226,51 @@ export function RuanganView() {
     setRoomModalOpen(false);
   };
 
+  const openAddBuildingModal = () => {
+    setEditingBuilding(null);
+    setBldCode("");
+    setBldName("");
+    setBldFloors("3");
+    setBldZone("Zona Utama");
+    setBldDesc("");
+    setBldError("");
+    setBuildingModalOpen(true);
+  };
+
+  const openEditBuildingModal = (bld: Building) => {
+    setEditingBuilding(bld);
+    setBldCode(bld.code);
+    setBldName(bld.name);
+    setBldFloors(String(bld.floors_count));
+    setBldZone(bld.zone);
+    setBldDesc(bld.description || "");
+    setBldError("");
+    setBuildingModalOpen(true);
+  };
+
   const handleBuildingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!bldCode.trim() || !bldName.trim()) {
       setBldError("Kode Gedung dan Nama Gedung wajib diisi.");
       return;
     }
-    addBuilding({
+    const payload = {
       code: bldCode.trim().toUpperCase(),
       name: bldName.trim(),
       floors_count: Math.max(1, Number(bldFloors) || 1),
       zone: bldZone.trim() || "Kampus Utama",
       description: bldDesc.trim(),
-    });
+    };
+    if (editingBuilding) {
+      updateBuilding(editingBuilding.id, payload);
+    } else {
+      addBuilding(payload);
+    }
     setBldCode("");
     setBldName("");
     setBldDesc("");
     setBldError("");
+    setEditingBuilding(null);
     setBuildingModalOpen(false);
   };
 
@@ -346,7 +395,10 @@ export function RuanganView() {
             type="button"
             variant="danger"
             size="sm"
-            onClick={() => deleteRoom(row.id)}
+            onClick={() => {
+              setDeleteError("");
+              setDeletingRoom(row);
+            }}
             aria-label={`Hapus ruang ${row.code}`}
           >
             <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
@@ -383,7 +435,7 @@ export function RuanganView() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => setBuildingModalOpen(true)}
+            onClick={openAddBuildingModal}
           >
             <Building2 className="w-4 h-4" aria-hidden="true" />
             <span>Tambah Gedung</span>
@@ -423,23 +475,44 @@ export function RuanganView() {
                   {bld.description}
                 </p>
               </div>
-              <div className="mt-3 pt-2.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+              <div className="mt-3 pt-2.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 text-xs">
                 <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
                   {roomCount} Ruangan Terdaftar
                 </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setFilterBuilding((prev) =>
-                      prev === bld.id ? "ALL" : bld.id
-                    )
-                  }
-                  className="font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-1 py-0.5"
-                >
-                  {filterBuilding === bld.id
-                    ? "Tampilkan Semua"
-                    : "Filter Gedung Ini"}
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFilterBuilding((prev) =>
+                        prev === bld.id ? "ALL" : bld.id
+                      )
+                    }
+                    className="min-h-[44px] font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
+                  >
+                    {filterBuilding === bld.id
+                      ? "Tampilkan Semua"
+                      : "Filter"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openEditBuildingModal(bld)}
+                    aria-label={`Edit gedung ${bld.code}`}
+                    className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F]"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeleteError("");
+                      setDeletingBuilding(bld);
+                    }}
+                    aria-label={`Hapus gedung ${bld.code}`}
+                    className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded border border-red-300 dark:border-red-800 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                </div>
               </div>
             </div>
           );
@@ -553,14 +626,27 @@ export function RuanganView() {
         }
         footer={
           selectedRoomDetail ? (
-            <div className="flex items-center justify-between gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setSelectedRoomId(null)}
-              >
-                Tutup Panel
-              </Button>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setSelectedRoomId(null)}
+                >
+                  Tutup
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => {
+                    setDeleteError("");
+                    setDeletingRoom(selectedRoomDetail);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4" aria-hidden="true" />
+                  <span>Hapus</span>
+                </Button>
+              </div>
               <Button
                 type="button"
                 variant="primary"
@@ -613,7 +699,7 @@ export function RuanganView() {
                 role="tab"
                 aria-selected={drawerTab === "assets"}
                 onClick={() => setDrawerTab("assets")}
-                className={`min-h-[40px] rounded text-xs font-bold transition-colors ${
+                className={`min-h-[44px] rounded text-xs font-bold transition-colors ${
                   drawerTab === "assets"
                     ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
                     : "text-slate-700 dark:text-slate-300"
@@ -626,7 +712,7 @@ export function RuanganView() {
                 role="tab"
                 aria-selected={drawerTab === "bookings"}
                 onClick={() => setDrawerTab("bookings")}
-                className={`min-h-[40px] rounded text-xs font-bold transition-colors ${
+                className={`min-h-[44px] rounded text-xs font-bold transition-colors ${
                   drawerTab === "bookings"
                     ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
                     : "text-slate-700 dark:text-slate-300"
@@ -639,7 +725,7 @@ export function RuanganView() {
                 role="tab"
                 aria-selected={drawerTab === "notes"}
                 onClick={() => setDrawerTab("notes")}
-                className={`min-h-[40px] rounded text-xs font-bold transition-colors ${
+                className={`min-h-[44px] rounded text-xs font-bold transition-colors ${
                   drawerTab === "notes"
                     ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
                     : "text-slate-700 dark:text-slate-300"
@@ -836,12 +922,16 @@ export function RuanganView() {
         </form>
       </Modal>
 
-      {/* Modal Tambah Gedung Baru */}
+      {/* Modal Tambah / Edit Gedung */}
       <Modal
         isOpen={buildingModalOpen}
         onClose={() => setBuildingModalOpen(false)}
-        title="Tambah Gedung Kampus Baru"
-        description="Daftarkan gedung baru sebagai induk penempatan ruangan."
+        title={
+          editingBuilding
+            ? `Edit Gedung ${editingBuilding.code}`
+            : "Tambah Gedung Kampus Baru"
+        }
+        description="Kelola data master gedung sebagai induk penempatan ruangan."
       >
         <form onSubmit={handleBuildingSubmit} className="space-y-4">
           {bldError ? (
@@ -903,11 +993,181 @@ export function RuanganView() {
               Batal
             </Button>
             <Button type="submit" variant="primary">
-              Simpan Gedung
+              {editingBuilding ? "Simpan Perubahan" : "Simpan Gedung"}
             </Button>
           </div>
         </form>
       </Modal>
+
+      {/* Modal Konfirmasi Hapus Ruangan */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(deletingRoom)}
+        onClose={() => {
+          if (!deleting) {
+            setDeletingRoom(null);
+            setDeleteError("");
+          }
+        }}
+        title="Konfirmasi Hapus Ruangan"
+        targetBadge={deletingRoom?.code}
+        targetName={deletingRoom?.name || ""}
+        errorMessage={deleteError}
+        isSubmitting={deleting}
+        showStrategySelector={Boolean(
+          deletingRoom &&
+            (bookings.some((b) => b.room_id === deletingRoom.id) ||
+              maintenanceLogs.some((m) => m.room_id === deletingRoom.id))
+        )}
+        impactNotes={
+          deletingRoom
+            ? (() => {
+                const roomAssets = assets.filter(
+                  (a) => a.room_id === deletingRoom.id
+                ).length;
+                const bkCount = bookings.filter(
+                  (b) => b.room_id === deletingRoom.id
+                ).length;
+                const mtCount = maintenanceLogs.filter(
+                  (m) => m.room_id === deletingRoom.id
+                ).length;
+                const noteCount = notes.filter(
+                  (n) =>
+                    n.entity_type === "room" && n.entity_id === deletingRoom.id
+                ).length;
+                const attCount = attachments.filter(
+                  (a) =>
+                    a.entity_type === "room" && a.entity_id === deletingRoom.id
+                ).length;
+                const lines: string[] = [];
+                if (roomAssets > 0) {
+                  lines.push(
+                    `${roomAssets} aset terpasang di ruang ini akan dipindahkan lokasinya ke "Gudang Cadangan".`
+                  );
+                }
+                if (bkCount > 0) {
+                  lines.push(
+                    `Terhubung ke ${bkCount} tiket peminjaman / reservasi ruangan.`
+                  );
+                }
+                if (mtCount > 0) {
+                  lines.push(
+                    `Terhubung ke ${mtCount} tiket laporan kerusakan ruang.`
+                  );
+                }
+                if (noteCount > 0 || attCount > 0) {
+                  lines.push(
+                    `${noteCount} catatan & ${attCount} berkas lampiran ruangan ini ikut dihapus.`
+                  );
+                }
+                if (lines.length === 0) {
+                  lines.push(
+                    "Tidak ada aset terpasang, peminjaman, maupun tiket kerusakan pada ruangan ini."
+                  );
+                }
+                return lines;
+              })()
+            : []
+        }
+        activeBlockers={
+          deletingRoom
+            ? [
+                ...bookings
+                  .filter(
+                    (b) =>
+                      b.room_id === deletingRoom.id &&
+                      (b.status === "Menunggu Persetujuan" ||
+                        b.status === "Disetujui" ||
+                        b.status === "Sedang Dipinjam")
+                  )
+                  .map((b) => `Peminjaman ${b.booking_code} (${b.status})`),
+                ...maintenanceLogs
+                  .filter(
+                    (m) =>
+                      m.room_id === deletingRoom.id &&
+                      m.status !== "Selesai Diperbaiki"
+                  )
+                  .map((m) => `Perbaikan ${m.ticket_code} (${m.status})`),
+              ]
+            : []
+        }
+        onConfirm={async ({
+          mode,
+          forceActive,
+        }: {
+          mode: DeleteStrategyMode;
+          forceActive: boolean;
+        }) => {
+          if (!deletingRoom) return;
+          setDeleting(true);
+          setDeleteError("");
+          const res = await deleteRoom(deletingRoom.id, { mode, forceActive });
+          setDeleting(false);
+          if (!res.ok) {
+            setDeleteError(res.error || "Gagal menghapus ruangan.");
+            return;
+          }
+          if (selectedRoomId === deletingRoom.id) {
+            setSelectedRoomId(null);
+          }
+          setDeletingRoom(null);
+        }}
+      />
+
+      {/* Modal Konfirmasi Hapus Gedung */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(deletingBuilding)}
+        onClose={() => {
+          if (!deleting) {
+            setDeletingBuilding(null);
+            setDeleteError("");
+          }
+        }}
+        title="Konfirmasi Hapus Gedung"
+        targetBadge={deletingBuilding?.code}
+        targetName={deletingBuilding?.name || ""}
+        errorMessage={deleteError}
+        isSubmitting={deleting}
+        impactNotes={
+          deletingBuilding
+            ? [
+                `Jumlah ruangan terdaftar di gedung ini: ${
+                  rooms.filter((r) => r.building_id === deletingBuilding.id)
+                    .length
+                } ruangan.`,
+                "Gedung hanya dapat dihapus jika seluruh ruangannya sudah dihapus atau dipindahkan ke gedung lain.",
+              ]
+            : []
+        }
+        hardBlockers={
+          deletingBuilding
+            ? (() => {
+                const count = rooms.filter(
+                  (r) => r.building_id === deletingBuilding.id
+                ).length;
+                return count > 0
+                  ? [
+                      `Masih terdapat ${count} ruangan terdaftar di gedung ${deletingBuilding.code}. Pindahkan atau hapus ruangan tersebut terlebih dahulu.`,
+                    ]
+                  : [];
+              })()
+            : []
+        }
+        onConfirm={async () => {
+          if (!deletingBuilding) return;
+          setDeleting(true);
+          setDeleteError("");
+          const res = await deleteBuilding(deletingBuilding.id);
+          setDeleting(false);
+          if (!res.ok) {
+            setDeleteError(res.error || "Gagal menghapus gedung.");
+            return;
+          }
+          if (filterBuilding === deletingBuilding.id) {
+            setFilterBuilding("ALL");
+          }
+          setDeletingBuilding(null);
+        }}
+      />
     </div>
   );
 }

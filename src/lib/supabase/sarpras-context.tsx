@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import {
+  ActionResult,
   Asset,
   AssetCategoryCode,
   Booking,
@@ -16,6 +17,7 @@ import {
   Building,
   Consumable,
   ConsumableTransaction,
+  DeleteStrategyMode,
   MaintenanceLog,
   MaintenanceStatus,
   Room,
@@ -97,9 +99,17 @@ interface SarprasContextValue {
 
   // Gedung & Ruangan CRUD
   addBuilding: (payload: Omit<Building, "id" | "created_at">) => void;
+  updateBuilding: (
+    id: string,
+    payload: Partial<Omit<Building, "id" | "created_at">>
+  ) => void;
+  deleteBuilding: (id: string) => Promise<ActionResult>;
   addRoom: (payload: Omit<Room, "id" | "created_at">) => void;
   updateRoom: (id: string, payload: Partial<Omit<Room, "id" | "created_at">>) => void;
-  deleteRoom: (id: string) => void;
+  deleteRoom: (
+    id: string,
+    options?: { mode?: DeleteStrategyMode; forceActive?: boolean }
+  ) => Promise<ActionResult>;
 
   // Inventaris Aset CRUD
   addAsset: (
@@ -112,19 +122,23 @@ interface SarprasContextValue {
     id: string,
     payload: Partial<Omit<Asset, "id" | "created_at">>
   ) => void;
-  deleteAsset: (id: string) => void;
+  deleteAsset: (
+    id: string,
+    options?: { mode?: DeleteStrategyMode; forceActive?: boolean }
+  ) => Promise<ActionResult>;
   previewNextInventoryCode: (category: AssetCategoryCode, year: number) => string;
 
   // Peminjaman & Reservasi
   addBooking: (
     payload: Omit<Booking, "id" | "booking_code" | "status" | "created_at">
-  ) => { ok: boolean; error?: string };
+  ) => ActionResult;
   updateBookingStatus: (
     id: string,
     status: BookingStatus,
     returnNotes?: string,
     approvedBy?: string
   ) => void;
+  deleteBooking: (id: string) => Promise<ActionResult>;
 
   // Pemeliharaan & Laporan Kerusakan
   addMaintenanceLog: (
@@ -142,14 +156,20 @@ interface SarprasContextValue {
       resolution_notes?: string;
     }
   ) => void;
+  deleteMaintenanceLog: (id: string) => Promise<ActionResult>;
 
   // Barang Habis Pakai (BHP)
   addConsumable: (
     payload: Omit<Consumable, "id" | "last_restocked_at">
   ) => void;
+  updateConsumable: (
+    id: string,
+    payload: Partial<Omit<Consumable, "id" | "last_restocked_at">>
+  ) => void;
+  deleteConsumable: (id: string) => Promise<ActionResult>;
   recordConsumableMutation: (
     payload: Omit<ConsumableTransaction, "id" | "transaction_date">
-  ) => { ok: boolean; error?: string };
+  ) => ActionResult;
 
   // Catatan Aktivitas & Lampiran Berkas (Drawer & Storage)
   addEntityNote: (
@@ -583,6 +603,55 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     [notify, refreshFromSupabase]
   );
 
+  // Mutasi terkonfirmasi: tunggu respon database terlebih dahulu sebelum ubah UI state
+  const sendConfirmedMutation = useCallback(
+    async (
+      payload: Record<string, unknown>,
+      actionLabel: string,
+      successTitle: string,
+      successMessage: string
+    ): Promise<ActionResult> => {
+      try {
+        const res = await fetch("/api/sarpras/mutate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const errMsg =
+            result.error || "Terjadi kesalahan saat memproses ke Supabase.";
+          notify("error", `Gagal ${actionLabel}`, errMsg);
+          return { ok: false, error: errMsg };
+        }
+        await refreshFromSupabase();
+        notify("info", successTitle, successMessage);
+        return { ok: true };
+      } catch {
+        const errMsg = "Koneksi ke server terputus saat menghapus data.";
+        notify("error", `Gagal ${actionLabel}`, errMsg);
+        return { ok: false, error: errMsg };
+      }
+    },
+    [notify, refreshFromSupabase]
+  );
+
+  const removeEntityArtifactsLocal = useCallback(
+    (entityType: SarprasEntityType, entityId: string) => {
+      setNotes((prev) =>
+        prev.filter(
+          (n) => !(n.entity_type === entityType && n.entity_id === entityId)
+        )
+      );
+      setAttachments((prev) =>
+        prev.filter(
+          (a) => !(a.entity_type === entityType && a.entity_id === entityId)
+        )
+      );
+    },
+    []
+  );
+
   const addBuilding = useCallback(
     (payload: Omit<Building, "id" | "created_at">) => {
       if (!requireStaffForLiveWrite()) return;
@@ -622,6 +691,74 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       );
     },
     [authUser, isLiveSupabase, notify, requireStaffForLiveWrite, sendMutation]
+  );
+
+  const updateBuilding = useCallback(
+    (id: string, payload: Partial<Omit<Building, "id" | "created_at">>) => {
+      if (!requireStaffForLiveWrite()) return;
+      setBuildings((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_building", id, data: payload },
+          "Memperbarui Gedung",
+          "Data Gedung Diperbarui",
+          "Perubahan atribut gedung telah tersimpan di Supabase."
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Data Gedung Diperbarui",
+        "Perubahan atribut gedung telah disimpan."
+      );
+    },
+    [authUser, isLiveSupabase, notify, requireStaffForLiveWrite, sendMutation]
+  );
+
+  const deleteBuilding = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const target = buildings.find((b) => b.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_building", id },
+          "Menghapus Gedung",
+          "Gedung Dihapus dari Supabase",
+          `Gedung ${target?.code || ""} telah dihapus dari database.`
+        );
+      }
+
+      const linkedRooms = rooms.filter((r) => r.building_id === id);
+      if (linkedRooms.length > 0) {
+        const errMsg = `Gedung tidak dapat dihapus karena masih memiliki ${linkedRooms.length} ruangan terdaftar.`;
+        notify("error", "Gagal Menghapus Gedung", errMsg);
+        return { ok: false, error: errMsg };
+      }
+
+      setBuildings((prev) => prev.filter((b) => b.id !== id));
+      notify(
+        "info",
+        "Gedung Dihapus",
+        `Gedung ${target?.code || ""} telah dihapus dari daftar master.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      buildings,
+      isLiveSupabase,
+      notify,
+      requireStaffForLiveWrite,
+      rooms,
+      sendConfirmedMutation,
+    ]
   );
 
   const addRoom = useCallback(
@@ -697,39 +834,82 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
   );
 
   const deleteRoom = useCallback(
-    (id: string) => {
-      if (!requireStaffForLiveWrite()) return;
+    async (
+      id: string,
+      options?: { mode?: DeleteStrategyMode; forceActive?: boolean }
+    ): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const mode = options?.mode || "archive";
+      const forceActive = Boolean(options?.forceActive);
       const target = rooms.find((r) => r.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_room", id, mode, forceActive },
+          "Menghapus Ruangan",
+          "Ruangan Dihapus dari Supabase",
+          `Ruang ${target?.code || ""} telah dihapus dari database.`
+        );
+      }
+
+      const label = target
+        ? `Ruang ${target.code} (${target.name}) [Dihapus]`
+        : "Ruangan [Dihapus]";
       setRooms((prev) => prev.filter((item) => item.id !== id));
       setAssets((prev) =>
         prev.map((a) => (a.room_id === id ? { ...a, room_id: null } : a))
       );
-
-      if (isLiveSupabase && authUser) {
-        void sendMutation(
-          { action: "delete_room", id },
-          "Menghapus Ruangan",
-          "Ruangan Dihapus dari Supabase",
-          `Ruang ${target?.code || ""} telah dihapus dari database.`,
-          false,
-          "info"
+      if (mode === "cascade") {
+        setBookings((prev) =>
+          prev
+            .filter((b) => !(b.room_id === id && !b.asset_id))
+            .map((b) =>
+              b.room_id === id && b.asset_id
+                ? { ...b, room_id: null, target_type: "Alat" }
+                : b
+            )
         );
-        return;
+        setMaintenanceLogs((prev) => prev.filter((m) => m.room_id !== id));
+      } else {
+        setBookings((prev) =>
+          prev.map((b) =>
+            b.room_id === id
+              ? {
+                  ...b,
+                  room_id: null,
+                  target_type: b.asset_id ? "Alat" : b.target_type,
+                  deleted_target_label: label,
+                }
+              : b
+          )
+        );
+        setMaintenanceLogs((prev) =>
+          prev.map((m) =>
+            m.room_id === id
+              ? { ...m, room_id: null, deleted_target_label: label }
+              : m
+          )
+        );
       }
+      removeEntityArtifactsLocal("room", id);
 
       notify(
         "info",
         "Ruangan Dihapus",
         `Ruang ${target?.code || ""} telah dihapus dari daftar master.`
       );
+      return { ok: true };
     },
     [
       authUser,
       isLiveSupabase,
       notify,
+      removeEntityArtifactsLocal,
       requireStaffForLiveWrite,
       rooms,
-      sendMutation,
+      sendConfirmedMutation,
     ]
   );
 
@@ -859,36 +1039,83 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
   );
 
   const deleteAsset = useCallback(
-    (id: string) => {
-      if (!requireStaffForLiveWrite()) return;
+    async (
+      id: string,
+      options?: { mode?: DeleteStrategyMode; forceActive?: boolean }
+    ): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const mode = options?.mode || "archive";
+      const forceActive = Boolean(options?.forceActive);
       const target = assets.find((a) => a.id === id);
-      setAssets((prev) => prev.filter((item) => item.id !== id));
 
       if (isLiveSupabase && authUser) {
-        void sendMutation(
-          { action: "delete_asset", id },
+        return sendConfirmedMutation(
+          { action: "delete_asset", id, mode, forceActive },
           "Menghapus Aset",
           "Aset Dihapus dari Supabase",
-          `Aset ${target?.inventory_code || ""} dihapus dari database.`,
-          false,
-          "info"
+          `Aset ${target?.inventory_code || ""} dihapus dari database.`
         );
-        return;
       }
+
+      const label = target
+        ? `Aset ${target.inventory_code} (${target.name}) [Dihapus]`
+        : "Aset [Dihapus]";
+      setAssets((prev) => prev.filter((item) => item.id !== id));
+      if (mode === "cascade") {
+        setBookings((prev) =>
+          prev
+            .filter((b) => !(b.asset_id === id && !b.room_id))
+            .map((b) =>
+              b.asset_id === id && b.room_id
+                ? { ...b, asset_id: null, target_type: "Ruangan" }
+                : b
+            )
+        );
+        setMaintenanceLogs((prev) =>
+          prev
+            .filter((m) => !(m.asset_id === id && !m.room_id))
+            .map((m) => (m.asset_id === id ? { ...m, asset_id: null } : m))
+        );
+      } else {
+        setBookings((prev) =>
+          prev.map((b) =>
+            b.asset_id === id
+              ? {
+                  ...b,
+                  asset_id: null,
+                  target_type: b.room_id ? "Ruangan" : b.target_type,
+                  deleted_target_label: label,
+                }
+              : b
+          )
+        );
+        setMaintenanceLogs((prev) =>
+          prev.map((m) =>
+            m.asset_id === id
+              ? { ...m, asset_id: null, deleted_target_label: label }
+              : m
+          )
+        );
+      }
+      removeEntityArtifactsLocal("asset", id);
 
       notify(
         "info",
         "Aset Dihapus",
         `Aset ${target?.inventory_code || ""} dihapus dari daftar inventaris.`
       );
+      return { ok: true };
     },
     [
       assets,
       authUser,
       isLiveSupabase,
       notify,
+      removeEntityArtifactsLocal,
       requireStaffForLiveWrite,
-      sendMutation,
+      sendConfirmedMutation,
     ]
   );
 
@@ -1072,6 +1299,51 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       requireStaffForLiveWrite,
       rooms,
       sendMutation,
+    ]
+  );
+
+  const deleteBooking = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const target = bookings.find((b) => b.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_booking", id },
+          "Menghapus Peminjaman",
+          "Tiket Peminjaman Dihapus",
+          `Tiket ${target?.booking_code || ""} telah dihapus dari database.`
+        );
+      }
+
+      setBookings((prev) => prev.filter((item) => item.id !== id));
+      if (target?.status === "Sedang Dipinjam" && target.room_id) {
+        setRooms((prev) =>
+          prev.map((r) =>
+            r.id === target.room_id && r.status === "Digunakan"
+              ? { ...r, status: "Tersedia" }
+              : r
+          )
+        );
+      }
+      removeEntityArtifactsLocal("booking", id);
+      notify(
+        "info",
+        "Tiket Peminjaman Dihapus",
+        `Tiket ${target?.booking_code || ""} telah dihapus dari daftar.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      bookings,
+      isLiveSupabase,
+      notify,
+      removeEntityArtifactsLocal,
+      requireStaffForLiveWrite,
+      sendConfirmedMutation,
     ]
   );
 
@@ -1286,6 +1558,86 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  const deleteMaintenanceLog = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const target = maintenanceLogs.find((m) => m.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_maintenance", id },
+          "Menghapus Tiket Kerusakan",
+          "Tiket Kerusakan Dihapus",
+          `Tiket ${target?.ticket_code || ""} telah dihapus dari database.`
+        );
+      }
+
+      const remaining = maintenanceLogs.filter((m) => m.id !== id);
+      setMaintenanceLogs(remaining);
+      if (target?.asset_id) {
+        const openForAsset = remaining.filter(
+          (m) =>
+            m.asset_id === target.asset_id && m.status !== "Selesai Diperbaiki"
+        );
+        const hasHeavy = openForAsset.some(
+          (m) => m.damage_severity === "Rusak Berat"
+        );
+        const hasLight = openForAsset.some(
+          (m) => m.damage_severity === "Rusak Ringan"
+        );
+        setAssets((prev) =>
+          prev.map((a) => {
+            if (a.id !== target.asset_id) return a;
+            if (hasHeavy) return { ...a, condition: "Rusak Berat" };
+            if (hasLight) return { ...a, condition: "Rusak Ringan" };
+            if (
+              a.condition === "Rusak Berat" ||
+              a.condition === "Rusak Ringan"
+            ) {
+              return { ...a, condition: "Baik" };
+            }
+            return a;
+          })
+        );
+      }
+      if (target?.room_id) {
+        const hasUrgent = remaining.some(
+          (m) =>
+            m.room_id === target.room_id &&
+            m.status !== "Selesai Diperbaiki" &&
+            m.priority === "Tinggi/Darurat"
+        );
+        if (!hasUrgent) {
+          setRooms((prev) =>
+            prev.map((r) =>
+              r.id === target.room_id && r.status === "Perbaikan"
+                ? { ...r, status: "Tersedia" }
+                : r
+            )
+          );
+        }
+      }
+      removeEntityArtifactsLocal("maintenance", id);
+      notify(
+        "info",
+        "Tiket Kerusakan Dihapus",
+        `Tiket ${target?.ticket_code || ""} telah dihapus dari daftar.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      maintenanceLogs,
+      notify,
+      removeEntityArtifactsLocal,
+      requireStaffForLiveWrite,
+      sendConfirmedMutation,
+    ]
+  );
+
   const addConsumable = useCallback(
     (payload: Omit<Consumable, "id" | "last_restocked_at">) => {
       if (!requireStaffForLiveWrite()) return;
@@ -1328,6 +1680,74 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       );
     },
     [authUser, isLiveSupabase, notify, requireStaffForLiveWrite, sendMutation]
+  );
+
+  const updateConsumable = useCallback(
+    (
+      id: string,
+      payload: Partial<Omit<Consumable, "id" | "last_restocked_at">>
+    ) => {
+      if (!requireStaffForLiveWrite()) return;
+      setConsumables((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_consumable", id, data: payload },
+          "Memperbarui Item BHP",
+          "Item BHP Diperbarui",
+          "Perubahan data barang habis pakai tersimpan di Supabase."
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Item BHP Diperbarui",
+        "Perubahan data barang habis pakai berhasil disimpan."
+      );
+    },
+    [authUser, isLiveSupabase, notify, requireStaffForLiveWrite, sendMutation]
+  );
+
+  const deleteConsumable = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const target = consumables.find((c) => c.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_consumable", id },
+          "Menghapus Item BHP",
+          "Item BHP Dihapus dari Supabase",
+          `${target?.code || ""} (${target?.name || ""}) telah dihapus dari database.`
+        );
+      }
+
+      setConsumables((prev) => prev.filter((item) => item.id !== id));
+      setConsumableTransactions((prev) =>
+        prev.filter((tx) => tx.consumable_id !== id)
+      );
+      removeEntityArtifactsLocal("consumable", id);
+      notify(
+        "info",
+        "Item BHP Dihapus",
+        `${target?.code || ""} telah dihapus beserta histori mutasinya.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      consumables,
+      isLiveSupabase,
+      notify,
+      removeEntityArtifactsLocal,
+      requireStaffForLiveWrite,
+      sendConfirmedMutation,
+    ]
   );
 
   const recordConsumableMutation = useCallback(
@@ -1603,6 +2023,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       signInWithUsername,
       signOut,
       addBuilding,
+      updateBuilding,
+      deleteBuilding,
       addRoom,
       updateRoom,
       deleteRoom,
@@ -1612,9 +2034,13 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       previewNextInventoryCode,
       addBooking,
       updateBookingStatus,
+      deleteBooking,
       addMaintenanceLog,
       updateMaintenanceStatus,
+      deleteMaintenanceLog,
       addConsumable,
+      updateConsumable,
+      deleteConsumable,
       recordConsumableMutation,
       addEntityNote,
       uploadEntityFile,
@@ -1647,6 +2073,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       signInWithUsername,
       signOut,
       addBuilding,
+      updateBuilding,
+      deleteBuilding,
       addRoom,
       updateRoom,
       deleteRoom,
@@ -1656,9 +2084,13 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       previewNextInventoryCode,
       addBooking,
       updateBookingStatus,
+      deleteBooking,
       addMaintenanceLog,
       updateMaintenanceStatus,
+      deleteMaintenanceLog,
       addConsumable,
+      updateConsumable,
+      deleteConsumable,
       recordConsumableMutation,
       addEntityNote,
       uploadEntityFile,

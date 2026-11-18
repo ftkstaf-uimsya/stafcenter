@@ -90,6 +90,13 @@ export interface SarprasAttachment {
 
 export type UISimulationState = "normal" | "loading" | "empty" | "error";
 
+export type DeleteStrategyMode = "archive" | "cascade";
+
+export interface ActionResult {
+  ok: boolean;
+  error?: string;
+}
+
 export interface Building {
   id: string;
   code: string;
@@ -150,6 +157,7 @@ export interface Booking {
   start_time: string;
   end_time: string;
   status: BookingStatus;
+  deleted_target_label?: string | null;
   return_condition_notes?: string;
   approved_by?: string;
   created_at: string;
@@ -160,6 +168,7 @@ export interface MaintenanceLog {
   ticket_code: string;
   asset_id: string | null;
   room_id: string | null;
+  deleted_target_label?: string | null;
   reporter_name: string;
   reporter_role: string;
   issue_title: string;

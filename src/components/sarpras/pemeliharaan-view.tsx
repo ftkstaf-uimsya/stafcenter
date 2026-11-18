@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { KanbanSquare, Plus, Table2, Wrench } from "lucide-react";
+import { KanbanSquare, Plus, Table2, Trash2, Wrench } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 import {
   DamageSeverity,
@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
 import { Drawer } from "@/components/ui/drawer";
+import { ConfirmDeleteModal } from "@/components/ui/confirm-delete-modal";
 import { DataTable, DataTableColumn } from "@/components/ui/data-table";
 import {
   ColumnsTogglePopover,
@@ -75,6 +76,7 @@ export function PemeliharaanView() {
     setUiSimState,
     addMaintenanceLog,
     updateMaintenanceStatus,
+    deleteMaintenanceLog,
     uploadEntityFile,
   } = useSarpras();
 
@@ -111,6 +113,13 @@ export function PemeliharaanView() {
   const [technicianVendor, setTechnicianVendor] = useState("");
   const [repairCost, setRepairCost] = useState("0");
   const [resolutionNotes, setResolutionNotes] = useState("");
+
+  // Modal Konfirmasi Hapus Tiket Kerusakan
+  const [deletingTicket, setDeletingTicket] = useState<MaintenanceLog | null>(
+    null
+  );
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -325,6 +334,11 @@ export function PemeliharaanView() {
                   {room.code}
                 </strong>{" "}
                 ({room.name})
+              </p>
+            ) : null}
+            {row.deleted_target_label ? (
+              <p className="font-mono text-amber-800 dark:text-amber-300">
+                Arsip: {row.deleted_target_label}
               </p>
             ) : null}
             <p className="text-slate-600 dark:text-slate-400">
@@ -601,13 +615,26 @@ export function PemeliharaanView() {
         footer={
           selectedTicket ? (
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setSelectedTicketId(null)}
-              >
-                Tutup Panel
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setSelectedTicketId(null)}
+                >
+                  Tutup
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => {
+                    setDeleteError("");
+                    setDeletingTicket(selectedTicket);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4" aria-hidden="true" />
+                  <span>Hapus Tiket</span>
+                </Button>
+              </div>
               <Button
                 type="button"
                 variant="primary"
@@ -683,7 +710,7 @@ export function PemeliharaanView() {
                   <strong className="font-mono text-slate-900 dark:text-slate-100">
                     {selectedAsset
                       ? `${selectedAsset.inventory_code} - ${selectedAsset.name}`
-                      : "Fasilitas Fisik Ruangan"}
+                      : selectedTicket.deleted_target_label || "Fasilitas Fisik Ruangan"}
                   </strong>
                 </div>
                 <div>
@@ -899,6 +926,65 @@ export function PemeliharaanView() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(deletingTicket)}
+        onClose={() => {
+          if (!deleting) {
+            setDeletingTicket(null);
+            setDeleteError("");
+          }
+        }}
+        title="Konfirmasi Hapus Tiket Kerusakan"
+        targetBadge={deletingTicket?.ticket_code}
+        targetName={deletingTicket?.issue_title || ""}
+        errorMessage={deleteError}
+        isSubmitting={deleting}
+        impactNotes={
+          deletingTicket
+            ? [
+                ...(deletingTicket.asset_id
+                  ? [
+                      "Kondisi fisik aset terkait akan dievaluasi ulang otomatis berdasarkan sisa tiket aktif lainnya.",
+                    ]
+                  : []),
+                ...(deletingTicket.room_id
+                  ? [
+                      "Status ruangan terkait akan dipulihkan bila tidak ada lagi kendala darurat aktif.",
+                    ]
+                  : []),
+                `Catatan & lampiran foto/dokumen terkait (${
+                  notes.filter(
+                    (n) =>
+                      n.entity_type === "maintenance" &&
+                      n.entity_id === deletingTicket.id
+                  ).length
+                } catatan, ${
+                  attachments.filter(
+                    (a) =>
+                      a.entity_type === "maintenance" &&
+                      a.entity_id === deletingTicket.id
+                  ).length
+                } file) ikut dihapus permanen.`,
+              ]
+            : []
+        }
+        onConfirm={async () => {
+          if (!deletingTicket) return;
+          setDeleting(true);
+          setDeleteError("");
+          const res = await deleteMaintenanceLog(deletingTicket.id);
+          setDeleting(false);
+          if (!res.ok) {
+            setDeleteError(res.error || "Gagal menghapus tiket kerusakan.");
+            return;
+          }
+          if (selectedTicketId === deletingTicket.id) {
+            setSelectedTicketId(null);
+          }
+          setDeletingTicket(null);
+        }}
+      />
     </div>
   );
 }

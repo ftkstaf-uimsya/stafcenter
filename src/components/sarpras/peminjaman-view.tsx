@@ -9,6 +9,7 @@ import {
   Plus,
   RotateCcw,
   Table2,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
@@ -24,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
 import { Drawer } from "@/components/ui/drawer";
+import { ConfirmDeleteModal } from "@/components/ui/confirm-delete-modal";
 import { DataTable, DataTableColumn } from "@/components/ui/data-table";
 import {
   ColumnsTogglePopover,
@@ -82,6 +84,7 @@ export function PeminjamanView() {
     setUiSimState,
     addBooking,
     updateBookingStatus,
+    deleteBooking,
   } = useSarpras();
 
   const [viewMode, setViewMode] = useState<"board" | "table">("board");
@@ -116,6 +119,11 @@ export function PeminjamanView() {
     null
   );
   const [returnNotes, setReturnNotes] = useState("");
+
+  // Modal Konfirmasi Hapus Tiket Peminjaman
+  const [deletingBooking, setDeletingBooking] = useState<Booking | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -361,6 +369,11 @@ export function PeminjamanView() {
                   {asset.inventory_code}
                 </strong>{" "}
                 ({asset.name})
+              </p>
+            ) : null}
+            {row.deleted_target_label ? (
+              <p className="font-mono text-amber-800 dark:text-amber-300">
+                Arsip: {row.deleted_target_label}
               </p>
             ) : null}
             <p className="text-slate-600 dark:text-slate-400">
@@ -725,13 +738,26 @@ export function PeminjamanView() {
         footer={
           selectedBooking ? (
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setSelectedBookingId(null)}
-              >
-                Tutup Panel
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setSelectedBookingId(null)}
+                >
+                  Tutup
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => {
+                    setDeleteError("");
+                    setDeletingBooking(selectedBooking);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4" aria-hidden="true" />
+                  <span>Hapus Tiket</span>
+                </Button>
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 {selectedBooking.status === "Menunggu Persetujuan" ? (
                   <>
@@ -858,6 +884,16 @@ export function PeminjamanView() {
                   </dt>
                   <dd className="mt-0.5 font-mono font-bold text-slate-900 dark:text-slate-100">
                     {selectedAsset.inventory_code} ({selectedAsset.name})
+                  </dd>
+                </div>
+              ) : null}
+              {selectedBooking.deleted_target_label ? (
+                <div className="sm:col-span-2">
+                  <dt className="text-slate-600 dark:text-slate-400">
+                    Riwayat Target Terhapus
+                  </dt>
+                  <dd className="mt-0.5 font-mono text-amber-800 dark:text-amber-300">
+                    {selectedBooking.deleted_target_label}
                   </dd>
                 </div>
               ) : null}
@@ -1089,6 +1125,62 @@ export function PeminjamanView() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(deletingBooking)}
+        onClose={() => {
+          if (!deleting) {
+            setDeletingBooking(null);
+            setDeleteError("");
+          }
+        }}
+        title="Konfirmasi Hapus Tiket Peminjaman"
+        targetBadge={deletingBooking?.booking_code}
+        targetName={deletingBooking?.activity_name || ""}
+        errorMessage={deleteError}
+        isSubmitting={deleting}
+        impactNotes={
+          deletingBooking
+            ? [
+                `Peminjam: ${deletingBooking.borrower_name} (${deletingBooking.borrower_unit})`,
+                ...(deletingBooking.status === "Sedang Dipinjam" &&
+                deletingBooking.room_id
+                  ? [
+                      "Status ruangan terkait akan otomatis dipulihkan menjadi Tersedia.",
+                    ]
+                  : []),
+                `Catatan & berkas lampiran terkait (${
+                  notes.filter(
+                    (n) =>
+                      n.entity_type === "booking" &&
+                      n.entity_id === deletingBooking.id
+                  ).length
+                } catatan, ${
+                  attachments.filter(
+                    (a) =>
+                      a.entity_type === "booking" &&
+                      a.entity_id === deletingBooking.id
+                  ).length
+                } file) ikut dihapus permanen.`,
+              ]
+            : []
+        }
+        onConfirm={async () => {
+          if (!deletingBooking) return;
+          setDeleting(true);
+          setDeleteError("");
+          const res = await deleteBooking(deletingBooking.id);
+          setDeleting(false);
+          if (!res.ok) {
+            setDeleteError(res.error || "Gagal menghapus tiket peminjaman.");
+            return;
+          }
+          if (selectedBookingId === deletingBooking.id) {
+            setSelectedBookingId(null);
+          }
+          setDeletingBooking(null);
+        }}
+      />
     </div>
   );
 }
