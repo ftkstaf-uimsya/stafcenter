@@ -1,12 +1,15 @@
 import ExcelJS from "exceljs";
 import {
-  ASSET_CATEGORY_CODES,
   ASSET_CONDITION_LIST,
   ASSET_PORTABLE_OPTIONS,
+  AssetCategoryRef,
   cleanCellText,
+  DEFAULT_ASSET_CATEGORY_REFS,
   ExistingAssetRef,
   formatCategoryDropdownOption,
+  formatFundingSourceDropdownOption,
   formatRoomDropdownOption,
+  FundingSourceRef,
   GUDANG_ROOM_LABEL,
   IMPORT_TEMPLATE_HEADERS,
   ImportParseResult,
@@ -51,7 +54,9 @@ function extractExcelCellString(cell: ExcelJS.Cell): string {
  * Kategori Inventaris, Lokasi Penempatan Ruangan (dinamis dari database), dan Kondisi Barang.
  */
 export async function buildAssetImportTemplateBuffer(
-  rooms: RoomLookupRef[]
+  rooms: RoomLookupRef[],
+  categories: AssetCategoryRef[] = DEFAULT_ASSET_CATEGORY_REFS,
+  fundingSources: FundingSourceRef[] = []
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "StafCenter Sarpras";
@@ -63,20 +68,25 @@ export async function buildAssetImportTemplateBuffer(
   const refSheet = workbook.addWorksheet(SHEET_REF);
   const guideSheet = workbook.addWorksheet(SHEET_GUIDE);
 
+  const activeCategories =
+    categories.length > 0 ? categories : DEFAULT_ASSET_CATEGORY_REFS;
+
   // 1. Isi Sheet Referensi_Enum
-  const categoryOptions = ASSET_CATEGORY_CODES.map(formatCategoryDropdownOption);
+  const categoryOptions = activeCategories.map(formatCategoryDropdownOption);
   const roomOptions = [
     ...rooms.map(formatRoomDropdownOption),
     GUDANG_ROOM_LABEL,
   ];
   const conditionOptions = [...ASSET_CONDITION_LIST];
   const portableOptions = [...ASSET_PORTABLE_OPTIONS];
+  const fundingOptions = fundingSources.map(formatFundingSourceDropdownOption);
 
   refSheet.columns = [
     { header: "Kategori Inventaris", key: "cat", width: 30 },
     { header: "Lokasi Penempatan Ruangan", key: "room", width: 38 },
     { header: "Kondisi Barang", key: "cond", width: 20 },
     { header: "Aset Portabel", key: "port", width: 16 },
+    { header: "Sumber Dana Pengadaan", key: "fund", width: 34 },
   ];
 
   const refHeader = refSheet.getRow(1);
@@ -95,7 +105,8 @@ export async function buildAssetImportTemplateBuffer(
     categoryOptions.length,
     roomOptions.length,
     conditionOptions.length,
-    portableOptions.length
+    portableOptions.length,
+    fundingOptions.length
   );
 
   for (let i = 0; i < maxRefRows; i++) {
@@ -104,6 +115,7 @@ export async function buildAssetImportTemplateBuffer(
       roomOptions[i] ?? "",
       conditionOptions[i] ?? "",
       portableOptions[i] ?? "",
+      fundingOptions[i] ?? "",
     ]);
   }
 
@@ -147,6 +159,10 @@ export async function buildAssetImportTemplateBuffer(
   const roomRange = `=${SHEET_REF}!$B$2:$B$${1 + roomOptions.length}`;
   const condRange = `=${SHEET_REF}!$C$2:$C$${1 + conditionOptions.length}`;
   const portRange = `=${SHEET_REF}!$D$2:$D$${1 + portableOptions.length}`;
+  const fundRange =
+    fundingOptions.length > 0
+      ? `=${SHEET_REF}!$E$2:$E$${1 + fundingOptions.length}`
+      : null;
 
   // Format kolom dan pasang Data Validation untuk baris 2 s.d. MAX_IMPORT_ROWS + 1
   for (let rowIdx = 2; rowIdx <= MAX_IMPORT_ROWS + 1; rowIdx++) {
@@ -207,6 +223,18 @@ export async function buildAssetImportTemplateBuffer(
       errorTitle: "Kondisi Barang Tidak Valid",
       error: "Pilih salah satu kondisi: Baik, Rusak Ringan, Rusak Berat, atau Hilang.",
     };
+
+    if (fundRange) {
+      row.getCell(8).dataValidation = {
+        type: "list",
+        allowBlank: false,
+        formulae: [fundRange],
+        showErrorMessage: true,
+        errorStyle: "stop",
+        errorTitle: "Sumber Dana Tidak Valid",
+        error: "Pilih sumber dana dari dropdown Master Sumber Dana.",
+      };
+    }
 
     // Format teks agar nomor seri berawalan nol tidak hilang
     row.getCell(9).numFmt = "@";
@@ -330,7 +358,9 @@ export async function buildAssetImportTemplateBuffer(
 export async function parseAssetImportWorkbook(
   buffer: ArrayBuffer | Buffer,
   rooms: RoomLookupRef[],
-  existingAssets: ExistingAssetRef[]
+  existingAssets: ExistingAssetRef[],
+  categories: AssetCategoryRef[] = DEFAULT_ASSET_CATEGORY_REFS,
+  fundingSources?: FundingSourceRef[]
 ): Promise<ImportParseResult> {
   const workbook = new ExcelJS.Workbook();
   try {
@@ -466,5 +496,11 @@ export async function parseAssetImportWorkbook(
     });
   }
 
-  return validateImportAssetRows(rawRows, rooms, existingAssets);
+  return validateImportAssetRows(
+    rawRows,
+    rooms,
+    existingAssets,
+    categories,
+    fundingSources
+  );
 }

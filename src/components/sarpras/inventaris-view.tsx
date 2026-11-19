@@ -17,8 +17,8 @@ import {
   DeleteStrategyMode,
 } from "@/types/sarpras";
 import {
-  ASSET_CATEGORY_LABELS,
   formatCurrencyIDR,
+  resolveAssetCategoryLabel,
 } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,15 +41,6 @@ import {
   MaintenanceStatusBadge,
 } from "@/components/sarpras/status-badges";
 import { AssetImportModal } from "@/components/sarpras/asset-import-modal";
-
-const CATEGORY_CODES: AssetCategoryCode[] = [
-  "ELK",
-  "KOM",
-  "KLM",
-  "AUD",
-  "MBL",
-  "LNY",
-];
 
 const ASSET_CONDITIONS: AssetCondition[] = [
   "Baik",
@@ -91,6 +82,8 @@ export function InventarisView() {
   const {
     rooms,
     assets,
+    assetCategories,
+    fundingSources,
     bookings,
     maintenanceLogs,
     notes: entityNotes,
@@ -108,6 +101,7 @@ export function InventarisView() {
   const [filterRoom, setFilterRoom] = useState("ALL");
   const [filterCondition, setFilterCondition] = useState("ALL");
   const [filterCategory, setFilterCategory] = useState("ALL");
+  const [filterFunding, setFilterFunding] = useState("ALL");
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<string[]>([]);
 
   // Slide-over detail drawer aset
@@ -124,6 +118,7 @@ export function InventarisView() {
   const [category, setCategory] = useState<AssetCategoryCode>("ELK");
   const [roomId, setRoomId] = useState<string>("");
   const [procurementYear, setProcurementYear] = useState("2026");
+  const [fundingSourceId, setFundingSourceId] = useState("");
   const [fundingSource, setFundingSource] = useState("Dana Operasional Kampus");
   const [acquisitionCost, setAcquisitionCost] = useState("5000000");
   const [condition, setCondition] = useState<AssetCondition>("Baik");
@@ -173,14 +168,30 @@ export function InventarisView() {
         filterCondition === "ALL" || a.condition === filterCondition;
       const matchCat =
         filterCategory === "ALL" || a.category === filterCategory;
-      return matchSearch && matchRoom && matchCond && matchCat;
+      const matchFunding =
+        filterFunding === "ALL" ||
+        a.funding_source_id === filterFunding ||
+        a.funding_source.toLowerCase() ===
+          (
+            fundingSources.find((f) => f.id === filterFunding)?.name || ""
+          ).toLowerCase();
+      return matchSearch && matchRoom && matchCond && matchCat && matchFunding;
     });
-  }, [assets, searchQuery, filterRoom, filterCondition, filterCategory]);
+  }, [
+    assets,
+    fundingSources,
+    searchQuery,
+    filterRoom,
+    filterCondition,
+    filterCategory,
+    filterFunding,
+  ]);
 
   const activeFilterCount =
     (filterRoom !== "ALL" ? 1 : 0) +
     (filterCondition !== "ALL" ? 1 : 0) +
-    (filterCategory !== "ALL" ? 1 : 0);
+    (filterCategory !== "ALL" ? 1 : 0) +
+    (filterFunding !== "ALL" ? 1 : 0);
 
   if (uiSimState === "loading") {
     return (
@@ -198,14 +209,19 @@ export function InventarisView() {
     );
   }
 
+  const activeAssetCategories = assetCategories.filter((c) => c.is_active);
+  const activeFundingSources = fundingSources.filter((f) => f.is_active);
+
   const openAddModal = () => {
     setEditingAsset(null);
     setName("");
     setBrandModel("");
-    setCategory("ELK");
+    setCategory(activeAssetCategories[0]?.code || "ELK");
     setRoomId(rooms[0]?.id || "");
     setProcurementYear("2026");
-    setFundingSource("Dana Operasional Kampus");
+    const defaultFs = activeFundingSources[0];
+    setFundingSourceId(defaultFs?.id || "");
+    setFundingSource(defaultFs?.name || "Dana Operasional Kampus");
     setAcquisitionCost("5000000");
     setCondition("Baik");
     setIsPortable(false);
@@ -222,7 +238,15 @@ export function InventarisView() {
     setCategory(asset.category);
     setRoomId(asset.room_id || "");
     setProcurementYear(String(asset.procurement_year));
-    setFundingSource(asset.funding_source);
+    const matchedFs =
+      fundingSources.find((f) => f.id === asset.funding_source_id) ||
+      fundingSources.find(
+        (f) =>
+          f.name.trim().toLowerCase() ===
+          asset.funding_source.trim().toLowerCase()
+      );
+    setFundingSourceId(matchedFs?.id || "");
+    setFundingSource(matchedFs?.name || asset.funding_source);
     setAcquisitionCost(String(asset.acquisition_cost));
     setCondition(asset.condition);
     setIsPortable(asset.is_portable);
@@ -241,6 +265,8 @@ export function InventarisView() {
 
     const yearNum = Number(procurementYear) || 2026;
     const costNum = Math.max(0, Number(acquisitionCost) || 0);
+    const resolvedFs = fundingSources.find((f) => f.id === fundingSourceId);
+    const finalFundingName = resolvedFs?.name || fundingSource.trim();
 
     if (editingAsset) {
       updateAsset(editingAsset.id, {
@@ -249,7 +275,8 @@ export function InventarisView() {
         category,
         room_id: roomId || null,
         procurement_year: yearNum,
-        funding_source: fundingSource.trim(),
+        funding_source: finalFundingName,
+        funding_source_id: resolvedFs?.id || null,
         acquisition_cost: costNum,
         condition,
         is_portable: isPortable,
@@ -263,7 +290,8 @@ export function InventarisView() {
         category,
         room_id: roomId || null,
         procurement_year: yearNum,
-        funding_source: fundingSource.trim(),
+        funding_source: finalFundingName,
+        funding_source_id: resolvedFs?.id || null,
         acquisition_cost: costNum,
         condition,
         is_portable: isPortable,
@@ -319,7 +347,8 @@ export function InventarisView() {
         return (
           <div className="text-xs space-y-1">
             <p className="font-semibold text-slate-900 dark:text-slate-100">
-              {row.category_label} ({row.category})
+              {resolveAssetCategoryLabel(row.category, assetCategories)} (
+              {row.category})
             </p>
             <p className="text-slate-700 dark:text-slate-300">
               Lokasi:{" "}
@@ -457,6 +486,7 @@ export function InventarisView() {
               setFilterRoom("ALL");
               setFilterCondition("ALL");
               setFilterCategory("ALL");
+              setFilterFunding("ALL");
             }}
             groups={[
               {
@@ -476,9 +506,22 @@ export function InventarisView() {
                 onChange: setFilterCategory,
                 options: [
                   { value: "ALL", label: "Semua Kategori" },
-                  ...CATEGORY_CODES.map((c) => ({
-                    value: c,
-                    label: `${c} - ${ASSET_CATEGORY_LABELS[c]}`,
+                  ...assetCategories.map((c) => ({
+                    value: c.code,
+                    label: `${c.code} - ${c.name}`,
+                  })),
+                ],
+              },
+              {
+                key: "funding",
+                label: "Sumber Dana",
+                value: filterFunding,
+                onChange: setFilterFunding,
+                options: [
+                  { value: "ALL", label: "Semua Sumber Dana" },
+                  ...fundingSources.map((f) => ({
+                    value: f.id,
+                    label: f.name,
                   })),
                 ],
               },
@@ -703,10 +746,23 @@ export function InventarisView() {
               onChange={(e) =>
                 setCategory(e.target.value as AssetCategoryCode)
               }
-              options={CATEGORY_CODES.map((c) => ({
-                value: c,
-                label: `${c} - ${ASSET_CATEGORY_LABELS[c]}`,
-              }))}
+              options={[
+                ...activeAssetCategories.map((c) => ({
+                  value: c.code,
+                  label: `${c.code} - ${c.name}`,
+                })),
+                ...(!activeAssetCategories.some((c) => c.code === category)
+                  ? [
+                      {
+                        value: category,
+                        label: `${category} - ${resolveAssetCategoryLabel(
+                          category,
+                          assetCategories
+                        )}`,
+                      },
+                    ]
+                  : []),
+              ]}
             />
             <Select
               label="Lokasi Penempatan Ruangan *"
@@ -767,13 +823,44 @@ export function InventarisView() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Input
-              label="Sumber Dana Pengadaan *"
-              placeholder="Contoh: Hibah Kemendikbudristek / Dana Kampus"
-              value={fundingSource}
-              onChange={(e) => setFundingSource(e.target.value)}
-              required
-            />
+            {activeFundingSources.length > 0 ? (
+              <Select
+                label="Sumber Dana Pengadaan *"
+                value={fundingSourceId || (fundingSource ? "__LEGACY__" : "")}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "__LEGACY__") {
+                    setFundingSourceId("");
+                    return;
+                  }
+                  setFundingSourceId(val);
+                  const found = fundingSources.find((f) => f.id === val);
+                  if (found) setFundingSource(found.name);
+                }}
+                options={[
+                  ...activeFundingSources.map((f) => ({
+                    value: f.id,
+                    label: `${f.code} - ${f.name}`,
+                  })),
+                  ...(!fundingSourceId && fundingSource
+                    ? [
+                        {
+                          value: "__LEGACY__",
+                          label: `${fundingSource} (Data Historis)`,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            ) : (
+              <Input
+                label="Sumber Dana Pengadaan *"
+                placeholder="Contoh: Hibah Kemendikbudristek / Dana Kampus"
+                value={fundingSource}
+                onChange={(e) => setFundingSource(e.target.value)}
+                required
+              />
+            )}
             <Input
               label="Nomor Seri Pabrik (Serial Number)"
               placeholder="Contoh: EPS-L530-9921"

@@ -11,18 +11,24 @@ import React, {
 import {
   ActionResult,
   Asset,
+  AssetCategory,
   AssetCategoryCode,
   Booking,
   BookingStatus,
   Building,
   CampusOfficial,
+  CampusUnit,
   Consumable,
+  ConsumableCategoryMaster,
   ConsumableTransaction,
+  ConsumableUnitMaster,
   Course,
   DeleteStrategyMode,
+  FundingSource,
   Lecturer,
   MaintenanceLog,
   MaintenanceStatus,
+  MaintenanceVendor,
   Room,
   SarprasAttachment,
   SarprasEntityType,
@@ -31,12 +37,12 @@ import {
   UISimulationState,
 } from "@/types/sarpras";
 import {
-  ASSET_CATEGORY_LABELS,
   findBookingConflict,
   generateInventoryCode,
   generateUuid,
   isSupabaseConfigured,
   normalizeTimeHHMM,
+  resolveAssetCategoryLabel,
 } from "@/lib/supabase/client";
 import {
   NormalizedImportAssetPayload,
@@ -44,14 +50,20 @@ import {
 } from "@/lib/sarpras/asset-import-shared";
 import {
   INITIAL_ASSETS,
+  INITIAL_ASSET_CATEGORIES,
   INITIAL_BOOKINGS,
   INITIAL_BUILDINGS,
   INITIAL_CAMPUS_OFFICIALS,
+  INITIAL_CAMPUS_UNITS,
   INITIAL_CONSUMABLES,
+  INITIAL_CONSUMABLE_CATEGORIES,
   INITIAL_CONSUMABLE_TRANSACTIONS,
+  INITIAL_CONSUMABLE_UNITS,
   INITIAL_COURSES,
+  INITIAL_FUNDING_SOURCES,
   INITIAL_LECTURERS,
   INITIAL_MAINTENANCE_LOGS,
+  INITIAL_MAINTENANCE_VENDORS,
   INITIAL_ROOMS,
 } from "@/lib/supabase/seed-data";
 
@@ -86,6 +98,13 @@ interface SarprasContextValue {
   lecturers: Lecturer[];
   courses: Course[];
   campusOfficials: CampusOfficial[];
+  campusUnits: CampusUnit[];
+  maintenanceVendors: MaintenanceVendor[];
+  assetCategories: AssetCategory[];
+  fundingSources: FundingSource[];
+  consumableCategories: ConsumableCategoryMaster[];
+  consumableUnits: ConsumableUnitMaster[];
+  extendedMasterReady: boolean;
   canManageDataMaster: boolean;
   isLiveSupabase: boolean;
   serverConfigured: boolean;
@@ -151,7 +170,8 @@ interface SarprasContextValue {
     id: string,
     status: BookingStatus,
     returnNotes?: string,
-    approvedBy?: string
+    approvedBy?: string,
+    approvedByOfficialId?: string | null
   ) => void;
   deleteBooking: (id: string) => Promise<ActionResult>;
 
@@ -167,6 +187,7 @@ interface SarprasContextValue {
     update: {
       status: MaintenanceStatus;
       technician_vendor?: string;
+      vendor_id?: string | null;
       repair_cost?: number;
       resolution_notes?: string;
     }
@@ -223,6 +244,50 @@ interface SarprasContextValue {
     payload: Partial<Omit<CampusOfficial, "id" | "created_at">>
   ) => void;
   deleteCampusOfficial: (id: string) => Promise<ActionResult>;
+
+  // Data Master Prioritas 1: Unit/Prodi/Ormawa, Teknisi & Vendor, dan Referensi (Khusus Master Admin)
+  addCampusUnit: (payload: Omit<CampusUnit, "id" | "created_at">) => void;
+  updateCampusUnit: (
+    id: string,
+    payload: Partial<Omit<CampusUnit, "id" | "created_at">>
+  ) => void;
+  deleteCampusUnit: (id: string) => Promise<ActionResult>;
+  addMaintenanceVendor: (
+    payload: Omit<MaintenanceVendor, "id" | "created_at">
+  ) => void;
+  updateMaintenanceVendor: (
+    id: string,
+    payload: Partial<Omit<MaintenanceVendor, "id" | "created_at">>
+  ) => void;
+  deleteMaintenanceVendor: (id: string) => Promise<ActionResult>;
+  addAssetCategory: (payload: Omit<AssetCategory, "id" | "created_at">) => void;
+  updateAssetCategory: (
+    id: string,
+    payload: Partial<Omit<AssetCategory, "id" | "created_at">>
+  ) => void;
+  deleteAssetCategory: (id: string) => Promise<ActionResult>;
+  addFundingSource: (payload: Omit<FundingSource, "id" | "created_at">) => void;
+  updateFundingSource: (
+    id: string,
+    payload: Partial<Omit<FundingSource, "id" | "created_at">>
+  ) => void;
+  deleteFundingSource: (id: string) => Promise<ActionResult>;
+  addConsumableCategory: (
+    payload: Omit<ConsumableCategoryMaster, "id" | "created_at">
+  ) => void;
+  updateConsumableCategory: (
+    id: string,
+    payload: Partial<Omit<ConsumableCategoryMaster, "id" | "created_at">>
+  ) => void;
+  deleteConsumableCategory: (id: string) => Promise<ActionResult>;
+  addConsumableUnit: (
+    payload: Omit<ConsumableUnitMaster, "id" | "created_at">
+  ) => void;
+  updateConsumableUnit: (
+    id: string,
+    payload: Partial<Omit<ConsumableUnitMaster, "id" | "created_at">>
+  ) => void;
+  deleteConsumableUnit: (id: string) => Promise<ActionResult>;
 }
 
 const SarprasContext = createContext<SarprasContextValue | null>(null);
@@ -281,6 +346,27 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
   const [campusOfficials, setCampusOfficials] = useState<CampusOfficial[]>(() =>
     isLiveSupabase ? [] : INITIAL_CAMPUS_OFFICIALS
   );
+  const [campusUnits, setCampusUnits] = useState<CampusUnit[]>(() =>
+    isLiveSupabase ? [] : INITIAL_CAMPUS_UNITS
+  );
+  const [maintenanceVendors, setMaintenanceVendors] = useState<
+    MaintenanceVendor[]
+  >(() => (isLiveSupabase ? [] : INITIAL_MAINTENANCE_VENDORS));
+  const [assetCategories, setAssetCategories] = useState<AssetCategory[]>(() =>
+    isLiveSupabase ? [] : INITIAL_ASSET_CATEGORIES
+  );
+  const [fundingSources, setFundingSources] = useState<FundingSource[]>(() =>
+    isLiveSupabase ? [] : INITIAL_FUNDING_SOURCES
+  );
+  const [consumableCategories, setConsumableCategories] = useState<
+    ConsumableCategoryMaster[]
+  >(() => (isLiveSupabase ? [] : INITIAL_CONSUMABLE_CATEGORIES));
+  const [consumableUnits, setConsumableUnits] = useState<
+    ConsumableUnitMaster[]
+  >(() => (isLiveSupabase ? [] : INITIAL_CONSUMABLE_UNITS));
+  const [extendedMasterReady, setExtendedMasterReady] = useState<boolean>(
+    !isLiveSupabase
+  );
 
   const [serverConfigured, setServerConfigured] = useState<boolean>(true);
   const [authUser, setAuthUser] = useState<AuthStaffUser | null>(null);
@@ -306,6 +392,12 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     setLecturers([]);
     setCourses([]);
     setCampusOfficials([]);
+    setCampusUnits([]);
+    setMaintenanceVendors([]);
+    setAssetCategories([]);
+    setFundingSources([]);
+    setConsumableCategories([]);
+    setConsumableUnits([]);
   }, []);
 
   const notify = useCallback(
@@ -432,6 +524,95 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           }))
         );
       }
+
+      const hasExtended =
+        Array.isArray(data.campusUnits) &&
+        Array.isArray(data.maintenanceVendors) &&
+        Array.isArray(data.assetCategories) &&
+        Array.isArray(data.fundingSources) &&
+        Array.isArray(data.consumableCategories) &&
+        Array.isArray(data.consumableUnits);
+      setExtendedMasterReady(hasExtended);
+
+      if (Array.isArray(data.campusUnits)) {
+        setCampusUnits(
+          (data.campusUnits as CampusUnit[]).map((item) => ({
+            ...item,
+            is_active: item.is_active !== false,
+            leader_name: item.leader_name || "",
+            phone: item.phone || "",
+            email: item.email || "",
+            notes: item.notes || "",
+          }))
+        );
+      } else {
+        setCampusUnits(INITIAL_CAMPUS_UNITS);
+      }
+
+      if (Array.isArray(data.maintenanceVendors)) {
+        setMaintenanceVendors(
+          (data.maintenanceVendors as MaintenanceVendor[]).map((item) => ({
+            ...item,
+            is_active: item.is_active !== false,
+            email: item.email || "",
+            address: item.address || "",
+            notes: item.notes || "",
+          }))
+        );
+      } else {
+        setMaintenanceVendors(INITIAL_MAINTENANCE_VENDORS);
+      }
+
+      if (Array.isArray(data.assetCategories)) {
+        setAssetCategories(
+          (data.assetCategories as AssetCategory[]).map((item) => ({
+            ...item,
+            useful_life_years: Number(item.useful_life_years) || 5,
+            is_active: item.is_active !== false,
+            description: item.description || "",
+          }))
+        );
+      } else {
+        setAssetCategories(INITIAL_ASSET_CATEGORIES);
+      }
+
+      if (Array.isArray(data.fundingSources)) {
+        setFundingSources(
+          (data.fundingSources as FundingSource[]).map((item) => ({
+            ...item,
+            is_active: item.is_active !== false,
+            notes: item.notes || "",
+          }))
+        );
+      } else {
+        setFundingSources(INITIAL_FUNDING_SOURCES);
+      }
+
+      if (Array.isArray(data.consumableCategories)) {
+        setConsumableCategories(
+          (data.consumableCategories as ConsumableCategoryMaster[]).map(
+            (item) => ({
+              ...item,
+              is_active: item.is_active !== false,
+              description: item.description || "",
+            })
+          )
+        );
+      } else {
+        setConsumableCategories(INITIAL_CONSUMABLE_CATEGORIES);
+      }
+
+      if (Array.isArray(data.consumableUnits)) {
+        setConsumableUnits(
+          (data.consumableUnits as ConsumableUnitMaster[]).map((item) => ({
+            ...item,
+            is_active: item.is_active !== false,
+            description: item.description || "",
+          }))
+        );
+      } else {
+        setConsumableUnits(INITIAL_CONSUMABLE_UNITS);
+      }
     } catch {
       // Tetap gunakan state sebelumnya bila koneksi terputus
     } finally {
@@ -463,6 +644,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           if (parsed.lecturers) setLecturers(parsed.lecturers);
           if (parsed.courses) setCourses(parsed.courses);
           if (parsed.campusOfficials) setCampusOfficials(parsed.campusOfficials);
+          if (parsed.campusUnits) setCampusUnits(parsed.campusUnits);
+          if (parsed.maintenanceVendors)
+            setMaintenanceVendors(parsed.maintenanceVendors);
+          if (parsed.assetCategories) setAssetCategories(parsed.assetCategories);
+          if (parsed.fundingSources) setFundingSources(parsed.fundingSources);
+          if (parsed.consumableCategories)
+            setConsumableCategories(parsed.consumableCategories);
+          if (parsed.consumableUnits) setConsumableUnits(parsed.consumableUnits);
         }
         setAuthLoading(false);
         setHydrated(true);
@@ -522,6 +711,12 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           lecturers,
           courses,
           campusOfficials,
+          campusUnits,
+          maintenanceVendors,
+          assetCategories,
+          fundingSources,
+          consumableCategories,
+          consumableUnits,
         })
       );
     } catch {
@@ -540,6 +735,12 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     lecturers,
     courses,
     campusOfficials,
+    campusUnits,
+    maintenanceVendors,
+    assetCategories,
+    fundingSources,
+    consumableCategories,
+    consumableUnits,
   ]);
 
   const signInWithUsername = useCallback(
@@ -636,6 +837,12 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     setLecturers(INITIAL_LECTURERS);
     setCourses(INITIAL_COURSES);
     setCampusOfficials(INITIAL_CAMPUS_OFFICIALS);
+    setCampusUnits(INITIAL_CAMPUS_UNITS);
+    setMaintenanceVendors(INITIAL_MAINTENANCE_VENDORS);
+    setAssetCategories(INITIAL_ASSET_CATEGORIES);
+    setFundingSources(INITIAL_FUNDING_SOURCES);
+    setConsumableCategories(INITIAL_CONSUMABLE_CATEGORIES);
+    setConsumableUnits(INITIAL_CONSUMABLE_UNITS);
     setUiSimState("normal");
     try {
       localStorage.removeItem(STORAGE_KEY);
@@ -913,6 +1120,12 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               capacity: payload.capacity,
               pic_name: payload.pic_name,
               pic_contact: payload.pic_contact || null,
+              ...(extendedMasterReady
+                ? {
+                    pic_official_id: payload.pic_official_id || null,
+                    pic_lecturer_id: payload.pic_lecturer_id || null,
+                  }
+                : {}),
               status: payload.status,
               facilities_notes: payload.facilities_notes || null,
             },
@@ -947,8 +1160,13 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (isLiveSupabase && authUser) {
+        const cleanRoomPayload = { ...payload };
+        if (!extendedMasterReady) {
+          delete cleanRoomPayload.pic_official_id;
+          delete cleanRoomPayload.pic_lecturer_id;
+        }
         void sendMutation(
-          { action: "update_room", id, data: payload },
+          { action: "update_room", id, data: cleanRoomPayload },
           "Memperbarui Ruangan",
           "Data Ruangan Diperbarui",
           "Perubahan atribut ruangan telah tersimpan di Supabase."
@@ -1074,7 +1292,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         seq
       );
       const id = generateUuid();
-      const category_label = ASSET_CATEGORY_LABELS[payload.category];
+      const category_label = resolveAssetCategoryLabel(
+        payload.category,
+        assetCategories
+      );
       const newAsset: Asset = {
         ...payload,
         id,
@@ -1099,6 +1320,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               room_id: payload.room_id || null,
               procurement_year: payload.procurement_year,
               funding_source: payload.funding_source,
+              ...(extendedMasterReady
+                ? { funding_source_id: payload.funding_source_id || null }
+                : {}),
               acquisition_cost: payload.acquisition_cost,
               condition: payload.condition,
               is_portable: payload.is_portable,
@@ -1216,10 +1440,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           name: item.name,
           brand_model: item.brand_model,
           category: item.category,
-          category_label: ASSET_CATEGORY_LABELS[item.category],
+          category_label: resolveAssetCategoryLabel(
+            item.category,
+            assetCategories
+          ),
           room_id: item.room_id,
           procurement_year: item.procurement_year,
           funding_source: item.funding_source,
+          funding_source_id: item.funding_source_id || null,
           acquisition_cost: item.acquisition_cost,
           condition: item.condition,
           is_portable: item.is_portable,
@@ -1251,7 +1479,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     (id: string, payload: Partial<Omit<Asset, "id" | "created_at">>) => {
       if (!requireStaffForLiveWrite()) return;
       const nextLabel = payload.category
-        ? ASSET_CATEGORY_LABELS[payload.category]
+        ? resolveAssetCategoryLabel(payload.category, assetCategories)
         : undefined;
 
       setAssets((prev) =>
@@ -1267,14 +1495,18 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (isLiveSupabase && authUser) {
+        const cleanAssetPayload = {
+          ...payload,
+          ...(nextLabel ? { category_label: nextLabel } : {}),
+        };
+        if (!extendedMasterReady) {
+          delete cleanAssetPayload.funding_source_id;
+        }
         void sendMutation(
           {
             action: "update_asset",
             id,
-            data: {
-              ...payload,
-              ...(nextLabel ? { category_label: nextLabel } : {}),
-            },
+            data: cleanAssetPayload,
           },
           "Memperbarui Aset",
           "Inventaris Diperbarui",
@@ -1427,6 +1659,13 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               borrower_name: payload.borrower_name,
               borrower_role: payload.borrower_role,
               borrower_unit: payload.borrower_unit,
+              ...(extendedMasterReady
+                ? {
+                    unit_id: payload.unit_id || null,
+                    borrower_lecturer_id: payload.borrower_lecturer_id || null,
+                    borrower_official_id: payload.borrower_official_id || null,
+                  }
+                : {}),
               borrower_phone: payload.borrower_phone,
               target_type: payload.target_type,
               room_id: payload.room_id || null,
@@ -1470,7 +1709,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       id: string,
       status: BookingStatus,
       returnNotes?: string,
-      approvedBy?: string
+      approvedBy?: string,
+      approvedByOfficialId?: string | null
     ) => {
       if (!requireStaffForLiveWrite()) return;
       const target = bookings.find((b) => b.id === id);
@@ -1485,6 +1725,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
                     ? returnNotes
                     : item.return_condition_notes,
                 approved_by: approvedBy || item.approved_by,
+                approved_by_official_id:
+                  approvedByOfficialId !== undefined
+                    ? approvedByOfficialId
+                    : item.approved_by_official_id,
               }
             : item
         )
@@ -1528,6 +1772,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
                 ? { return_condition_notes: returnNotes }
                 : {}),
               ...(approvedBy ? { approved_by: approvedBy } : {}),
+              ...(extendedMasterReady && approvedByOfficialId !== undefined
+                ? { approved_by_official_id: approvedByOfficialId || null }
+                : {}),
             },
             roomId: target?.room_id || null,
             nextRoomStatus,
@@ -1712,6 +1959,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       update: {
         status: MaintenanceStatus;
         technician_vendor?: string;
+        vendor_id?: string | null;
         repair_cost?: number;
         resolution_notes?: string;
       }
@@ -1733,6 +1981,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
                   update.technician_vendor !== undefined
                     ? update.technician_vendor
                     : item.technician_vendor,
+                vendor_id:
+                  update.vendor_id !== undefined
+                    ? update.vendor_id
+                    : item.vendor_id,
                 repair_cost:
                   update.repair_cost !== undefined
                     ? update.repair_cost
@@ -1776,6 +2028,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               status: update.status,
               ...(update.technician_vendor !== undefined
                 ? { technician_vendor: update.technician_vendor }
+                : {}),
+              ...(extendedMasterReady && update.vendor_id !== undefined
+                ? { vendor_id: update.vendor_id || null }
                 : {}),
               ...(update.repair_cost !== undefined
                 ? { repair_cost: update.repair_cost }
@@ -2065,6 +2320,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               quantity: payload.quantity,
               actor_name: payload.actor_name,
               actor_unit: payload.actor_unit,
+              ...(extendedMasterReady ? { unit_id: payload.unit_id || null } : {}),
               purpose_notes: payload.purpose_notes || null,
             },
           },
@@ -2266,6 +2522,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               nidn_nip: payload.nidn_nip,
               full_name: payload.full_name,
               homebase_prodi: payload.homebase_prodi,
+              ...(extendedMasterReady ? { unit_id: payload.unit_id || null } : {}),
               employment_status: payload.employment_status,
               academic_rank: payload.academic_rank || "-",
               email: payload.email || null,
@@ -2305,8 +2562,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (isLiveSupabase && authUser) {
+        const cleanPayload = { ...payload };
+        if (!extendedMasterReady) delete cleanPayload.unit_id;
         void sendMutation(
-          { action: "update_lecturer", id, data: payload },
+          { action: "update_lecturer", id, data: cleanPayload },
           "Memperbarui Data Dosen",
           "Data Dosen Diperbarui",
           "Perubahan data dosen tersimpan di Supabase."
@@ -2388,6 +2647,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               code: payload.code,
               name: payload.name,
               prodi: payload.prodi,
+              ...(extendedMasterReady ? { unit_id: payload.unit_id || null } : {}),
               semester: payload.semester,
               curriculum_year: payload.curriculum_year,
               sks_theory: payload.sks_theory,
@@ -2429,8 +2689,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (isLiveSupabase && authUser) {
+        const cleanPayload = { ...payload };
+        if (!extendedMasterReady) delete cleanPayload.unit_id;
         void sendMutation(
-          { action: "update_course", id, data: payload },
+          { action: "update_course", id, data: cleanPayload },
           "Memperbarui Mata Kuliah",
           "Mata Kuliah Diperbarui",
           "Perubahan data mata kuliah tersimpan di Supabase."
@@ -2510,6 +2772,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               full_name: payload.full_name,
               position_title: payload.position_title,
               unit_name: payload.unit_name,
+              ...(extendedMasterReady ? { unit_id: payload.unit_id || null } : {}),
               category: payload.category,
               email: payload.email || null,
               phone: payload.phone || null,
@@ -2551,8 +2814,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (isLiveSupabase && authUser) {
+        const cleanPayload = { ...payload };
+        if (!extendedMasterReady) delete cleanPayload.unit_id;
         void sendMutation(
-          { action: "update_official", id, data: payload },
+          { action: "update_official", id, data: cleanPayload },
           "Memperbarui Pengurus Kampus",
           "Data Pengurus Diperbarui",
           "Perubahan data pengurus kampus tersimpan di Supabase."
@@ -2611,6 +2876,765 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  // ============================================================================
+  // DATA MASTER PRIORITAS 1: UNIT/PRODI/ORMAWA, TEKNISI & VENDOR, DAN REFERENSI
+  // ============================================================================
+
+  const addCampusUnit = useCallback(
+    (payload: Omit<CampusUnit, "id" | "created_at">) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      const id = generateUuid();
+      const newItem: CampusUnit = {
+        ...payload,
+        id,
+        created_at: new Date().toISOString(),
+      };
+      setCampusUnits((prev) => [newItem, ...prev]);
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_campus_unit",
+            data: {
+              id,
+              code: payload.code,
+              name: payload.name,
+              unit_type: payload.unit_type,
+              parent_unit_id: payload.parent_unit_id || null,
+              leader_name: payload.leader_name || null,
+              phone: payload.phone || null,
+              email: payload.email || null,
+              is_active: payload.is_active,
+              notes: payload.notes || null,
+            },
+          },
+          "Menambah Unit Kampus",
+          "Unit Kampus Tersimpan",
+          `${newItem.code} (${newItem.name}) berhasil disimpan ke database.`
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Unit Kampus Ditambahkan",
+        `${newItem.code} (${newItem.name}) berhasil dicatat.`
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const updateCampusUnit = useCallback(
+    (id: string, payload: Partial<Omit<CampusUnit, "id" | "created_at">>) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      setCampusUnits((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_campus_unit", id, data: payload },
+          "Memperbarui Unit Kampus",
+          "Unit Kampus Diperbarui",
+          "Perubahan data unit/prodi/ormawa tersimpan di Supabase."
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Unit Kampus Diperbarui",
+        "Perubahan data unit/prodi/ormawa berhasil disimpan."
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const deleteCampusUnit = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireMasterAdminForDataMaster()) {
+        return { ok: false, error: "Akses Master Admin diperlukan." };
+      }
+      const target = campusUnits.find((u) => u.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_campus_unit", id },
+          "Menghapus Unit Kampus",
+          "Unit Kampus Dihapus",
+          `${target?.name || ""} telah dihapus dari Data Master.`
+        );
+      }
+
+      setCampusUnits((prev) =>
+        prev
+          .filter((item) => item.id !== id)
+          .map((item) =>
+            item.parent_unit_id === id ? { ...item, parent_unit_id: null } : item
+          )
+      );
+      setLecturers((prev) =>
+        prev.map((l) => (l.unit_id === id ? { ...l, unit_id: null } : l))
+      );
+      setCourses((prev) =>
+        prev.map((c) => (c.unit_id === id ? { ...c, unit_id: null } : c))
+      );
+      setCampusOfficials((prev) =>
+        prev.map((o) => (o.unit_id === id ? { ...o, unit_id: null } : o))
+      );
+      setBookings((prev) =>
+        prev.map((b) => (b.unit_id === id ? { ...b, unit_id: null } : b))
+      );
+      setConsumableTransactions((prev) =>
+        prev.map((t) => (t.unit_id === id ? { ...t, unit_id: null } : t))
+      );
+      removeEntityArtifactsLocal("unit", id);
+      notify(
+        "info",
+        "Unit Kampus Dihapus",
+        `${target?.name || ""} telah dihapus dari Data Master.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      campusUnits,
+      isLiveSupabase,
+      notify,
+      removeEntityArtifactsLocal,
+      requireMasterAdminForDataMaster,
+      sendConfirmedMutation,
+    ]
+  );
+
+  const addMaintenanceVendor = useCallback(
+    (payload: Omit<MaintenanceVendor, "id" | "created_at">) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      const id = generateUuid();
+      const newItem: MaintenanceVendor = {
+        ...payload,
+        id,
+        created_at: new Date().toISOString(),
+      };
+      setMaintenanceVendors((prev) => [newItem, ...prev]);
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_vendor",
+            data: {
+              id,
+              vendor_code: payload.vendor_code,
+              name: payload.name,
+              vendor_type: payload.vendor_type,
+              specialty: payload.specialty,
+              pic_name: payload.pic_name,
+              phone: payload.phone,
+              email: payload.email || null,
+              address: payload.address || null,
+              is_active: payload.is_active,
+              notes: payload.notes || null,
+            },
+          },
+          "Menambah Teknisi / Vendor",
+          "Teknisi / Vendor Tersimpan",
+          `${newItem.vendor_code} (${newItem.name}) berhasil disimpan.`
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Teknisi / Vendor Ditambahkan",
+        `${newItem.vendor_code} (${newItem.name}) berhasil dicatat.`
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const updateMaintenanceVendor = useCallback(
+    (
+      id: string,
+      payload: Partial<Omit<MaintenanceVendor, "id" | "created_at">>
+    ) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      setMaintenanceVendors((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_vendor", id, data: payload },
+          "Memperbarui Teknisi / Vendor",
+          "Teknisi / Vendor Diperbarui",
+          "Perubahan data teknisi/vendor tersimpan di Supabase."
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Teknisi / Vendor Diperbarui",
+        "Perubahan data teknisi/vendor berhasil disimpan."
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const deleteMaintenanceVendor = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireMasterAdminForDataMaster()) {
+        return { ok: false, error: "Akses Master Admin diperlukan." };
+      }
+      const target = maintenanceVendors.find((v) => v.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_vendor", id },
+          "Menghapus Teknisi / Vendor",
+          "Teknisi / Vendor Dihapus",
+          `${target?.name || ""} telah dihapus dari Data Master.`
+        );
+      }
+
+      setMaintenanceVendors((prev) => prev.filter((item) => item.id !== id));
+      setMaintenanceLogs((prev) =>
+        prev.map((m) => (m.vendor_id === id ? { ...m, vendor_id: null } : m))
+      );
+      removeEntityArtifactsLocal("vendor", id);
+      notify(
+        "info",
+        "Teknisi / Vendor Dihapus",
+        `${target?.name || ""} telah dihapus dari daftar vendor.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      maintenanceVendors,
+      notify,
+      removeEntityArtifactsLocal,
+      requireMasterAdminForDataMaster,
+      sendConfirmedMutation,
+    ]
+  );
+
+  const addAssetCategory = useCallback(
+    (payload: Omit<AssetCategory, "id" | "created_at">) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      const id = generateUuid();
+      const newItem: AssetCategory = {
+        ...payload,
+        code: payload.code.trim().toUpperCase(),
+        id,
+        created_at: new Date().toISOString(),
+      };
+      setAssetCategories((prev) => [newItem, ...prev]);
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_asset_category",
+            data: {
+              id,
+              code: newItem.code,
+              name: payload.name,
+              description: payload.description || null,
+              useful_life_years: payload.useful_life_years,
+              is_active: payload.is_active,
+            },
+          },
+          "Menambah Kategori Aset",
+          "Kategori Aset Tersimpan",
+          `${newItem.code} (${newItem.name}) berhasil disimpan.`
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Kategori Aset Ditambahkan",
+        `${newItem.code} (${newItem.name}) berhasil ditambahkan.`
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const updateAssetCategory = useCallback(
+    (id: string, payload: Partial<Omit<AssetCategory, "id" | "created_at">>) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      setAssetCategories((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_asset_category", id, data: payload },
+          "Memperbarui Kategori Aset",
+          "Kategori Aset Diperbarui",
+          "Perubahan kategori aset tersimpan di Supabase."
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Kategori Aset Diperbarui",
+        "Perubahan kategori aset berhasil disimpan."
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const deleteAssetCategory = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireMasterAdminForDataMaster()) {
+        return { ok: false, error: "Akses Master Admin diperlukan." };
+      }
+      const target = assetCategories.find((c) => c.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_asset_category", id },
+          "Menghapus Kategori Aset",
+          "Kategori Aset Dihapus",
+          `Kategori ${target?.code || ""} telah dihapus.`
+        );
+      }
+
+      const usedCount = target
+        ? assets.filter((a) => a.category === target.code).length
+        : 0;
+      if (usedCount > 0) {
+        const err = `Kategori "${target?.code}" masih digunakan oleh ${usedCount} unit aset.`;
+        notify("error", "Gagal Menghapus Kategori", err);
+        return { ok: false, error: err };
+      }
+
+      setAssetCategories((prev) => prev.filter((item) => item.id !== id));
+      notify(
+        "info",
+        "Kategori Aset Dihapus",
+        `Kategori ${target?.code || ""} telah dihapus.`
+      );
+      return { ok: true };
+    },
+    [
+      assetCategories,
+      assets,
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendConfirmedMutation,
+    ]
+  );
+
+  const addFundingSource = useCallback(
+    (payload: Omit<FundingSource, "id" | "created_at">) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      const id = generateUuid();
+      const newItem: FundingSource = {
+        ...payload,
+        code: payload.code.trim().toUpperCase(),
+        id,
+        created_at: new Date().toISOString(),
+      };
+      setFundingSources((prev) => [newItem, ...prev]);
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_funding_source",
+            data: {
+              id,
+              code: newItem.code,
+              name: payload.name,
+              source_type: payload.source_type,
+              is_active: payload.is_active,
+              notes: payload.notes || null,
+            },
+          },
+          "Menambah Sumber Dana",
+          "Sumber Dana Tersimpan",
+          `${newItem.code} (${newItem.name}) berhasil disimpan.`
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Sumber Dana Ditambahkan",
+        `${newItem.code} (${newItem.name}) berhasil ditambahkan.`
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const updateFundingSource = useCallback(
+    (id: string, payload: Partial<Omit<FundingSource, "id" | "created_at">>) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      setFundingSources((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_funding_source", id, data: payload },
+          "Memperbarui Sumber Dana",
+          "Sumber Dana Diperbarui",
+          "Perubahan sumber dana tersimpan di Supabase."
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Sumber Dana Diperbarui",
+        "Perubahan sumber dana berhasil disimpan."
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const deleteFundingSource = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireMasterAdminForDataMaster()) {
+        return { ok: false, error: "Akses Master Admin diperlukan." };
+      }
+      const target = fundingSources.find((f) => f.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_funding_source", id },
+          "Menghapus Sumber Dana",
+          "Sumber Dana Dihapus",
+          `Sumber dana ${target?.name || ""} telah dihapus.`
+        );
+      }
+
+      setFundingSources((prev) => prev.filter((item) => item.id !== id));
+      setAssets((prev) =>
+        prev.map((a) =>
+          a.funding_source_id === id ? { ...a, funding_source_id: null } : a
+        )
+      );
+      notify(
+        "info",
+        "Sumber Dana Dihapus",
+        `Sumber dana ${target?.name || ""} telah dihapus.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      fundingSources,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendConfirmedMutation,
+    ]
+  );
+
+  const addConsumableCategory = useCallback(
+    (payload: Omit<ConsumableCategoryMaster, "id" | "created_at">) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      const id = generateUuid();
+      const newItem: ConsumableCategoryMaster = {
+        ...payload,
+        code: payload.code.trim().toUpperCase(),
+        id,
+        created_at: new Date().toISOString(),
+      };
+      setConsumableCategories((prev) => [newItem, ...prev]);
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_consumable_category",
+            data: {
+              id,
+              code: newItem.code,
+              name: payload.name,
+              description: payload.description || null,
+              is_active: payload.is_active,
+            },
+          },
+          "Menambah Kategori BHP",
+          "Kategori BHP Tersimpan",
+          `${newItem.name} berhasil disimpan.`
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Kategori BHP Ditambahkan",
+        `${newItem.name} berhasil ditambahkan.`
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const updateConsumableCategory = useCallback(
+    (
+      id: string,
+      payload: Partial<Omit<ConsumableCategoryMaster, "id" | "created_at">>
+    ) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      setConsumableCategories((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_consumable_category", id, data: payload },
+          "Memperbarui Kategori BHP",
+          "Kategori BHP Diperbarui",
+          "Perubahan kategori BHP tersimpan di Supabase."
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Kategori BHP Diperbarui",
+        "Perubahan kategori BHP berhasil disimpan."
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const deleteConsumableCategory = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireMasterAdminForDataMaster()) {
+        return { ok: false, error: "Akses Master Admin diperlukan." };
+      }
+      const target = consumableCategories.find((c) => c.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_consumable_category", id },
+          "Menghapus Kategori BHP",
+          "Kategori BHP Dihapus",
+          `Kategori BHP ${target?.name || ""} telah dihapus.`
+        );
+      }
+
+      const usedCount = target
+        ? consumables.filter((c) => c.category === target.name).length
+        : 0;
+      if (usedCount > 0) {
+        const err = `Kategori BHP "${target?.name}" masih digunakan oleh ${usedCount} item BHP.`;
+        notify("error", "Gagal Menghapus Kategori BHP", err);
+        return { ok: false, error: err };
+      }
+
+      setConsumableCategories((prev) => prev.filter((item) => item.id !== id));
+      notify(
+        "info",
+        "Kategori BHP Dihapus",
+        `Kategori BHP ${target?.name || ""} telah dihapus.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      consumableCategories,
+      consumables,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendConfirmedMutation,
+    ]
+  );
+
+  const addConsumableUnit = useCallback(
+    (payload: Omit<ConsumableUnitMaster, "id" | "created_at">) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      const id = generateUuid();
+      const newItem: ConsumableUnitMaster = {
+        ...payload,
+        code: payload.code.trim().toUpperCase(),
+        id,
+        created_at: new Date().toISOString(),
+      };
+      setConsumableUnits((prev) => [newItem, ...prev]);
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_consumable_unit",
+            data: {
+              id,
+              code: newItem.code,
+              name: payload.name,
+              description: payload.description || null,
+              is_active: payload.is_active,
+            },
+          },
+          "Menambah Satuan BHP",
+          "Satuan BHP Tersimpan",
+          `Satuan ${newItem.name} berhasil disimpan.`
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Satuan BHP Ditambahkan",
+        `Satuan ${newItem.name} berhasil ditambahkan.`
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const updateConsumableUnit = useCallback(
+    (
+      id: string,
+      payload: Partial<Omit<ConsumableUnitMaster, "id" | "created_at">>
+    ) => {
+      if (!requireMasterAdminForDataMaster()) return;
+      setConsumableUnits((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_consumable_unit", id, data: payload },
+          "Memperbarui Satuan BHP",
+          "Satuan BHP Diperbarui",
+          "Perubahan satuan BHP tersimpan di Supabase."
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Satuan BHP Diperbarui",
+        "Perubahan satuan BHP berhasil disimpan."
+      );
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const deleteConsumableUnit = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireMasterAdminForDataMaster()) {
+        return { ok: false, error: "Akses Master Admin diperlukan." };
+      }
+      const target = consumableUnits.find((u) => u.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_consumable_unit", id },
+          "Menghapus Satuan BHP",
+          "Satuan BHP Dihapus",
+          `Satuan ${target?.name || ""} telah dihapus.`
+        );
+      }
+
+      const usedCount = target
+        ? consumables.filter((c) => c.unit === target.name).length
+        : 0;
+      if (usedCount > 0) {
+        const err = `Satuan "${target?.name}" masih digunakan oleh ${usedCount} item BHP.`;
+        notify("error", "Gagal Menghapus Satuan BHP", err);
+        return { ok: false, error: err };
+      }
+
+      setConsumableUnits((prev) => prev.filter((item) => item.id !== id));
+      notify(
+        "info",
+        "Satuan BHP Dihapus",
+        `Satuan ${target?.name || ""} telah dihapus.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      consumableUnits,
+      consumables,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendConfirmedMutation,
+    ]
+  );
+
   const value = useMemo<SarprasContextValue>(
     () => ({
       buildings: uiSimState === "empty" ? [] : buildings,
@@ -2626,6 +3650,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       lecturers: uiSimState === "empty" ? [] : lecturers,
       courses: uiSimState === "empty" ? [] : courses,
       campusOfficials: uiSimState === "empty" ? [] : campusOfficials,
+      campusUnits: uiSimState === "empty" ? [] : campusUnits,
+      maintenanceVendors: uiSimState === "empty" ? [] : maintenanceVendors,
+      assetCategories: uiSimState === "empty" ? [] : assetCategories,
+      fundingSources: uiSimState === "empty" ? [] : fundingSources,
+      consumableCategories:
+        uiSimState === "empty" ? [] : consumableCategories,
+      consumableUnits: uiSimState === "empty" ? [] : consumableUnits,
+      extendedMasterReady,
       canManageDataMaster,
       isLiveSupabase,
       serverConfigured,
@@ -2678,6 +3710,24 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       addCampusOfficial,
       updateCampusOfficial,
       deleteCampusOfficial,
+      addCampusUnit,
+      updateCampusUnit,
+      deleteCampusUnit,
+      addMaintenanceVendor,
+      updateMaintenanceVendor,
+      deleteMaintenanceVendor,
+      addAssetCategory,
+      updateAssetCategory,
+      deleteAssetCategory,
+      addFundingSource,
+      updateFundingSource,
+      deleteFundingSource,
+      addConsumableCategory,
+      updateConsumableCategory,
+      deleteConsumableCategory,
+      addConsumableUnit,
+      updateConsumableUnit,
+      deleteConsumableUnit,
     }),
     [
       uiSimState,
@@ -2693,6 +3743,13 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       lecturers,
       courses,
       campusOfficials,
+      campusUnits,
+      maintenanceVendors,
+      assetCategories,
+      fundingSources,
+      consumableCategories,
+      consumableUnits,
+      extendedMasterReady,
       canManageDataMaster,
       isLiveSupabase,
       serverConfigured,
@@ -2742,6 +3799,24 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       addCampusOfficial,
       updateCampusOfficial,
       deleteCampusOfficial,
+      addCampusUnit,
+      updateCampusUnit,
+      deleteCampusUnit,
+      addMaintenanceVendor,
+      updateMaintenanceVendor,
+      deleteMaintenanceVendor,
+      addAssetCategory,
+      updateAssetCategory,
+      deleteAssetCategory,
+      addFundingSource,
+      updateFundingSource,
+      deleteFundingSource,
+      addConsumableCategory,
+      updateConsumableCategory,
+      deleteConsumableCategory,
+      addConsumableUnit,
+      updateConsumableUnit,
+      deleteConsumableUnit,
     ]
   );
 

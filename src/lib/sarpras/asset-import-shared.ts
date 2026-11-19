@@ -1,5 +1,15 @@
-import { ASSET_CATEGORY_LABELS, generateInventoryCode } from "@/lib/supabase/client";
-import { Asset, AssetCategoryCode, AssetCondition, Room } from "@/types/sarpras";
+import {
+  ASSET_CATEGORY_LABELS,
+  generateInventoryCode,
+} from "@/lib/supabase/client";
+import {
+  Asset,
+  AssetCategory,
+  AssetCategoryCode,
+  AssetCondition,
+  FundingSource,
+  Room,
+} from "@/types/sarpras";
 
 export const MAX_IMPORT_ROWS = 500;
 export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -13,6 +23,15 @@ export const ASSET_CATEGORY_CODES: AssetCategoryCode[] = [
   "MBL",
   "LNY",
 ];
+
+export type AssetCategoryRef = Pick<AssetCategory, "code" | "name">;
+export type FundingSourceRef = Pick<FundingSource, "id" | "code" | "name">;
+
+export const DEFAULT_ASSET_CATEGORY_REFS: AssetCategoryRef[] =
+  ASSET_CATEGORY_CODES.map((code) => ({
+    code,
+    name: ASSET_CATEGORY_LABELS[code] || code,
+  }));
 
 export const ASSET_CONDITION_LIST: AssetCondition[] = [
   "Baik",
@@ -62,6 +81,7 @@ export interface NormalizedImportAssetPayload {
   acquisition_cost: number;
   condition: AssetCondition;
   funding_source: string;
+  funding_source_id?: string | null;
   serial_number: string;
   is_portable: boolean;
   notes: string;
@@ -77,6 +97,7 @@ export interface ImportPreviewRow {
   rawCost: string;
   rawCondition: string;
   fundingSource: string;
+  fundingSourceId?: string | null;
   serialNumber: string;
   rawPortable: string;
   notes: string;
@@ -128,35 +149,82 @@ export function cleanCellText(value: unknown): string {
   return String(value).replace(/\u0000/g, "").trim();
 }
 
-export function formatCategoryDropdownOption(code: AssetCategoryCode): string {
-  return `${code} - ${ASSET_CATEGORY_LABELS[code]}`;
+export function formatCategoryDropdownOption(
+  codeOrCategory: AssetCategoryCode | AssetCategoryRef
+): string {
+  if (typeof codeOrCategory === "string") {
+    return `${codeOrCategory} - ${ASSET_CATEGORY_LABELS[codeOrCategory] || codeOrCategory}`;
+  }
+  return `${codeOrCategory.code} - ${codeOrCategory.name}`;
+}
+
+export function formatFundingSourceDropdownOption(
+  source: FundingSourceRef
+): string {
+  return source.name;
 }
 
 export function formatRoomDropdownOption(room: Pick<Room, "code" | "name">): string {
   return `${room.code} - ${room.name}`;
 }
 
-export function resolveCategoryCode(raw: string): AssetCategoryCode | null {
+export function resolveCategoryEntry(
+  raw: string,
+  categories: AssetCategoryRef[] = DEFAULT_ASSET_CATEGORY_REFS
+): AssetCategoryRef | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
+  const list = categories.length > 0 ? categories : DEFAULT_ASSET_CATEGORY_REFS;
   const upper = trimmed.toUpperCase();
-  const directMatch = ASSET_CATEGORY_CODES.find((c) => c === upper);
+
+  const directMatch = list.find((c) => c.code.toUpperCase() === upper);
   if (directMatch) return directMatch;
 
   // Cocokkan format "ELK - Elektronik & Visual" atau "ELK-..."
   const prefixToken = upper.split(/[\s\-–:]+/)[0];
-  const prefixMatch = ASSET_CATEGORY_CODES.find((c) => c === prefixToken);
+  const prefixMatch = list.find((c) => c.code.toUpperCase() === prefixToken);
   if (prefixMatch) return prefixMatch;
 
   // Cocokkan berdasarkan label penuh
   const lower = trimmed.toLowerCase();
-  for (const code of ASSET_CATEGORY_CODES) {
-    if (ASSET_CATEGORY_LABELS[code].toLowerCase() === lower) {
-      return code;
+  const labelMatch = list.find((c) => c.name.toLowerCase() === lower);
+  if (labelMatch) return labelMatch;
+
+  return null;
+}
+
+export function resolveCategoryCode(
+  raw: string,
+  categories: AssetCategoryRef[] = DEFAULT_ASSET_CATEGORY_REFS
+): AssetCategoryCode | null {
+  return resolveCategoryEntry(raw, categories)?.code || null;
+}
+
+export function resolveFundingSourceSelection(
+  raw: string,
+  fundingSources?: FundingSourceRef[]
+): { matched: true; id: string | null; name: string } | { matched: false } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { matched: false };
+
+  if (!fundingSources || fundingSources.length === 0) {
+    return { matched: true, id: null, name: trimmed };
+  }
+
+  const lower = trimmed.toLowerCase();
+  for (const fs of fundingSources) {
+    const codeName = `${fs.code} - ${fs.name}`.toLowerCase();
+    if (
+      lower === fs.name.toLowerCase() ||
+      lower === fs.code.toLowerCase() ||
+      lower === codeName
+    ) {
+      return { matched: true, id: fs.id, name: fs.name };
     }
   }
-  return null;
+
+  return { matched: false };
 }
 
 export function resolveRoomSelection(
@@ -263,7 +331,9 @@ export function parseCurrencyNumber(raw: string): number | null {
 export function validateImportAssetRows(
   rawRows: RawImportAssetRow[],
   rooms: RoomLookupRef[],
-  existingAssets: ExistingAssetRef[]
+  existingAssets: ExistingAssetRef[],
+  categories: AssetCategoryRef[] = DEFAULT_ASSET_CATEGORY_REFS,
+  fundingSources?: FundingSourceRef[]
 ): ImportParseResult {
   if (rawRows.length === 0) {
     return {
@@ -287,6 +357,10 @@ export function validateImportAssetRows(
     };
   }
 
+  const activeCategories =
+    categories.length > 0 ? categories : DEFAULT_ASSET_CATEGORY_REFS;
+  const categoryCodesHint = activeCategories.map((c) => c.code).join(", ");
+
   const existingSerialMap = new Map<string, string>();
   for (const asset of existingAssets) {
     const key = normalizeSerialKey(asset.serial_number);
@@ -309,11 +383,11 @@ export function validateImportAssetRows(
   const previewRows: ImportPreviewRow[] = rawRows.map((raw) => {
     const errors: string[] = [];
 
-    const categoryCode = resolveCategoryCode(raw.category);
-    if (!categoryCode) {
+    const categoryMatch = resolveCategoryEntry(raw.category, activeCategories);
+    if (!categoryMatch) {
       errors.push(
         raw.category
-          ? `Kategori "${raw.category}" tidak dikenal (gunakan ELK, KOM, KLM, AUD, MBL, atau LNY).`
+          ? `Kategori "${raw.category}" tidak dikenal (gunakan: ${categoryCodesHint}).`
           : "Kategori Inventaris wajib diisi."
       );
     }
@@ -365,12 +439,20 @@ export function validateImportAssetRows(
       );
     }
 
-    const fundingSource = raw.fundingSource.trim();
-    if (!fundingSource) {
+    const rawFunding = raw.fundingSource.trim();
+    const fundingMatch = resolveFundingSourceSelection(rawFunding, fundingSources);
+    if (!rawFunding) {
       errors.push("Sumber Dana Pengadaan wajib diisi.");
-    } else if (fundingSource.length > 100) {
+    } else if (rawFunding.length > 100) {
       errors.push("Sumber Dana maksimal 100 karakter.");
+    } else if (!fundingMatch.matched) {
+      errors.push(
+        `Sumber Dana "${rawFunding}" tidak terdaftar di Master Sumber Dana.`
+      );
     }
+
+    const fundingSource = fundingMatch.matched ? fundingMatch.name : rawFunding;
+    const fundingSourceId = fundingMatch.matched ? fundingMatch.id : null;
 
     const serialNumber = raw.serialNumber.trim() || "-";
     if (serialNumber.length > 100) {
@@ -411,17 +493,17 @@ export function validateImportAssetRows(
 
     if (
       isValid &&
-      categoryCode &&
+      categoryMatch &&
       roomMatch.matched &&
       condition &&
       costNum !== null &&
       portableRes.valid
     ) {
       nextSeq += 1;
-      projectedCode = generateInventoryCode(categoryCode, yearNum, nextSeq);
+      projectedCode = generateInventoryCode(categoryMatch.code, yearNum, nextSeq);
       payload = {
-        category: categoryCode,
-        category_label: ASSET_CATEGORY_LABELS[categoryCode],
+        category: categoryMatch.code,
+        category_label: categoryMatch.name,
         room_id: roomMatch.roomId,
         name,
         brand_model: brandModel,
@@ -429,6 +511,7 @@ export function validateImportAssetRows(
         acquisition_cost: costNum,
         condition,
         funding_source: fundingSource,
+        funding_source_id: fundingSourceId,
         serial_number: serialNumber,
         is_portable: portableRes.value,
         notes,
@@ -445,6 +528,7 @@ export function validateImportAssetRows(
       rawCost: raw.acquisitionCost,
       rawCondition: raw.condition,
       fundingSource,
+      fundingSourceId,
       serialNumber,
       rawPortable: raw.isPortable || "Tidak",
       notes,

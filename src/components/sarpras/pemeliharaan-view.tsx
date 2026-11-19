@@ -70,6 +70,9 @@ export function PemeliharaanView() {
     rooms,
     assets,
     maintenanceLogs,
+    maintenanceVendors,
+    campusOfficials,
+    lecturers,
     notes,
     attachments,
     uiSimState,
@@ -93,6 +96,7 @@ export function PemeliharaanView() {
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [assetId, setAssetId] = useState("");
   const [roomId, setRoomId] = useState("");
+  const [reporterQuickPick, setReporterQuickPick] = useState("");
   const [reporterName, setReporterName] = useState("");
   const [reporterRole, setReporterRole] = useState("PIC Ruangan / Dosen");
   const [issueTitle, setIssueTitle] = useState("");
@@ -110,6 +114,7 @@ export function PemeliharaanView() {
   );
   const [trackStatus, setTrackStatus] =
     useState<MaintenanceStatus>("Dalam Pengerjaan");
+  const [vendorId, setVendorId] = useState("");
   const [technicianVendor, setTechnicianVendor] = useState("");
   const [repairCost, setRepairCost] = useState("0");
   const [resolutionNotes, setResolutionNotes] = useState("");
@@ -173,6 +178,7 @@ export function PemeliharaanView() {
     const firstAsset = assets[0];
     setAssetId(firstAsset?.id || "");
     setRoomId(firstAsset?.room_id || rooms[0]?.id || "");
+    setReporterQuickPick("");
     setReporterName("");
     setReporterRole("PIC Ruangan / Staf");
     setIssueTitle("");
@@ -241,7 +247,23 @@ export function PemeliharaanView() {
         ? "Selesai Diperbaiki"
         : ticket.status
     );
-    setTechnicianVendor(ticket.technician_vendor || "");
+    const matchedVendor =
+      maintenanceVendors.find((v) => v.id === ticket.vendor_id) ||
+      maintenanceVendors.find(
+        (v) =>
+          ticket.technician_vendor &&
+          ticket.technician_vendor.toLowerCase().includes(v.name.toLowerCase())
+      ) ||
+      (!ticket.technician_vendor
+        ? maintenanceVendors.find((v) => v.is_active)
+        : undefined);
+    setVendorId(matchedVendor?.id || "");
+    setTechnicianVendor(
+      ticket.technician_vendor ||
+        (matchedVendor
+          ? `${matchedVendor.name} (${matchedVendor.pic_name})`
+          : "")
+    );
     setRepairCost(String(ticket.repair_cost || 0));
     setResolutionNotes(ticket.resolution_notes || "");
   };
@@ -249,9 +271,16 @@ export function PemeliharaanView() {
   const handleTrackingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!trackingTicket) return;
+    const matchedVendor = maintenanceVendors.find((v) => v.id === vendorId);
+    const vendorDisplay = matchedVendor
+      ? matchedVendor.vendor_type === "Teknisi Internal"
+        ? matchedVendor.name
+        : `${matchedVendor.name} (${matchedVendor.pic_name})`
+      : technicianVendor.trim() || "Tim Teknisi Sarpras";
     updateMaintenanceStatus(trackingTicket.id, {
       status: trackStatus,
-      technician_vendor: technicianVendor.trim() || "Tim Teknisi Sarpras",
+      technician_vendor: vendorDisplay,
+      vendor_id: matchedVendor?.id || null,
       repair_cost: Math.max(0, Number(repairCost) || 0),
       resolution_notes: resolutionNotes.trim(),
     });
@@ -787,6 +816,50 @@ export function PemeliharaanView() {
             />
           </div>
 
+          {campusOfficials.length > 0 || lecturers.length > 0 ? (
+            <Select
+              label="Pilih Pelapor dari Data Master (Opsional)"
+              value={reporterQuickPick}
+              onChange={(e) => {
+                const val = e.target.value;
+                setReporterQuickPick(val);
+                if (!val) return;
+                if (val.startsWith("official:")) {
+                  const found = campusOfficials.find(
+                    (o) => o.id === val.slice("official:".length)
+                  );
+                  if (found) {
+                    setReporterName(found.full_name);
+                    setReporterRole(found.position_title);
+                  }
+                } else if (val.startsWith("lecturer:")) {
+                  const found = lecturers.find(
+                    (l) => l.id === val.slice("lecturer:".length)
+                  );
+                  if (found) {
+                    setReporterName(found.full_name);
+                    setReporterRole(`Dosen (${found.homebase_prodi})`);
+                  }
+                }
+              }}
+              options={[
+                { value: "", label: "-- Pilih pelapor atau ketik manual --" },
+                ...campusOfficials
+                  .filter((o) => o.is_active)
+                  .map((o) => ({
+                    value: `official:${o.id}`,
+                    label: `[Pengurus] ${o.full_name} (${o.position_title})`,
+                  })),
+                ...lecturers
+                  .filter((l) => l.is_active)
+                  .map((l) => ({
+                    value: `lecturer:${l.id}`,
+                    label: `[Dosen] ${l.full_name} (${l.homebase_prodi})`,
+                  })),
+              ]}
+            />
+          ) : null}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
               label="Nama Pelapor *"
@@ -887,13 +960,52 @@ export function PemeliharaanView() {
             options={STATUSES.map((s) => ({ value: s, label: s }))}
           />
 
-          <Input
-            label="Nama Teknisi / Vendor Pelaksana *"
-            placeholder="Contoh: CV Sejuk Teknik Mandiri (Pak Wahyu)"
-            value={technicianVendor}
-            onChange={(e) => setTechnicianVendor(e.target.value)}
-            required
-          />
+          {maintenanceVendors.some((v) => v.is_active) ? (
+            <Select
+              label="Teknisi / Vendor Pelaksana *"
+              value={vendorId || (technicianVendor ? "__LEGACY__" : "")}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === "__LEGACY__") {
+                  setVendorId("");
+                  return;
+                }
+                setVendorId(val);
+                const found = maintenanceVendors.find((v) => v.id === val);
+                if (found) {
+                  setTechnicianVendor(
+                    found.vendor_type === "Teknisi Internal"
+                      ? found.name
+                      : `${found.name} (${found.pic_name})`
+                  );
+                }
+              }}
+              options={[
+                ...maintenanceVendors
+                  .filter((v) => v.is_active)
+                  .map((v) => ({
+                    value: v.id,
+                    label: `${v.vendor_code} - ${v.name} [${v.specialty}] (PIC: ${v.pic_name})`,
+                  })),
+                ...(!vendorId && technicianVendor
+                  ? [
+                      {
+                        value: "__LEGACY__",
+                        label: `${technicianVendor} (Data Historis)`,
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          ) : (
+            <Input
+              label="Nama Teknisi / Vendor Pelaksana *"
+              placeholder="Contoh: CV Sejuk Teknik Mandiri (Pak Wahyu)"
+              value={technicianVendor}
+              onChange={(e) => setTechnicianVendor(e.target.value)}
+              required
+            />
+          )}
 
           <Input
             label="Biaya Perbaikan (Rp) *"

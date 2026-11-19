@@ -74,6 +74,24 @@ type MutationPayload =
   | { action: "insert_official"; data: Record<string, unknown> }
   | { action: "update_official"; id: string; data: Record<string, unknown> }
   | { action: "delete_official"; id: string }
+  | { action: "insert_campus_unit"; data: Record<string, unknown> }
+  | { action: "update_campus_unit"; id: string; data: Record<string, unknown> }
+  | { action: "delete_campus_unit"; id: string }
+  | { action: "insert_vendor"; data: Record<string, unknown> }
+  | { action: "update_vendor"; id: string; data: Record<string, unknown> }
+  | { action: "delete_vendor"; id: string }
+  | { action: "insert_asset_category"; data: Record<string, unknown> }
+  | { action: "update_asset_category"; id: string; data: Record<string, unknown> }
+  | { action: "delete_asset_category"; id: string }
+  | { action: "insert_funding_source"; data: Record<string, unknown> }
+  | { action: "update_funding_source"; id: string; data: Record<string, unknown> }
+  | { action: "delete_funding_source"; id: string }
+  | { action: "insert_consumable_category"; data: Record<string, unknown> }
+  | { action: "update_consumable_category"; id: string; data: Record<string, unknown> }
+  | { action: "delete_consumable_category"; id: string }
+  | { action: "insert_consumable_unit"; data: Record<string, unknown> }
+  | { action: "update_consumable_unit"; id: string; data: Record<string, unknown> }
+  | { action: "delete_consumable_unit"; id: string }
   | { action: "insert_note"; data: Record<string, unknown> }
   | { action: "delete_attachment"; id: string; filePath?: string };
 
@@ -93,6 +111,24 @@ const DATA_MASTER_ACTIONS = new Set([
   "insert_official",
   "update_official",
   "delete_official",
+  "insert_campus_unit",
+  "update_campus_unit",
+  "delete_campus_unit",
+  "insert_vendor",
+  "update_vendor",
+  "delete_vendor",
+  "insert_asset_category",
+  "update_asset_category",
+  "delete_asset_category",
+  "insert_funding_source",
+  "update_funding_source",
+  "delete_funding_source",
+  "insert_consumable_category",
+  "update_consumable_category",
+  "delete_consumable_category",
+  "insert_consumable_unit",
+  "update_consumable_unit",
+  "delete_consumable_unit",
 ]);
 
 const DATA_MASTER_ENTITY_TYPES = new Set<string>([
@@ -100,9 +136,23 @@ const DATA_MASTER_ENTITY_TYPES = new Set<string>([
   "lecturer",
   "course",
   "official",
+  "unit",
+  "vendor",
 ]);
 
 function formatDataMasterError(message: string): string {
+  if (
+    message.includes("campus_units") ||
+    message.includes("maintenance_vendors") ||
+    message.includes("asset_categories") ||
+    message.includes("funding_sources") ||
+    message.includes("consumable_categories") ||
+    message.includes("consumable_units")
+  ) {
+    if (message.includes("does not exist") || message.includes("schema cache")) {
+      return "Tabel Data Master lanjutan belum dibuat. Jalankan migrasi supabase/migrations/006_extended_master_data.sql di SQL Editor Supabase.";
+    }
+  }
   if (
     message.includes("lecturers") ||
     message.includes("courses") ||
@@ -474,9 +524,10 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const [roomsRes, assetsRes] = await Promise.all([
+        const [roomsRes, assetsRes, catRes] = await Promise.all([
           supabase.from("rooms").select("id"),
           supabase.from("assets").select("inventory_code, serial_number"),
+          supabase.from("asset_categories").select("code, name"),
         ]);
 
         if (roomsRes.error || assetsRes.error) {
@@ -489,6 +540,17 @@ export async function POST(request: NextRequest) {
             },
             { status: 500 }
           );
+        }
+
+        const categoryMap = new Map<string, string>();
+        if (!catRes.error && Array.isArray(catRes.data) && catRes.data.length > 0) {
+          for (const c of catRes.data) {
+            categoryMap.set(String(c.code).toUpperCase(), String(c.name));
+          }
+        } else {
+          for (const code of ASSET_CATEGORY_CODES) {
+            categoryMap.set(code, ASSET_CATEGORY_LABELS[code] || code);
+          }
         }
 
         const validRoomIds = new Set(
@@ -513,8 +575,9 @@ export async function POST(request: NextRequest) {
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
           const rowLabel = `Baris data ke-${i + 1}`;
+          const normalizedCat = String(item.category || "").trim().toUpperCase();
 
-          if (!ASSET_CATEGORY_CODES.includes(item.category)) {
+          if (!categoryMap.has(normalizedCat)) {
             return NextResponse.json(
               { error: `${rowLabel}: Kategori inventaris tidak valid.` },
               { status: 400 }
@@ -593,18 +656,25 @@ export async function POST(request: NextRequest) {
           }
 
           seq += 1;
-          const inventoryCode = generateInventoryCode(item.category, year, seq);
+          const normalizedCatCode = String(item.category || "").trim().toUpperCase();
+          const inventoryCode = generateInventoryCode(normalizedCatCode, year, seq);
 
           dbRows.push({
             id: crypto.randomUUID(),
             inventory_code: inventoryCode,
             name,
             brand_model: brandModel,
-            category: item.category,
-            category_label: ASSET_CATEGORY_LABELS[item.category],
+            category: normalizedCatCode,
+            category_label:
+              categoryMap.get(normalizedCatCode) ||
+              ASSET_CATEGORY_LABELS[normalizedCatCode] ||
+              normalizedCatCode,
             room_id: item.room_id || null,
             procurement_year: year,
             funding_source: fundingSource,
+            ...(item.funding_source_id
+              ? { funding_source_id: item.funding_source_id }
+              : {}),
             acquisition_cost: Math.round(cost),
             condition: item.condition,
             is_portable: Boolean(item.is_portable),
@@ -871,6 +941,291 @@ export async function POST(request: NextRequest) {
         await cleanupEntityArtifacts(supabase, "official", body.id);
         const { error } = await supabase
           .from("campus_officials")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_campus_unit": {
+        const { error } = await supabase.from("campus_units").insert(body.data);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_campus_unit": {
+        const { error } = await supabase
+          .from("campus_units")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_campus_unit": {
+        await cleanupEntityArtifacts(supabase, "unit", body.id);
+        const { error } = await supabase
+          .from("campus_units")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_vendor": {
+        const { error } = await supabase
+          .from("maintenance_vendors")
+          .insert(body.data);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_vendor": {
+        const { error } = await supabase
+          .from("maintenance_vendors")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_vendor": {
+        await cleanupEntityArtifacts(supabase, "vendor", body.id);
+        const { error } = await supabase
+          .from("maintenance_vendors")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_asset_category": {
+        const { error } = await supabase
+          .from("asset_categories")
+          .insert(body.data);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_asset_category": {
+        const { error } = await supabase
+          .from("asset_categories")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_asset_category": {
+        const { data: catRow } = await supabase
+          .from("asset_categories")
+          .select("code")
+          .eq("id", body.id)
+          .maybeSingle();
+        if (catRow?.code) {
+          const { count } = await supabase
+            .from("assets")
+            .select("id", { count: "exact", head: true })
+            .eq("category", catRow.code);
+          if ((count || 0) > 0) {
+            return NextResponse.json(
+              {
+                error: `Kategori "${catRow.code}" masih digunakan oleh ${count} unit aset di Inventaris. Ubah kategori aset tersebut terlebih dahulu.`,
+              },
+              { status: 409 }
+            );
+          }
+        }
+        const { error } = await supabase
+          .from("asset_categories")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_funding_source": {
+        const { error } = await supabase
+          .from("funding_sources")
+          .insert(body.data);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_funding_source": {
+        const { error } = await supabase
+          .from("funding_sources")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_funding_source": {
+        const { error } = await supabase
+          .from("funding_sources")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_consumable_category": {
+        const { error } = await supabase
+          .from("consumable_categories")
+          .insert(body.data);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_consumable_category": {
+        const { error } = await supabase
+          .from("consumable_categories")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_consumable_category": {
+        const { data: catRow } = await supabase
+          .from("consumable_categories")
+          .select("name")
+          .eq("id", body.id)
+          .maybeSingle();
+        if (catRow?.name) {
+          const { count } = await supabase
+            .from("consumables")
+            .select("id", { count: "exact", head: true })
+            .eq("category", catRow.name);
+          if ((count || 0) > 0) {
+            return NextResponse.json(
+              {
+                error: `Kategori BHP "${catRow.name}" masih digunakan oleh ${count} item BHP. Pindahkan kategori item tersebut terlebih dahulu.`,
+              },
+              { status: 409 }
+            );
+          }
+        }
+        const { error } = await supabase
+          .from("consumable_categories")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_consumable_unit": {
+        const { error } = await supabase
+          .from("consumable_units")
+          .insert(body.data);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_consumable_unit": {
+        const { error } = await supabase
+          .from("consumable_units")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_consumable_unit": {
+        const { data: unitRow } = await supabase
+          .from("consumable_units")
+          .select("name")
+          .eq("id", body.id)
+          .maybeSingle();
+        if (unitRow?.name) {
+          const { count } = await supabase
+            .from("consumables")
+            .select("id", { count: "exact", head: true })
+            .eq("unit", unitRow.name);
+          if ((count || 0) > 0) {
+            return NextResponse.json(
+              {
+                error: `Satuan "${unitRow.name}" masih digunakan oleh ${count} item BHP. Ubah satuan item tersebut terlebih dahulu.`,
+              },
+              { status: 409 }
+            );
+          }
+        }
+        const { error } = await supabase
+          .from("consumable_units")
           .delete()
           .eq("id", body.id);
         if (error) {

@@ -53,21 +53,38 @@ export async function GET() {
     return NextResponse.json({ error: firstError.message }, { status: 500 });
   }
 
-  // Ambil catatan, lampiran, dan Data Master secara opsional (tidak menggagalkan aplikasi bila migrasi 003/005 belum dijalankan)
-  const [notesRes, attachRes, lecturersRes, coursesRes, officialsRes] =
-    await Promise.all([
-      supabase
-        .from("sarpras_notes")
-        .select("*")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("sarpras_attachments")
-        .select("*")
-        .order("created_at", { ascending: false }),
-      supabase.from("lecturers").select("*").order("full_name"),
-      supabase.from("courses").select("*").order("code"),
-      supabase.from("campus_officials").select("*").order("official_code"),
-    ]);
+  // Ambil catatan, lampiran, dan Data Master secara opsional (tidak menggagalkan aplikasi bila migrasi 003/005/006 belum dijalankan)
+  const [
+    notesRes,
+    attachRes,
+    lecturersRes,
+    coursesRes,
+    officialsRes,
+    unitsRes,
+    vendorsRes,
+    assetCategoriesRes,
+    fundingSourcesRes,
+    consumableCategoriesRes,
+    consumableUnitsRes,
+  ] = await Promise.all([
+    supabase
+      .from("sarpras_notes")
+      .select("*")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("sarpras_attachments")
+      .select("*")
+      .order("created_at", { ascending: false }),
+    supabase.from("lecturers").select("*").order("full_name"),
+    supabase.from("courses").select("*").order("code"),
+    supabase.from("campus_officials").select("*").order("official_code"),
+    supabase.from("campus_units").select("*").order("code"),
+    supabase.from("maintenance_vendors").select("*").order("vendor_code"),
+    supabase.from("asset_categories").select("*").order("code"),
+    supabase.from("funding_sources").select("*").order("code"),
+    supabase.from("consumable_categories").select("*").order("code"),
+    supabase.from("consumable_units").select("*").order("code"),
+  ]);
 
   return NextResponse.json(
     {
@@ -83,6 +100,20 @@ export async function GET() {
       lecturers: lecturersRes.error ? [] : lecturersRes.data || [],
       courses: coursesRes.error ? [] : coursesRes.data || [],
       campusOfficials: officialsRes.error ? [] : officialsRes.data || [],
+      campusUnits: unitsRes.error ? null : unitsRes.data || [],
+      maintenanceVendors: vendorsRes.error ? null : vendorsRes.data || [],
+      assetCategories: assetCategoriesRes.error
+        ? null
+        : assetCategoriesRes.data || [],
+      fundingSources: fundingSourcesRes.error
+        ? null
+        : fundingSourcesRes.data || [],
+      consumableCategories: consumableCategoriesRes.error
+        ? null
+        : consumableCategoriesRes.data || [],
+      consumableUnits: consumableUnitsRes.error
+        ? null
+        : consumableUnitsRes.data || [],
     },
     { status: 200 }
   );

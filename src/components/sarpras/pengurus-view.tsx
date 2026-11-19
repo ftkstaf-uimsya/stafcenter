@@ -30,6 +30,7 @@ const OFFICIAL_CATEGORIES: CampusOfficialCategory[] = [
 export function PengurusView() {
   const {
     campusOfficials,
+    campusUnits,
     rooms,
     canManageDataMaster,
     uiSimState,
@@ -52,6 +53,7 @@ export function PengurusView() {
   const [officialCode, setOfficialCode] = useState("");
   const [fullName, setFullName] = useState("");
   const [positionTitle, setPositionTitle] = useState("");
+  const [unitId, setUnitId] = useState("");
   const [unitName, setUnitName] = useState("");
   const [category, setCategory] = useState<CampusOfficialCategory>(
     "Biro & Unit Administrasi"
@@ -121,12 +123,19 @@ export function PengurusView() {
     );
   }
 
+  const activeCampusUnits = useMemo(
+    () => campusUnits.filter((u) => u.is_active),
+    [campusUnits]
+  );
+
   const openAddModal = () => {
     setEditingItem(null);
     setOfficialCode("");
     setFullName("");
     setPositionTitle("");
-    setUnitName("");
+    const firstUnit = activeCampusUnits[0];
+    setUnitId(firstUnit?.id || "");
+    setUnitName(firstUnit?.name || "");
     setCategory("Biro & Unit Administrasi");
     setEmail("");
     setPhone("");
@@ -142,7 +151,14 @@ export function PengurusView() {
     setOfficialCode(item.official_code);
     setFullName(item.full_name);
     setPositionTitle(item.position_title);
-    setUnitName(item.unit_name);
+    const matchedUnit =
+      campusUnits.find((u) => u.id === item.unit_id) ||
+      campusUnits.find(
+        (u) =>
+          u.name.trim().toLowerCase() === item.unit_name.trim().toLowerCase()
+      );
+    setUnitId(matchedUnit?.id || "");
+    setUnitName(matchedUnit?.name || item.unit_name);
     setCategory(item.category);
     setEmail(item.email || "");
     setPhone(item.phone || "");
@@ -158,7 +174,8 @@ export function PengurusView() {
     const cleanCode = officialCode.trim().toUpperCase();
     const cleanName = fullName.trim();
     const cleanPos = positionTitle.trim();
-    const cleanUnit = unitName.trim();
+    const selectedUnit = campusUnits.find((u) => u.id === unitId);
+    const cleanUnit = (selectedUnit?.name || unitName).trim();
 
     if (!cleanCode || !cleanName || !cleanPos || !cleanUnit) {
       setFormError(
@@ -182,6 +199,7 @@ export function PengurusView() {
       full_name: cleanName,
       position_title: cleanPos,
       unit_name: cleanUnit,
+      unit_id: selectedUnit?.id || null,
       category,
       email: email.trim(),
       phone: phone.trim(),
@@ -241,7 +259,9 @@ export function PengurusView() {
       header: "Kontak & Tanggung Jawab Ruang",
       render: (row) => {
         const picRoomsCount = rooms.filter(
-          (r) => r.pic_name.trim().toLowerCase() === row.full_name.trim().toLowerCase()
+          (r) =>
+            r.pic_official_id === row.id ||
+            r.pic_name.trim().toLowerCase() === row.full_name.trim().toLowerCase()
         ).length;
         return (
           <div className="text-xs space-y-0.5">
@@ -296,8 +316,9 @@ export function PengurusView() {
   const picRooms = selectedOfficial
     ? rooms.filter(
         (r) =>
+          r.pic_official_id === selectedOfficial.id ||
           r.pic_name.trim().toLowerCase() ===
-          selectedOfficial.full_name.trim().toLowerCase()
+            selectedOfficial.full_name.trim().toLowerCase()
       )
     : [];
 
@@ -578,13 +599,44 @@ export function PengurusView() {
               onChange={(e) => setPositionTitle(e.target.value)}
               required
             />
-            <Input
-              label="Unit / Biro / Fakultas *"
-              placeholder="Contoh: Biro Umum & Sarana Prasarana"
-              value={unitName}
-              onChange={(e) => setUnitName(e.target.value)}
-              required
-            />
+            {activeCampusUnits.length > 0 ? (
+              <Select
+                label="Unit / Biro / Fakultas *"
+                value={unitId || (unitName ? "__LEGACY__" : "")}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "__LEGACY__") {
+                    setUnitId("");
+                    return;
+                  }
+                  setUnitId(val);
+                  const found = campusUnits.find((u) => u.id === val);
+                  if (found) setUnitName(found.name);
+                }}
+                options={[
+                  ...activeCampusUnits.map((u) => ({
+                    value: u.id,
+                    label: `${u.code} - ${u.name}`,
+                  })),
+                  ...(!unitId && unitName
+                    ? [
+                        {
+                          value: "__LEGACY__",
+                          label: `${unitName} (Data Historis)`,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            ) : (
+              <Input
+                label="Unit / Biro / Fakultas *"
+                placeholder="Contoh: Biro Umum & Sarana Prasarana"
+                value={unitName}
+                onChange={(e) => setUnitName(e.target.value)}
+                required
+              />
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

@@ -200,7 +200,13 @@ export function RuanganView() {
     setCapacity(String(room.capacity));
     setPicName(room.pic_name);
     setPicContact(room.pic_contact);
-    setPicQuickPick("");
+    if (room.pic_official_id) {
+      setPicQuickPick(`official:${room.pic_official_id}`);
+    } else if (room.pic_lecturer_id) {
+      setPicQuickPick(`lecturer:${room.pic_lecturer_id}`);
+    } else {
+      setPicQuickPick("");
+    }
     setStatus(room.status);
     setFacilitiesNotes(room.facilities_notes);
     setFormError("");
@@ -216,6 +222,13 @@ export function RuanganView() {
       return;
     }
 
+    const picOfficialId = picQuickPick.startsWith("official:")
+      ? picQuickPick.slice("official:".length)
+      : null;
+    const picLecturerId = picQuickPick.startsWith("lecturer:")
+      ? picQuickPick.slice("lecturer:".length)
+      : null;
+
     const payload = {
       code: code.trim().toUpperCase(),
       name: name.trim(),
@@ -225,6 +238,8 @@ export function RuanganView() {
       capacity: Math.max(1, Number(capacity) || 1),
       pic_name: picName.trim(),
       pic_contact: picContact.trim() || "-",
+      pic_official_id: picOfficialId,
+      pic_lecturer_id: picLecturerId,
       status,
       facilities_notes: facilitiesNotes.trim(),
     };
@@ -345,16 +360,28 @@ export function RuanganView() {
     {
       key: "pic",
       header: "Penanggung Jawab (PIC)",
-      render: (row) => (
-        <div className="text-xs space-y-0.5">
-          <p className="font-semibold text-slate-900 dark:text-slate-100">
-            {row.pic_name}
-          </p>
-          <p className="font-mono text-slate-600 dark:text-slate-400">
-            {row.pic_contact}
-          </p>
-        </div>
-      ),
+      render: (row) => {
+        const linkedOfficial = row.pic_official_id
+          ? campusOfficials.find((o) => o.id === row.pic_official_id)
+          : null;
+        const linkedLecturer = row.pic_lecturer_id
+          ? lecturers.find((l) => l.id === row.pic_lecturer_id)
+          : null;
+        const displayPicName =
+          linkedOfficial?.full_name || linkedLecturer?.full_name || row.pic_name;
+        const displayPicContact =
+          linkedOfficial?.phone || linkedLecturer?.phone || row.pic_contact;
+        return (
+          <div className="text-xs space-y-0.5">
+            <p className="font-semibold text-slate-900 dark:text-slate-100">
+              {displayPicName}
+            </p>
+            <p className="font-mono text-slate-600 dark:text-slate-400">
+              {displayPicContact}
+            </p>
+          </div>
+        );
+      },
     },
     {
       key: "status",

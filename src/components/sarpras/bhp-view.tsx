@@ -56,6 +56,12 @@ export function BhpView() {
   const {
     consumables,
     consumableTransactions,
+    consumableCategories,
+    consumableUnits,
+    campusUnits,
+    buildings,
+    campusOfficials,
+    lecturers,
     notes,
     attachments,
     uiSimState,
@@ -102,7 +108,9 @@ export function BhpView() {
   const [mutationTarget, setMutationTarget] = useState<Consumable | null>(null);
   const [txType, setTxType] = useState<TransactionType>("Masuk");
   const [quantity, setQuantity] = useState("5");
+  const [actorQuickPick, setActorQuickPick] = useState("");
   const [actorName, setActorName] = useState("");
+  const [actorUnitId, setActorUnitId] = useState("");
   const [actorUnit, setActorUnit] = useState("");
   const [purposeNotes, setPurposeNotes] = useState("");
   const [mutationError, setMutationError] = useState("");
@@ -158,12 +166,29 @@ export function BhpView() {
     );
   }
 
+  const activeCategoryNames = useMemo(() => {
+    const active = consumableCategories
+      .filter((c) => c.is_active)
+      .map((c) => c.name);
+    return active.length > 0 ? active : BHP_CATEGORIES;
+  }, [consumableCategories]);
+
+  const activeUnitNames = useMemo(() => {
+    const active = consumableUnits
+      .filter((u) => u.is_active)
+      .map((u) => u.name);
+    return active.length > 0 ? active : BHP_UNITS;
+  }, [consumableUnits]);
+
   const openMutationModal = (item: Consumable, defaultType: TransactionType) => {
     setMutationTarget(item);
     setTxType(defaultType);
     setQuantity("5");
+    setActorQuickPick("");
     setActorName("");
-    setActorUnit("");
+    const firstUnit = campusUnits.find((u) => u.is_active);
+    setActorUnitId(firstUnit?.id || "");
+    setActorUnit(firstUnit?.name || "");
     setPurposeNotes("");
     setMutationError("");
   };
@@ -172,8 +197,8 @@ export function BhpView() {
     setEditingConsumable(null);
     setCode("");
     setName("");
-    setCategory("ATK & Kelas");
-    setUnit("Box");
+    setCategory(activeCategoryNames[0] || "ATK & Kelas");
+    setUnit(activeUnitNames[0] || "Box");
     setCurrentStock("20");
     setMinStock("10");
     setStorageLocation("Lemari ATK A1 - Biro Sarpras");
@@ -226,8 +251,11 @@ export function BhpView() {
     setMutationError("");
     if (!mutationTarget) return;
 
+    const matchedUnit = campusUnits.find((u) => u.id === actorUnitId);
+    const finalUnitName = (matchedUnit?.name || actorUnit).trim();
+
     const qtyNum = Number(quantity) || 0;
-    if (qtyNum <= 0 || !actorName.trim() || !actorUnit.trim()) {
+    if (qtyNum <= 0 || !actorName.trim() || !finalUnitName) {
       setMutationError(
         "Jumlah mutasi (> 0), Nama Petugas/Pengambil, dan Unit wajib diisi."
       );
@@ -239,7 +267,8 @@ export function BhpView() {
       transaction_type: txType,
       quantity: qtyNum,
       actor_name: actorName.trim(),
-      actor_unit: actorUnit.trim(),
+      actor_unit: finalUnitName,
+      unit_id: matchedUnit?.id || null,
       purpose_notes:
         purposeNotes.trim() ||
         (txType === "Masuk"
@@ -426,7 +455,12 @@ export function BhpView() {
                 onChange: setFilterCategory,
                 options: [
                   { value: "ALL", label: "Semua Kategori" },
-                  ...BHP_CATEGORIES.map((c) => ({ value: c, label: c })),
+                  ...Array.from(
+                    new Set([
+                      ...activeCategoryNames,
+                      ...consumables.map((c) => c.category),
+                    ])
+                  ).map((c) => ({ value: c, label: c })),
                 ],
               },
               {
@@ -702,7 +736,9 @@ export function BhpView() {
               onChange={(e) =>
                 setCategory(e.target.value as ConsumableCategory)
               }
-              options={BHP_CATEGORIES.map((c) => ({ value: c, label: c }))}
+              options={Array.from(
+                new Set([...activeCategoryNames, ...(category ? [category] : [])])
+              ).map((c) => ({ value: c, label: c }))}
             />
           </div>
 
@@ -719,7 +755,9 @@ export function BhpView() {
               label="Satuan *"
               value={unit}
               onChange={(e) => setUnit(e.target.value as ConsumableUnit)}
-              options={BHP_UNITS.map((u) => ({ value: u, label: u }))}
+              options={Array.from(
+                new Set([...activeUnitNames, ...(unit ? [unit] : [])])
+              ).map((u) => ({ value: u, label: u }))}
             />
             <Input
               label="Stok Awal *"
@@ -809,6 +847,66 @@ export function BhpView() {
             />
           </div>
 
+          {campusOfficials.length > 0 || lecturers.length > 0 ? (
+            <Select
+              label="Pilih Petugas / Pengambil dari Data Master (Opsional)"
+              value={actorQuickPick}
+              onChange={(e) => {
+                const val = e.target.value;
+                setActorQuickPick(val);
+                if (!val) return;
+                if (val.startsWith("official:")) {
+                  const found = campusOfficials.find(
+                    (o) => o.id === val.slice("official:".length)
+                  );
+                  if (found) {
+                    setActorName(found.full_name);
+                    setActorUnit(found.unit_name);
+                    const matchedUnit =
+                      campusUnits.find((u) => u.id === found.unit_id) ||
+                      campusUnits.find(
+                        (u) =>
+                          u.name.trim().toLowerCase() ===
+                          found.unit_name.trim().toLowerCase()
+                      );
+                    setActorUnitId(matchedUnit?.id || "");
+                  }
+                } else if (val.startsWith("lecturer:")) {
+                  const found = lecturers.find(
+                    (l) => l.id === val.slice("lecturer:".length)
+                  );
+                  if (found) {
+                    setActorName(found.full_name);
+                    setActorUnit(found.homebase_prodi);
+                    const matchedUnit =
+                      campusUnits.find((u) => u.id === found.unit_id) ||
+                      campusUnits.find(
+                        (u) =>
+                          u.name.trim().toLowerCase() ===
+                          found.homebase_prodi.trim().toLowerCase()
+                      );
+                    setActorUnitId(matchedUnit?.id || "");
+                  }
+                }
+              }}
+              options={[
+                { value: "", label: "-- Pilih petugas atau ketik manual --" },
+                ...campusOfficials
+                  .filter((o) => o.is_active)
+                  .map((o) => ({
+                    value: `official:${o.id}`,
+                    label: `[Pengurus] ${o.full_name} (${o.unit_name})`,
+                  })),
+                ...lecturers
+                  .filter((l) => l.is_active)
+                  .map((l) => ({
+                    value: `lecturer:${l.id}`,
+                    label: `[Dosen] ${l.full_name} (${l.homebase_prodi})`,
+                  })),
+              ]}
+            />
+          ) : null}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
               label="Nama Petugas / Pengambil *"
@@ -817,13 +915,63 @@ export function BhpView() {
               onChange={(e) => setActorName(e.target.value)}
               required
             />
-            <Input
-              label="Unit Kerja / Gedung *"
-              placeholder="Contoh: GKB Saintek Lt. 1"
-              value={actorUnit}
-              onChange={(e) => setActorUnit(e.target.value)}
-              required
-            />
+            {campusUnits.some((u) => u.is_active) || buildings.length > 0 ? (
+              <Select
+                label="Unit Kerja / Gedung *"
+                value={
+                  actorUnitId
+                    ? `unit:${actorUnitId}`
+                    : actorUnit
+                    ? `custom:${actorUnit}`
+                    : ""
+                }
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val.startsWith("unit:")) {
+                    const id = val.slice("unit:".length);
+                    setActorUnitId(id);
+                    const found = campusUnits.find((u) => u.id === id);
+                    if (found) setActorUnit(found.name);
+                  } else if (val.startsWith("bld:")) {
+                    setActorUnitId("");
+                    setActorUnit(val.slice("bld:".length));
+                  } else if (val.startsWith("custom:")) {
+                    setActorUnitId("");
+                    setActorUnit(val.slice("custom:".length));
+                  }
+                }}
+                options={[
+                  ...campusUnits
+                    .filter((u) => u.is_active)
+                    .map((u) => ({
+                      value: `unit:${u.id}`,
+                      label: `${u.code} - ${u.name}`,
+                    })),
+                  ...buildings.map((b) => ({
+                    value: `bld:${b.name}`,
+                    label: `[Gedung] ${b.code} - ${b.name}`,
+                  })),
+                  ...(actorUnit &&
+                  !actorUnitId &&
+                  !buildings.some((b) => b.name === actorUnit)
+                    ? [
+                        {
+                          value: `custom:${actorUnit}`,
+                          label: actorUnit,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            ) : (
+              <Input
+                label="Unit Kerja / Gedung *"
+                placeholder="Contoh: GKB Saintek Lt. 1"
+                value={actorUnit}
+                onChange={(e) => setActorUnit(e.target.value)}
+                required
+              />
+            )}
           </div>
 
           <Input

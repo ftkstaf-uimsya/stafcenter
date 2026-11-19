@@ -48,6 +48,8 @@ export async function POST(request: NextRequest) {
         "lecturer",
         "course",
         "official",
+        "unit",
+        "vendor",
       ].includes(entityType) ||
       !entityId
     ) {
@@ -58,7 +60,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (
-      ["room", "lecturer", "course", "official"].includes(entityType) &&
+      ["room", "lecturer", "course", "official", "unit", "vendor"].includes(
+        entityType
+      ) &&
       session.role !== "master_admin"
     ) {
       return NextResponse.json(

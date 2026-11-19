@@ -35,6 +35,7 @@ export function MakulView() {
     courses,
     lecturers,
     rooms,
+    campusUnits,
     canManageDataMaster,
     uiSimState,
     setUiSimState,
@@ -56,6 +57,7 @@ export function MakulView() {
 
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
+  const [unitId, setUnitId] = useState("");
   const [prodi, setProdi] = useState("");
   const [semester, setSemester] = useState("1");
   const [curriculumYear, setCurriculumYear] = useState("2024");
@@ -127,11 +129,21 @@ export function MakulView() {
     );
   }
 
+  const academicUnitOptions = useMemo(
+    () =>
+      campusUnits.filter(
+        (u) => u.is_active && u.unit_type !== "Ormawa / UKM"
+      ),
+    [campusUnits]
+  );
+
   const openAddModal = () => {
     setEditingItem(null);
     setCode("");
     setName("");
-    setProdi("");
+    const firstUnit = academicUnitOptions[0];
+    setUnitId(firstUnit?.id || "");
+    setProdi(firstUnit?.name || "Semua Program Studi");
     setSemester("1");
     setCurriculumYear("2024");
     setSksTheory("2");
@@ -149,7 +161,13 @@ export function MakulView() {
     setEditingItem(item);
     setCode(item.code);
     setName(item.name);
-    setProdi(item.prodi);
+    const matchedUnit =
+      campusUnits.find((u) => u.id === item.unit_id) ||
+      campusUnits.find(
+        (u) => u.name.trim().toLowerCase() === item.prodi.trim().toLowerCase()
+      );
+    setUnitId(matchedUnit?.id || "");
+    setProdi(matchedUnit?.name || item.prodi);
     setSemester(String(item.semester));
     setCurriculumYear(String(item.curriculum_year));
     setSksTheory(String(item.sks_theory));
@@ -167,7 +185,8 @@ export function MakulView() {
     e.preventDefault();
     const cleanCode = code.trim().toUpperCase();
     const cleanName = name.trim();
-    const cleanProdi = prodi.trim();
+    const selectedUnit = campusUnits.find((u) => u.id === unitId);
+    const cleanProdi = (selectedUnit?.name || prodi).trim();
 
     if (!cleanCode || !cleanName || !cleanProdi) {
       setFormError("Kode MK, Nama Mata Kuliah, dan Program Studi wajib diisi.");
@@ -195,6 +214,7 @@ export function MakulView() {
       code: cleanCode,
       name: cleanName,
       prodi: cleanProdi,
+      unit_id: selectedUnit?.id || null,
       semester: Math.min(8, Math.max(1, Number(semester) || 1)),
       curriculum_year: Number(curriculumYear) || 2024,
       sks_theory: theoryNum,
@@ -560,13 +580,60 @@ export function MakulView() {
               onChange={(e) => setCode(e.target.value)}
               required
             />
-            <Input
-              label="Program Studi *"
-              placeholder="Contoh: Teknik Informatika"
-              value={prodi}
-              onChange={(e) => setProdi(e.target.value)}
-              required
-            />
+            {academicUnitOptions.length > 0 ? (
+              <Select
+                label="Program Studi / Unit Pengampu *"
+                value={
+                  unitId ||
+                  (prodi === "Semua Program Studi"
+                    ? "__ALL_PRODI__"
+                    : prodi
+                    ? "__LEGACY__"
+                    : "__ALL_PRODI__")
+                }
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "__ALL_PRODI__") {
+                    setUnitId("");
+                    setProdi("Semua Program Studi");
+                    return;
+                  }
+                  if (val === "__LEGACY__") {
+                    setUnitId("");
+                    return;
+                  }
+                  setUnitId(val);
+                  const found = campusUnits.find((u) => u.id === val);
+                  if (found) setProdi(found.name);
+                }}
+                options={[
+                  ...academicUnitOptions.map((u) => ({
+                    value: u.id,
+                    label: `${u.code} - ${u.name}`,
+                  })),
+                  {
+                    value: "__ALL_PRODI__",
+                    label: "Semua Program Studi (MKU / Umum)",
+                  },
+                  ...(!unitId && prodi && prodi !== "Semua Program Studi"
+                    ? [
+                        {
+                          value: "__LEGACY__",
+                          label: `${prodi} (Data Historis)`,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            ) : (
+              <Input
+                label="Program Studi *"
+                placeholder="Contoh: Teknik Informatika"
+                value={prodi}
+                onChange={(e) => setProdi(e.target.value)}
+                required
+              />
+            )}
           </div>
 
           <Input

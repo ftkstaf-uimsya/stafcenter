@@ -12,9 +12,12 @@ import {
   ChevronLeft,
   ChevronRight,
   GraduationCap,
+  HardHat,
+  Landmark,
   LayoutDashboard,
   type LucideIcon,
   Package,
+  Tags,
   UserCog,
   Users,
   Wrench,
@@ -54,6 +57,8 @@ export function Sidebar({
     lecturers,
     courses,
     campusOfficials,
+    campusUnits,
+    maintenanceVendors,
     canManageDataMaster,
     authUser,
     setCommandSearchOpen,
@@ -148,6 +153,29 @@ export function Sidebar({
       badgeCount:
         campusOfficials.length > 0 ? campusOfficials.length : undefined,
       badgeTone: "info",
+    },
+    {
+      href: "/sarpras/unit",
+      label: "UNIT / PRODI / ORMAWA",
+      shortLabel: "Unit Kerja",
+      icon: Landmark,
+      badgeCount: campusUnits.length > 0 ? campusUnits.length : undefined,
+      badgeTone: "info",
+    },
+    {
+      href: "/sarpras/vendor",
+      label: "TEKNISI & VENDOR",
+      shortLabel: "Vendor",
+      icon: HardHat,
+      badgeCount:
+        maintenanceVendors.length > 0 ? maintenanceVendors.length : undefined,
+      badgeTone: "info",
+    },
+    {
+      href: "/sarpras/referensi",
+      label: "MASTER REFERENSI",
+      shortLabel: "Referensi",
+      icon: Tags,
     },
   ];
 

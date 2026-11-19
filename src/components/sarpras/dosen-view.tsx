@@ -44,6 +44,7 @@ export function DosenView() {
     lecturers,
     courses,
     rooms,
+    campusUnits,
     canManageDataMaster,
     uiSimState,
     setUiSimState,
@@ -64,6 +65,7 @@ export function DosenView() {
 
   const [nidnNip, setNidnNip] = useState("");
   const [fullName, setFullName] = useState("");
+  const [unitId, setUnitId] = useState("");
   const [homebaseProdi, setHomebaseProdi] = useState("");
   const [employmentStatus, setEmploymentStatus] =
     useState<LecturerEmploymentStatus>("Dosen Tetap");
@@ -132,11 +134,21 @@ export function DosenView() {
     );
   }
 
+  const academicUnitOptions = useMemo(
+    () =>
+      campusUnits.filter(
+        (u) => u.is_active && u.unit_type !== "Ormawa / UKM"
+      ),
+    [campusUnits]
+  );
+
   const openAddModal = () => {
     setEditingItem(null);
     setNidnNip("");
     setFullName("");
-    setHomebaseProdi("");
+    const firstUnit = academicUnitOptions[0];
+    setUnitId(firstUnit?.id || "");
+    setHomebaseProdi(firstUnit?.name || "");
     setEmploymentStatus("Dosen Tetap");
     setAcademicRank("Asisten Ahli");
     setEmail("");
@@ -152,7 +164,15 @@ export function DosenView() {
     setEditingItem(item);
     setNidnNip(item.nidn_nip);
     setFullName(item.full_name);
-    setHomebaseProdi(item.homebase_prodi);
+    const matchedUnit =
+      campusUnits.find((u) => u.id === item.unit_id) ||
+      campusUnits.find(
+        (u) =>
+          u.name.trim().toLowerCase() ===
+          item.homebase_prodi.trim().toLowerCase()
+      );
+    setUnitId(matchedUnit?.id || "");
+    setHomebaseProdi(matchedUnit?.name || item.homebase_prodi);
     setEmploymentStatus(item.employment_status);
     setAcademicRank(item.academic_rank);
     setEmail(item.email || "");
@@ -168,7 +188,8 @@ export function DosenView() {
     e.preventDefault();
     const cleanCode = nidnNip.trim();
     const cleanName = fullName.trim();
-    const cleanProdi = homebaseProdi.trim();
+    const selectedUnit = campusUnits.find((u) => u.id === unitId);
+    const cleanProdi = (selectedUnit?.name || homebaseProdi).trim();
 
     if (!cleanCode || !cleanName || !cleanProdi) {
       setFormError("NIDN/NIP, Nama Lengkap, dan Program Studi wajib diisi.");
@@ -189,6 +210,7 @@ export function DosenView() {
       nidn_nip: cleanCode,
       full_name: cleanName,
       homebase_prodi: cleanProdi,
+      unit_id: selectedUnit?.id || null,
       employment_status: employmentStatus,
       academic_rank: academicRank,
       email: email.trim(),
@@ -564,13 +586,44 @@ export function DosenView() {
               onChange={(e) => setNidnNip(e.target.value)}
               required
             />
-            <Input
-              label="Program Studi Homebase *"
-              placeholder="Contoh: Teknik Informatika"
-              value={homebaseProdi}
-              onChange={(e) => setHomebaseProdi(e.target.value)}
-              required
-            />
+            {academicUnitOptions.length > 0 ? (
+              <Select
+                label="Program Studi / Unit Homebase *"
+                value={unitId || (homebaseProdi ? "__LEGACY__" : "")}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "__LEGACY__") {
+                    setUnitId("");
+                    return;
+                  }
+                  setUnitId(val);
+                  const found = campusUnits.find((u) => u.id === val);
+                  if (found) setHomebaseProdi(found.name);
+                }}
+                options={[
+                  ...academicUnitOptions.map((u) => ({
+                    value: u.id,
+                    label: `${u.code} - ${u.name}`,
+                  })),
+                  ...(!unitId && homebaseProdi
+                    ? [
+                        {
+                          value: "__LEGACY__",
+                          label: `${homebaseProdi} (Data Historis)`,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            ) : (
+              <Input
+                label="Program Studi Homebase *"
+                placeholder="Contoh: Teknik Informatika"
+                value={homebaseProdi}
+                onChange={(e) => setHomebaseProdi(e.target.value)}
+                required
+              />
+            )}
           </div>
 
           <Input

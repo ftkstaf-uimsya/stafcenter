@@ -6,7 +6,7 @@ export type RoomCategory =
 
 export type RoomStatus = "Tersedia" | "Digunakan" | "Perbaikan";
 
-export type AssetCategoryCode = "ELK" | "MBL" | "KOM" | "AUD" | "KLM" | "LNY";
+export type AssetCategoryCode = string;
 
 export type AssetCondition =
   | "Baik"
@@ -34,14 +34,9 @@ export type MaintenanceStatus =
 
 export type DamageSeverity = "Rusak Ringan" | "Rusak Berat";
 
-export type ConsumableUnit = "Pcs" | "Box" | "Rim" | "Botol" | "Pack" | "Roll";
+export type ConsumableUnit = string;
 
-export type ConsumableCategory =
-  | "ATK & Kelas"
-  | "Cetakan & Kertas"
-  | "Tinta & Toner"
-  | "Kebersihan & Sanitasi"
-  | "Kelistrikan Ringan";
+export type ConsumableCategory = string;
 
 export type TransactionType = "Masuk" | "Keluar";
 
@@ -66,7 +61,91 @@ export type SarprasEntityType =
   | "consumable"
   | "lecturer"
   | "course"
-  | "official";
+  | "official"
+  | "unit"
+  | "vendor";
+
+export type CampusUnitType =
+  | "Fakultas"
+  | "Program Studi"
+  | "Biro & Unit Kerja"
+  | "Ormawa / UKM";
+
+export interface CampusUnit {
+  id: string;
+  code: string;
+  name: string;
+  unit_type: CampusUnitType;
+  parent_unit_id?: string | null;
+  leader_name?: string;
+  phone?: string;
+  email?: string;
+  is_active: boolean;
+  notes?: string;
+  created_at: string;
+}
+
+export type MaintenanceVendorType = "Teknisi Internal" | "Vendor Eksternal";
+
+export interface MaintenanceVendor {
+  id: string;
+  vendor_code: string;
+  name: string;
+  vendor_type: MaintenanceVendorType;
+  specialty: string;
+  pic_name: string;
+  phone: string;
+  email?: string;
+  address?: string;
+  is_active: boolean;
+  notes?: string;
+  created_at: string;
+}
+
+export interface AssetCategory {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  useful_life_years: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export type FundingSourceType =
+  | "Internal Kampus"
+  | "Yayasan"
+  | "Hibah Pemerintah"
+  | "Kerjasama / CSR"
+  | "Lainnya";
+
+export interface FundingSource {
+  id: string;
+  code: string;
+  name: string;
+  source_type: FundingSourceType;
+  is_active: boolean;
+  notes?: string;
+  created_at: string;
+}
+
+export interface ConsumableCategoryMaster {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface ConsumableUnitMaster {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  is_active: boolean;
+  created_at: string;
+}
 
 export type LecturerEmploymentStatus =
   | "Dosen Tetap"
@@ -86,6 +165,7 @@ export interface Lecturer {
   nidn_nip: string;
   full_name: string;
   homebase_prodi: string;
+  unit_id?: string | null;
   employment_status: LecturerEmploymentStatus;
   academic_rank: LecturerAcademicRank;
   email: string;
@@ -108,6 +188,7 @@ export interface Course {
   code: string;
   name: string;
   prodi: string;
+  unit_id?: string | null;
   semester: number;
   curriculum_year: number;
   sks_theory: number;
@@ -132,6 +213,7 @@ export interface CampusOfficial {
   full_name: string;
   position_title: string;
   unit_name: string;
+  unit_id?: string | null;
   category: CampusOfficialCategory;
   email: string;
   phone: string;
@@ -193,6 +275,8 @@ export interface Room {
   capacity: number;
   pic_name: string;
   pic_contact: string;
+  pic_official_id?: string | null;
+  pic_lecturer_id?: string | null;
   status: RoomStatus;
   facilities_notes: string;
   created_at: string;
@@ -208,6 +292,7 @@ export interface Asset {
   room_id: string | null;
   procurement_year: number;
   funding_source: string;
+  funding_source_id?: string | null;
   acquisition_cost: number;
   condition: AssetCondition;
   is_portable: boolean;
@@ -223,6 +308,9 @@ export interface Booking {
   borrower_name: string;
   borrower_role: BorrowerRole;
   borrower_unit: string;
+  unit_id?: string | null;
+  borrower_lecturer_id?: string | null;
+  borrower_official_id?: string | null;
   borrower_phone: string;
   target_type: BookingTargetType;
   room_id: string | null;
@@ -236,6 +324,7 @@ export interface Booking {
   deleted_target_label?: string | null;
   return_condition_notes?: string;
   approved_by?: string;
+  approved_by_official_id?: string | null;
   created_at: string;
 }
 
@@ -254,6 +343,7 @@ export interface MaintenanceLog {
   photo_url?: string;
   status: MaintenanceStatus;
   technician_vendor?: string;
+  vendor_id?: string | null;
   repair_cost: number;
   reported_at: string;
   completed_at?: string;
@@ -279,6 +369,7 @@ export interface ConsumableTransaction {
   quantity: number;
   actor_name: string;
   actor_unit: string;
+  unit_id?: string | null;
   purpose_notes: string;
   transaction_date: string;
 }

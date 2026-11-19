@@ -8,6 +8,8 @@ import {
   CalendarClock,
   DoorOpen,
   GraduationCap,
+  HardHat,
+  Landmark,
   Package,
   Search,
   UserCog,
@@ -37,6 +39,8 @@ export function CommandSearch() {
     lecturers,
     courses,
     campusOfficials,
+    campusUnits,
+    maintenanceVendors,
     canManageDataMaster,
     commandSearchOpen,
     setCommandSearchOpen,
@@ -148,6 +152,46 @@ export function CommandSearch() {
           });
         }
       }
+
+      for (const u of campusUnits) {
+        if (
+          !q ||
+          u.code.toLowerCase().includes(q) ||
+          u.name.toLowerCase().includes(q) ||
+          u.unit_type.toLowerCase().includes(q) ||
+          (u.leader_name || "").toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `unit-${u.id}`,
+            category: "Unit / Prodi",
+            code: u.code,
+            title: u.name,
+            meta: `${u.unit_type}${u.leader_name ? ` • ${u.leader_name}` : ""}`,
+            href: `/sarpras/unit?inspect=${u.id}`,
+            icon: <Landmark className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
+          });
+        }
+      }
+
+      for (const v of maintenanceVendors) {
+        if (
+          !q ||
+          v.vendor_code.toLowerCase().includes(q) ||
+          v.name.toLowerCase().includes(q) ||
+          v.specialty.toLowerCase().includes(q) ||
+          v.pic_name.toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `vnd-${v.id}`,
+            category: "Vendor / Teknisi",
+            code: v.vendor_code,
+            title: v.name,
+            meta: `${v.vendor_type} • ${v.specialty} (PIC: ${v.pic_name})`,
+            href: `/sarpras/vendor?inspect=${v.id}`,
+            icon: <HardHat className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
+          });
+        }
+      }
     }
 
     for (const a of assets) {
@@ -232,11 +276,13 @@ export function CommandSearch() {
     assets,
     bookings,
     campusOfficials,
+    campusUnits,
     canManageDataMaster,
     consumables,
     courses,
     lecturers,
     maintenanceLogs,
+    maintenanceVendors,
     query,
     rooms,
   ]);

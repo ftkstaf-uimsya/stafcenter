@@ -24,6 +24,18 @@ const ROUTE_META: Record<string, { group: string; label: string }> = {
   "/sarpras/dosen": { group: "Data Master", label: "Dosen" },
   "/sarpras/makul": { group: "Data Master", label: "Makul (Mata Kuliah)" },
   "/sarpras/pengurus": { group: "Data Master", label: "Pengurus Kampus" },
+  "/sarpras/unit": {
+    group: "Data Master",
+    label: "Unit, Prodi & Ormawa",
+  },
+  "/sarpras/vendor": {
+    group: "Data Master",
+    label: "Teknisi & Vendor Pemeliharaan",
+  },
+  "/sarpras/referensi": {
+    group: "Data Master",
+    label: "Master Referensi & Klasifikasi",
+  },
   "/sarpras/akun": { group: "Master Admin", label: "Manajemen Akun Staf" },
   "/login": { group: "", label: "Autentikasi & Sesi Staf" },
 };

@@ -81,6 +81,9 @@ export function PeminjamanView() {
     notes,
     attachments,
     lecturers,
+    campusOfficials,
+    campusUnits,
+    authUser,
     uiSimState,
     setUiSimState,
     addBooking,
@@ -104,6 +107,8 @@ export function PeminjamanView() {
   const [borrowerName, setBorrowerName] = useState("");
   const [borrowerRole, setBorrowerRole] = useState<BorrowerRole>("Dosen");
   const [selectedLecturerId, setSelectedLecturerId] = useState("");
+  const [selectedOfficialId, setSelectedOfficialId] = useState("");
+  const [selectedUnitId, setSelectedUnitId] = useState("");
   const [borrowerUnit, setBorrowerUnit] = useState("");
   const [borrowerPhone, setBorrowerPhone] = useState("");
   const [targetType, setTargetType] = useState<BookingTargetType>("Ruangan");
@@ -183,7 +188,10 @@ export function PeminjamanView() {
     setBorrowerName("");
     setBorrowerRole("Dosen");
     setSelectedLecturerId("");
-    setBorrowerUnit("");
+    setSelectedOfficialId("");
+    const firstActiveUnit = campusUnits.find((u) => u.is_active);
+    setSelectedUnitId(firstActiveUnit?.id || "");
+    setBorrowerUnit(firstActiveUnit?.name || "");
     setBorrowerPhone("");
     setTargetType("Ruangan");
     setRoomId(rooms[0]?.id || "");
@@ -201,9 +209,12 @@ export function PeminjamanView() {
     e.preventDefault();
     setConflictError("");
 
+    const matchedUnit = campusUnits.find((u) => u.id === selectedUnitId);
+    const finalUnitName = (matchedUnit?.name || borrowerUnit).trim();
+
     if (
       !borrowerName.trim() ||
-      !borrowerUnit.trim() ||
+      !finalUnitName ||
       !activityName.trim()
     ) {
       setConflictError(
@@ -229,7 +240,12 @@ export function PeminjamanView() {
     const res = addBooking({
       borrower_name: borrowerName.trim(),
       borrower_role: borrowerRole,
-      borrower_unit: borrowerUnit.trim(),
+      borrower_unit: finalUnitName,
+      unit_id: matchedUnit?.id || null,
+      borrower_lecturer_id:
+        borrowerRole === "Dosen" ? selectedLecturerId || null : null,
+      borrower_official_id:
+        borrowerRole === "Staf" ? selectedOfficialId || null : null,
       borrower_phone: borrowerPhone.trim() || "-",
       target_type: targetType,
       room_id: selectedRoomId,
@@ -655,7 +671,7 @@ export function PeminjamanView() {
                           row.id,
                           "Disetujui",
                           undefined,
-                          "Kepala Biro Sarpras"
+                          authUser?.fullName || "Kepala Biro Sarpras"
                         )
                       }
                     >
@@ -781,7 +797,7 @@ export function PeminjamanView() {
                           selectedBooking.id,
                           "Disetujui",
                           undefined,
-                          "Kepala Biro Sarpras"
+                          authUser?.fullName || "Kepala Biro Sarpras"
                         )
                       }
                     >
@@ -967,6 +983,14 @@ export function PeminjamanView() {
                 if (found) {
                   setBorrowerName(found.full_name);
                   setBorrowerUnit(found.homebase_prodi);
+                  const matchedUnit =
+                    campusUnits.find((u) => u.id === found.unit_id) ||
+                    campusUnits.find(
+                      (u) =>
+                        u.name.trim().toLowerCase() ===
+                        found.homebase_prodi.trim().toLowerCase()
+                    );
+                  setSelectedUnitId(matchedUnit?.id || "");
                   if (found.phone) setBorrowerPhone(found.phone);
                 }
               }}
@@ -977,6 +1001,73 @@ export function PeminjamanView() {
                   .map((l) => ({
                     value: l.id,
                     label: `${l.nidn_nip} - ${l.full_name} (${l.homebase_prodi})`,
+                  })),
+              ]}
+            />
+          ) : null}
+
+          {borrowerRole === "Staf" && campusOfficials.length > 0 ? (
+            <Select
+              label="Pilih dari Data Master Pengurus / Staf (Opsional)"
+              value={selectedOfficialId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setSelectedOfficialId(id);
+                const found = campusOfficials.find((o) => o.id === id);
+                if (found) {
+                  setBorrowerName(found.full_name);
+                  setBorrowerUnit(found.unit_name);
+                  const matchedUnit =
+                    campusUnits.find((u) => u.id === found.unit_id) ||
+                    campusUnits.find(
+                      (u) =>
+                        u.name.trim().toLowerCase() ===
+                        found.unit_name.trim().toLowerCase()
+                    );
+                  setSelectedUnitId(matchedUnit?.id || "");
+                  if (found.phone) setBorrowerPhone(found.phone);
+                }
+              }}
+              options={[
+                { value: "", label: "-- Pilih pengurus/staf atau ketik manual --" },
+                ...campusOfficials
+                  .filter((o) => o.is_active)
+                  .map((o) => ({
+                    value: o.id,
+                    label: `${o.official_code} - ${o.full_name} (${o.unit_name})`,
+                  })),
+              ]}
+            />
+          ) : null}
+
+          {borrowerRole === "Mahasiswa/Ormawa" &&
+          campusUnits.some((u) => u.is_active && u.unit_type === "Ormawa / UKM") ? (
+            <Select
+              label="Pilih dari Master Ormawa / UKM (Opsional)"
+              value={selectedUnitId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setSelectedUnitId(id);
+                const found = campusUnits.find((u) => u.id === id);
+                if (found) {
+                  setBorrowerUnit(found.name);
+                  if (found.leader_name && !borrowerName.trim()) {
+                    setBorrowerName(found.leader_name);
+                  }
+                  if (found.phone && !borrowerPhone.trim()) {
+                    setBorrowerPhone(found.phone);
+                  }
+                }
+              }}
+              options={[
+                { value: "", label: "-- Pilih Ormawa/UKM atau isi manual --" },
+                ...campusUnits
+                  .filter((u) => u.is_active && u.unit_type === "Ormawa / UKM")
+                  .map((u) => ({
+                    value: u.id,
+                    label: `${u.code} - ${u.name}${
+                      u.leader_name ? ` (Ketua: ${u.leader_name})` : ""
+                    }`,
                   })),
               ]}
             />
@@ -997,19 +1088,53 @@ export function PeminjamanView() {
                 const nextRole = e.target.value as BorrowerRole;
                 setBorrowerRole(nextRole);
                 if (nextRole !== "Dosen") setSelectedLecturerId("");
+                if (nextRole !== "Staf") setSelectedOfficialId("");
               }}
               options={BORROWER_ROLES.map((r) => ({ value: r, label: r }))}
             />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Input
-              label="Program Studi / Unit / Ormawa *"
-              placeholder="Contoh: Prodi Teknik Informatika / BEM"
-              value={borrowerUnit}
-              onChange={(e) => setBorrowerUnit(e.target.value)}
-              required
-            />
+            {campusUnits.some((u) => u.is_active) ? (
+              <Select
+                label="Program Studi / Unit / Ormawa *"
+                value={selectedUnitId || (borrowerUnit ? "__LEGACY__" : "")}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "__LEGACY__") {
+                    setSelectedUnitId("");
+                    return;
+                  }
+                  setSelectedUnitId(val);
+                  const found = campusUnits.find((u) => u.id === val);
+                  if (found) setBorrowerUnit(found.name);
+                }}
+                options={[
+                  ...campusUnits
+                    .filter((u) => u.is_active)
+                    .map((u) => ({
+                      value: u.id,
+                      label: `${u.code} - ${u.name} (${u.unit_type})`,
+                    })),
+                  ...(!selectedUnitId && borrowerUnit
+                    ? [
+                        {
+                          value: "__LEGACY__",
+                          label: `${borrowerUnit} (Manual)`,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            ) : (
+              <Input
+                label="Program Studi / Unit / Ormawa *"
+                placeholder="Contoh: Prodi Teknik Informatika / BEM"
+                value={borrowerUnit}
+                onChange={(e) => setBorrowerUnit(e.target.value)}
+                required
+              />
+            )}
             <Input
               label="Nomor WhatsApp / Telepon Aktif *"
               placeholder="Contoh: 0813-2211-9001"

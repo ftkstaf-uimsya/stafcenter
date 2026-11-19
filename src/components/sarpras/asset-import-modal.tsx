@@ -26,7 +26,15 @@ interface AssetImportModalProps {
 }
 
 export function AssetImportModal({ isOpen, onClose }: AssetImportModalProps) {
-  const { rooms, assets, isLiveSupabase, importAssets, notify } = useSarpras();
+  const {
+    rooms,
+    assets,
+    assetCategories,
+    fundingSources,
+    isLiveSupabase,
+    importAssets,
+    notify,
+  } = useSarpras();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
@@ -75,6 +83,12 @@ export function AssetImportModal({ isOpen, onClose }: AssetImportModalProps) {
                 code: r.code,
                 name: r.name,
               })),
+              categories: assetCategories
+                .filter((c) => c.is_active)
+                .map((c) => ({ code: c.code, name: c.name })),
+              fundingSources: fundingSources
+                .filter((f) => f.is_active)
+                .map((f) => ({ id: f.id, code: f.code, name: f.name })),
             }),
           });
 
@@ -157,6 +171,22 @@ export function AssetImportModal({ isOpen, onClose }: AssetImportModalProps) {
               id: a.id,
               inventory_code: a.inventory_code,
               serial_number: a.serial_number,
+            }))
+          )
+        );
+        formData.append(
+          "categoriesJson",
+          JSON.stringify(
+            assetCategories.map((c) => ({ code: c.code, name: c.name }))
+          )
+        );
+        formData.append(
+          "fundingSourcesJson",
+          JSON.stringify(
+            fundingSources.map((f) => ({
+              id: f.id,
+              code: f.code,
+              name: f.name,
             }))
           )
         );
@@ -261,9 +291,9 @@ export function AssetImportModal({ isOpen, onClose }: AssetImportModalProps) {
               Langkah 1 • Template Excel (.xlsx)
             </p>
             <p className="text-xs text-slate-700 dark:text-slate-300">
-              Template menyertakan dropdown enum <strong>Kategori Inventaris *</strong>,{" "}
-              <strong>Lokasi Penempatan Ruangan *</strong> ({rooms.length} ruang aktif + Gudang Cadangan),
-              dan <strong>Kondisi Barang *</strong>. Maksimal {MAX_IMPORT_ROWS} baris per import.
+              Template menyertakan dropdown enum <strong>Kategori Inventaris *</strong> ({assetCategories.filter((c) => c.is_active).length} kategori),{" "}
+              <strong>Lokasi Penempatan Ruangan *</strong> ({rooms.length} ruang aktif + Gudang Cadangan),{" "}
+              <strong>Kondisi Barang *</strong>, dan <strong>Sumber Dana Pengadaan *</strong> ({fundingSources.filter((f) => f.is_active).length} sumber dana). Maksimal {MAX_IMPORT_ROWS} baris per import.
             </p>
           </div>
           <Button

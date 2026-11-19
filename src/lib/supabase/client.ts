@@ -25,7 +25,7 @@ export function getSupabaseBrowserClient(): SupabaseClient | null {
   return supabaseInstance;
 }
 
-export const ASSET_CATEGORY_LABELS: Record<AssetCategoryCode, string> = {
+export const ASSET_CATEGORY_LABELS: Record<string, string> = {
   ELK: "Elektronik & Visual",
   MBL: "Meubelair & Furnitur",
   KOM: "Komputer & Jaringan",
@@ -34,13 +34,24 @@ export const ASSET_CATEGORY_LABELS: Record<AssetCategoryCode, string> = {
   LNY: "Fasilitas Lainnya",
 };
 
+export function resolveAssetCategoryLabel(
+  code: string,
+  categories?: Array<{ code: string; name: string }>
+): string {
+  const found = categories?.find(
+    (c) => c.code.toUpperCase() === code.toUpperCase()
+  );
+  if (found) return found.name;
+  return ASSET_CATEGORY_LABELS[code.toUpperCase()] || code;
+}
+
 export function generateInventoryCode(
   category: AssetCategoryCode,
   year: number,
   sequenceNumber: number
 ): string {
   const paddedSeq = String(sequenceNumber).padStart(4, "0");
-  return `INV-${category}-${year}-${paddedSeq}`;
+  return `INV-${category.toUpperCase()}-${year}-${paddedSeq}`;
 }
 
 export function formatCurrencyIDR(amount: number): string {

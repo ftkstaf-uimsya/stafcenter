@@ -4,10 +4,18 @@ import {
   getSupabaseServerClient,
   isServerSupabaseConfigured,
 } from "@/lib/supabase/server";
-import { INITIAL_ASSETS, INITIAL_ROOMS } from "@/lib/supabase/seed-data";
+import {
+  INITIAL_ASSET_CATEGORIES,
+  INITIAL_ASSETS,
+  INITIAL_FUNDING_SOURCES,
+  INITIAL_ROOMS,
+} from "@/lib/supabase/seed-data";
 import { parseAssetImportWorkbook } from "@/lib/sarpras/asset-excel";
 import {
+  AssetCategoryRef,
+  DEFAULT_ASSET_CATEGORY_REFS,
   ExistingAssetRef,
+  FundingSourceRef,
   MAX_IMPORT_FILE_BYTES,
   RoomLookupRef,
 } from "@/lib/sarpras/asset-import-shared";
@@ -49,6 +57,8 @@ export async function POST(request: NextRequest) {
 
     let rooms: RoomLookupRef[] = [];
     let existingAssets: ExistingAssetRef[] = [];
+    let categories: AssetCategoryRef[] = DEFAULT_ASSET_CATEGORY_REFS;
+    let fundingSources: FundingSourceRef[] | undefined;
 
     if (isServerSupabaseConfigured()) {
       const session = await getVerifiedServerSession();
@@ -67,9 +77,11 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const [roomsRes, assetsRes] = await Promise.all([
+      const [roomsRes, assetsRes, catRes, fundRes] = await Promise.all([
         supabase.from("rooms").select("id, code, name").order("code"),
         supabase.from("assets").select("id, inventory_code, serial_number"),
+        supabase.from("asset_categories").select("code, name").order("code"),
+        supabase.from("funding_sources").select("id, code, name").order("code"),
       ]);
 
       if (roomsRes.error || assetsRes.error) {
@@ -86,9 +98,17 @@ export async function POST(request: NextRequest) {
 
       rooms = (roomsRes.data || []) as RoomLookupRef[];
       existingAssets = (assetsRes.data || []) as ExistingAssetRef[];
+      if (!catRes.error && Array.isArray(catRes.data) && catRes.data.length > 0) {
+        categories = catRes.data as AssetCategoryRef[];
+      }
+      if (!fundRes.error && Array.isArray(fundRes.data)) {
+        fundingSources = fundRes.data as FundingSourceRef[];
+      }
     } else {
       const roomsJson = formData.get("roomsJson");
       const assetsJson = formData.get("assetsJson");
+      const categoriesJson = formData.get("categoriesJson");
+      const fundingSourcesJson = formData.get("fundingSourcesJson");
 
       try {
         rooms =
@@ -115,10 +135,45 @@ export async function POST(request: NextRequest) {
           serial_number: a.serial_number,
         }));
       }
+
+      try {
+        categories =
+          typeof categoriesJson === "string"
+            ? (JSON.parse(categoriesJson) as AssetCategoryRef[])
+            : INITIAL_ASSET_CATEGORIES.map((c) => ({ code: c.code, name: c.name }));
+      } catch {
+        categories = INITIAL_ASSET_CATEGORIES.map((c) => ({
+          code: c.code,
+          name: c.name,
+        }));
+      }
+
+      try {
+        fundingSources =
+          typeof fundingSourcesJson === "string"
+            ? (JSON.parse(fundingSourcesJson) as FundingSourceRef[])
+            : INITIAL_FUNDING_SOURCES.map((f) => ({
+                id: f.id,
+                code: f.code,
+                name: f.name,
+              }));
+      } catch {
+        fundingSources = INITIAL_FUNDING_SOURCES.map((f) => ({
+          id: f.id,
+          code: f.code,
+          name: f.name,
+        }));
+      }
     }
 
     const buffer = await file.arrayBuffer();
-    const result = await parseAssetImportWorkbook(buffer, rooms, existingAssets);
+    const result = await parseAssetImportWorkbook(
+      buffer,
+      rooms,
+      existingAssets,
+      categories,
+      fundingSources
+    );
 
     if (!result.ok) {
       return NextResponse.json(result, { status: 400 });
