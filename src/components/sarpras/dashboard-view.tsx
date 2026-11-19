@@ -36,6 +36,7 @@ export function DashboardView() {
     bookings,
     maintenanceLogs,
     consumables,
+    canManageDataMaster,
     uiSimState,
     setUiSimState,
     resetToSeedData,
@@ -212,12 +213,14 @@ export function DashboardView() {
               <span className="text-slate-600 dark:text-slate-400">
                 {buildings.length} gedung kampus
               </span>
-              <Link
-                href="/sarpras/ruangan"
-                className="font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-1 py-0.5"
-              >
-                Kelola Ruang
-              </Link>
+              {canManageDataMaster ? (
+                <Link
+                  href="/sarpras/ruangan"
+                  className="font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-1 py-0.5"
+                >
+                  Kelola Ruang
+                </Link>
+              ) : null}
             </div>
           </div>
 
@@ -315,12 +318,14 @@ export function DashboardView() {
                 agenda peminjaman hari ini.
               </p>
             </div>
-            <Link
-              href="/sarpras/ruangan"
-              className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
-            >
-              Semua Ruangan ({rooms.length})
-            </Link>
+            {canManageDataMaster ? (
+              <Link
+                href="/sarpras/ruangan"
+                className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
+              >
+                Semua Ruangan ({rooms.length})
+              </Link>
+            ) : null}
           </div>
 
           <div className="p-5 space-y-4 flex-1">
@@ -383,16 +388,18 @@ export function DashboardView() {
                           </p>
                         )}
                       </div>
-                      <div className="shrink-0">
-                        <Link
-                          href={`/sarpras/ruangan?inspect=${encodeURIComponent(
-                            room.id
-                          )}`}
-                          className="min-h-[44px] px-3 py-2 inline-flex items-center justify-center text-xs font-semibold rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F]"
-                        >
-                          Detail Ruangan
-                        </Link>
-                      </div>
+                      {canManageDataMaster ? (
+                        <div className="shrink-0">
+                          <Link
+                            href={`/sarpras/ruangan?inspect=${encodeURIComponent(
+                              room.id
+                            )}`}
+                            className="min-h-[44px] px-3 py-2 inline-flex items-center justify-center text-xs font-semibold rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F]"
+                          >
+                            Detail Ruangan
+                          </Link>
+                        </div>
+                      ) : null}
                     </li>
                   );
                 })}
@@ -592,12 +599,14 @@ export function DashboardView() {
                 </p>
               </div>
             </div>
-            <Link
-              href="/sarpras/ruangan"
-              className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
-            >
-              Master Gedung
-            </Link>
+            {canManageDataMaster ? (
+              <Link
+                href="/sarpras/ruangan"
+                className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
+              >
+                Master Gedung
+              </Link>
+            ) : null}
           </div>
 
           <ul className="space-y-2.5" role="list">

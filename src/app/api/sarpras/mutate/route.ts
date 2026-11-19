@@ -65,8 +65,55 @@ type MutationPayload =
   | { action: "update_consumable"; id: string; data: Record<string, unknown> }
   | { action: "delete_consumable"; id: string }
   | { action: "insert_consumable_tx"; data: Record<string, unknown> }
+  | { action: "insert_lecturer"; data: Record<string, unknown> }
+  | { action: "update_lecturer"; id: string; data: Record<string, unknown> }
+  | { action: "delete_lecturer"; id: string }
+  | { action: "insert_course"; data: Record<string, unknown> }
+  | { action: "update_course"; id: string; data: Record<string, unknown> }
+  | { action: "delete_course"; id: string }
+  | { action: "insert_official"; data: Record<string, unknown> }
+  | { action: "update_official"; id: string; data: Record<string, unknown> }
+  | { action: "delete_official"; id: string }
   | { action: "insert_note"; data: Record<string, unknown> }
   | { action: "delete_attachment"; id: string; filePath?: string };
+
+const DATA_MASTER_ACTIONS = new Set([
+  "insert_building",
+  "update_building",
+  "delete_building",
+  "insert_room",
+  "update_room",
+  "delete_room",
+  "insert_lecturer",
+  "update_lecturer",
+  "delete_lecturer",
+  "insert_course",
+  "update_course",
+  "delete_course",
+  "insert_official",
+  "update_official",
+  "delete_official",
+]);
+
+const DATA_MASTER_ENTITY_TYPES = new Set<string>([
+  "room",
+  "lecturer",
+  "course",
+  "official",
+]);
+
+function formatDataMasterError(message: string): string {
+  if (
+    message.includes("lecturers") ||
+    message.includes("courses") ||
+    message.includes("campus_officials")
+  ) {
+    if (message.includes("does not exist") || message.includes("schema cache")) {
+      return "Tabel Data Master belum dibuat. Jalankan migrasi supabase/migrations/005_data_master.sql di SQL Editor Supabase.";
+    }
+  }
+  return message;
+}
 
 const ACTIVE_BOOKING_STATUSES = new Set([
   "Menunggu Persetujuan",
@@ -336,6 +383,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as MutationPayload;
     const nowIso = new Date().toISOString();
+
+    if (
+      DATA_MASTER_ACTIONS.has(body.action) &&
+      session.role !== "master_admin"
+    ) {
+      return NextResponse.json(
+        { error: "Hanya Master Admin yang berhak mengelola Data Master." },
+        { status: 403 }
+      );
+    }
 
     switch (body.action) {
       case "insert_building": {
@@ -711,7 +768,130 @@ export async function POST(request: NextRequest) {
         if (error) return NextResponse.json({ error: error.message }, { status: 400 });
         return NextResponse.json({ ok: true });
       }
+      case "insert_lecturer": {
+        const { error } = await supabase.from("lecturers").insert(body.data);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_lecturer": {
+        const { error } = await supabase
+          .from("lecturers")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_lecturer": {
+        await cleanupEntityArtifacts(supabase, "lecturer", body.id);
+        const { error } = await supabase
+          .from("lecturers")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_course": {
+        const { error } = await supabase.from("courses").insert(body.data);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_course": {
+        const { error } = await supabase
+          .from("courses")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_course": {
+        await cleanupEntityArtifacts(supabase, "course", body.id);
+        const { error } = await supabase
+          .from("courses")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_official": {
+        const { error } = await supabase
+          .from("campus_officials")
+          .insert(body.data);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_official": {
+        const { error } = await supabase
+          .from("campus_officials")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_official": {
+        await cleanupEntityArtifacts(supabase, "official", body.id);
+        const { error } = await supabase
+          .from("campus_officials")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
       case "insert_note": {
+        const entityType = String(body.data?.entity_type || "");
+        if (
+          DATA_MASTER_ENTITY_TYPES.has(entityType) &&
+          session.role !== "master_admin"
+        ) {
+          return NextResponse.json(
+            { error: "Hanya Master Admin yang berhak menambah catatan Data Master." },
+            { status: 403 }
+          );
+        }
         const { error } = await supabase.from("sarpras_notes").insert({
           ...body.data,
           author_id: session.id,
@@ -733,6 +913,21 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "delete_attachment": {
+        const { data: attRow } = await supabase
+          .from("sarpras_attachments")
+          .select("entity_type")
+          .eq("id", body.id)
+          .maybeSingle();
+        if (
+          attRow &&
+          DATA_MASTER_ENTITY_TYPES.has(String(attRow.entity_type)) &&
+          session.role !== "master_admin"
+        ) {
+          return NextResponse.json(
+            { error: "Hanya Master Admin yang berhak menghapus lampiran Data Master." },
+            { status: 403 }
+          );
+        }
         if (body.filePath) {
           await supabase.storage.from("sarpras-files").remove([body.filePath]);
         }

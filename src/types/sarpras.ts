@@ -63,7 +63,83 @@ export type SarprasEntityType =
   | "maintenance"
   | "asset"
   | "room"
-  | "consumable";
+  | "consumable"
+  | "lecturer"
+  | "course"
+  | "official";
+
+export type LecturerEmploymentStatus =
+  | "Dosen Tetap"
+  | "Dosen Tidak Tetap"
+  | "Dosen Tamu";
+
+export type LecturerAcademicRank =
+  | "-"
+  | "Tenaga Pengajar"
+  | "Asisten Ahli"
+  | "Lektor"
+  | "Lektor Kepala"
+  | "Guru Besar";
+
+export interface Lecturer {
+  id: string;
+  nidn_nip: string;
+  full_name: string;
+  homebase_prodi: string;
+  employment_status: LecturerEmploymentStatus;
+  academic_rank: LecturerAcademicRank;
+  email: string;
+  phone: string;
+  office_room_id: string | null;
+  is_active: boolean;
+  notes?: string;
+  created_at: string;
+}
+
+export type CourseType =
+  | "Wajib Prodi"
+  | "Wajib Universitas"
+  | "Pilihan"
+  | "Praktikum"
+  | "Tugas Akhir";
+
+export interface Course {
+  id: string;
+  code: string;
+  name: string;
+  prodi: string;
+  semester: number;
+  curriculum_year: number;
+  sks_theory: number;
+  sks_practice: number;
+  course_type: CourseType;
+  lecturer_id: string | null;
+  preferred_room_id: string | null;
+  is_active: boolean;
+  description?: string;
+  created_at: string;
+}
+
+export type CampusOfficialCategory =
+  | "Pimpinan Kampus"
+  | "Dekanat & Prodi"
+  | "Biro & Unit Administrasi"
+  | "Koordinator Sarpras & Lab";
+
+export interface CampusOfficial {
+  id: string;
+  official_code: string;
+  full_name: string;
+  position_title: string;
+  unit_name: string;
+  category: CampusOfficialCategory;
+  email: string;
+  phone: string;
+  period_label: string;
+  is_active: boolean;
+  notes?: string;
+  created_at: string;
+}
 
 export interface SarprasNote {
   id: string;

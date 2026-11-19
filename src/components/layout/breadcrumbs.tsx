@@ -5,21 +5,36 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 
-const ROUTE_LABELS: Record<string, string> = {
-  "/sarpras/dashboard": "Ringkasan Operasional",
-  "/sarpras/ruangan": "Master Gedung & Ruangan",
-  "/sarpras/inventaris": "Inventaris Aset & Barang",
-  "/sarpras/peminjaman": "Peminjaman & Reservasi",
-  "/sarpras/pemeliharaan": "Pemeliharaan & Laporan Kerusakan",
-  "/sarpras/bhp": "Barang Habis Pakai (ATK)",
-  "/sarpras/akun": "Manajemen Akun Staf",
-  "/login": "Autentikasi & Sesi Staf",
+const ROUTE_META: Record<string, { group: string; label: string }> = {
+  "/sarpras/dashboard": { group: "SAPRAS", label: "Ringkasan Operasional" },
+  "/sarpras/inventaris": {
+    group: "SAPRAS",
+    label: "Inventaris Aset & Barang",
+  },
+  "/sarpras/peminjaman": { group: "SAPRAS", label: "Peminjaman & Reservasi" },
+  "/sarpras/pemeliharaan": {
+    group: "SAPRAS",
+    label: "Pemeliharaan & Laporan Kerusakan",
+  },
+  "/sarpras/bhp": { group: "SAPRAS", label: "Barang Habis Pakai (ATK)" },
+  "/sarpras/ruangan": {
+    group: "Data Master",
+    label: "Master Gedung & Ruangan Kampus",
+  },
+  "/sarpras/dosen": { group: "Data Master", label: "Dosen" },
+  "/sarpras/makul": { group: "Data Master", label: "Makul (Mata Kuliah)" },
+  "/sarpras/pengurus": { group: "Data Master", label: "Pengurus Kampus" },
+  "/sarpras/akun": { group: "Master Admin", label: "Manajemen Akun Staf" },
+  "/login": { group: "", label: "Autentikasi & Sesi Staf" },
 };
 
 export function Breadcrumbs() {
   const pathname = usePathname();
   const isLoginRoute = pathname === "/login";
-  const currentLabel = ROUTE_LABELS[pathname] || "Sarana Prasarana";
+  const meta = ROUTE_META[pathname] || {
+    group: "SAPRAS",
+    label: "Ringkasan Operasional",
+  };
 
   return (
     <nav aria-label="Breadcrumb" className="flex items-center text-xs">
@@ -32,13 +47,13 @@ export function Breadcrumbs() {
             StafCenter
           </Link>
         </li>
-        {!isLoginRoute ? (
+        {!isLoginRoute && meta.group ? (
           <>
             <li aria-hidden="true">
               <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
             </li>
             <li className="font-medium text-slate-700 dark:text-slate-300">
-              Sarana Prasarana
+              {meta.group}
             </li>
           </>
         ) : null}
@@ -49,7 +64,7 @@ export function Breadcrumbs() {
           aria-current="page"
           className="font-bold text-slate-900 dark:text-slate-100"
         >
-          {currentLabel}
+          {meta.label}
         </li>
       </ol>
     </nav>

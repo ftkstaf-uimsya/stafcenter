@@ -4,15 +4,18 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BookOpen,
   Boxes,
   Building2,
   CalendarClock,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  GraduationCap,
   LayoutDashboard,
   type LucideIcon,
   Package,
+  UserCog,
   Users,
   Wrench,
   X,
@@ -48,10 +51,15 @@ export function Sidebar({
     bookings,
     maintenanceLogs,
     consumables,
+    lecturers,
+    courses,
+    campusOfficials,
+    canManageDataMaster,
     authUser,
     setCommandSearchOpen,
   } = useSarpras();
   const [sarprasExpanded, setSarprasExpanded] = useState(true);
+  const [dataMasterExpanded, setDataMasterExpanded] = useState(true);
 
   const pendingBookings = bookings.filter(
     (b) => b.status === "Menunggu Persetujuan"
@@ -66,20 +74,12 @@ export function Sidebar({
     (a) => a.condition === "Rusak Berat" || a.condition === "Rusak Ringan"
   ).length;
 
-  const navItems: NavSubItem[] = [
+  const saprasNavItems: NavSubItem[] = [
     {
       href: "/sarpras/dashboard",
       label: "Dashboard Ringkasan",
       shortLabel: "Ringkasan",
       icon: LayoutDashboard,
-    },
-    {
-      href: "/sarpras/ruangan",
-      label: "Master Gedung & Ruangan",
-      shortLabel: "Ruangan",
-      icon: Building2,
-      badgeCount: rooms.length,
-      badgeTone: "info",
     },
     {
       href: "/sarpras/inventaris",
@@ -115,6 +115,42 @@ export function Sidebar({
     },
   ];
 
+  const dataMasterNavItems: NavSubItem[] = [
+    {
+      href: "/sarpras/ruangan",
+      label: "Master Gedung & Ruangan Kampus",
+      shortLabel: "Ruangan",
+      icon: Building2,
+      badgeCount: rooms.length,
+      badgeTone: "info",
+    },
+    {
+      href: "/sarpras/dosen",
+      label: "DOSEN",
+      shortLabel: "Dosen",
+      icon: GraduationCap,
+      badgeCount: lecturers.length > 0 ? lecturers.length : undefined,
+      badgeTone: "info",
+    },
+    {
+      href: "/sarpras/makul",
+      label: "MAKUL",
+      shortLabel: "Makul",
+      icon: BookOpen,
+      badgeCount: courses.length > 0 ? courses.length : undefined,
+      badgeTone: "info",
+    },
+    {
+      href: "/sarpras/pengurus",
+      label: "PENGURUS KAMPUS",
+      shortLabel: "Pengurus",
+      icon: UserCog,
+      badgeCount:
+        campusOfficials.length > 0 ? campusOfficials.length : undefined,
+      badgeTone: "info",
+    },
+  ];
+
   const badgeToneClasses: Record<
     NonNullable<NavSubItem["badgeTone"]>,
     string
@@ -123,6 +159,58 @@ export function Sidebar({
     warning: "bg-amber-900 text-amber-100 border-amber-400/60",
     danger: "bg-red-900 text-red-100 border-red-400/60",
   };
+
+  const renderNavItemList = (items: NavSubItem[], isCollapsedView: boolean) => (
+    <ul className="mt-1 space-y-1" role="list">
+      {items.map((item) => {
+        const Icon = item.icon;
+        const isActive =
+          pathname === item.href || pathname.startsWith(`${item.href}/`);
+        return (
+          <li key={item.href}>
+            <Link
+              href={item.href}
+              onClick={onCloseMobile}
+              aria-current={isActive ? "page" : undefined}
+              title={isCollapsedView ? item.label : undefined}
+              className={`min-h-[44px] flex items-center justify-between gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                isActive
+                  ? "bg-amber-500 text-slate-950 font-bold"
+                  : "text-slate-100 hover:bg-white/10 hover:text-white"
+              }`}
+            >
+              <span className="flex items-center gap-3 min-w-0">
+                <Icon
+                  className={`w-5 h-5 shrink-0 ${
+                    isActive ? "text-slate-950" : "text-slate-200"
+                  }`}
+                  aria-hidden={true}
+                />
+                {!isCollapsedView ? (
+                  <span className="truncate">{item.label}</span>
+                ) : (
+                  <span className="sr-only">{item.label}</span>
+                )}
+              </span>
+              {!isCollapsedView &&
+              item.badgeCount !== undefined &&
+              item.badgeCount > 0 ? (
+                <span
+                  className={`px-2 py-0.5 text-xs font-mono font-bold rounded border ${
+                    isActive
+                      ? "bg-slate-950 text-amber-300 border-slate-800"
+                      : badgeToneClasses[item.badgeTone || "info"]
+                  }`}
+                >
+                  {item.badgeCount}
+                </span>
+              ) : null}
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
 
   const renderNavLinks = (isCollapsedView: boolean) => (
     <div className="space-y-3">
@@ -150,7 +238,7 @@ export function Sidebar({
             aria-expanded={sarprasExpanded}
             className="w-full min-h-[44px] flex items-center justify-between px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-white hover:bg-white/10 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
           >
-            <span>Modul 01: Sarana Prasarana</span>
+            <span>SAPRAS</span>
             <ChevronDown
               className={`w-4 h-4 transition-transform ${
                 sarprasExpanded ? "rotate-0" : "-rotate-90"
@@ -160,58 +248,35 @@ export function Sidebar({
           </button>
         ) : null}
 
-        {sarprasExpanded || isCollapsedView ? (
-          <ul className="mt-1 space-y-1" role="list">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive =
-                pathname === item.href || pathname.startsWith(`${item.href}/`);
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    onClick={onCloseMobile}
-                    aria-current={isActive ? "page" : undefined}
-                    title={isCollapsedView ? item.label : undefined}
-                    className={`min-h-[44px] flex items-center justify-between gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
-                      isActive
-                        ? "bg-amber-500 text-slate-950 font-bold"
-                        : "text-slate-100 hover:bg-white/10 hover:text-white"
-                    }`}
-                  >
-                    <span className="flex items-center gap-3 min-w-0">
-                      <Icon
-                        className={`w-5 h-5 shrink-0 ${
-                          isActive ? "text-slate-950" : "text-slate-200"
-                        }`}
-                        aria-hidden={true}
-                      />
-                      {!isCollapsedView ? (
-                        <span className="truncate">{item.label}</span>
-                      ) : (
-                        <span className="sr-only">{item.label}</span>
-                      )}
-                    </span>
-                    {!isCollapsedView &&
-                    item.badgeCount !== undefined &&
-                    item.badgeCount > 0 ? (
-                      <span
-                        className={`px-2 py-0.5 text-xs font-mono font-bold rounded border ${
-                          isActive
-                            ? "bg-slate-950 text-amber-300 border-slate-800"
-                            : badgeToneClasses[item.badgeTone || "info"]
-                        }`}
-                      >
-                        {item.badgeCount}
-                      </span>
-                    ) : null}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        ) : null}
+        {sarprasExpanded || isCollapsedView
+          ? renderNavItemList(saprasNavItems, isCollapsedView)
+          : null}
       </div>
+
+      {canManageDataMaster ? (
+        <div className="pt-3 mt-3 border-t border-white/15">
+          {!isCollapsedView ? (
+            <button
+              type="button"
+              onClick={() => setDataMasterExpanded((prev) => !prev)}
+              aria-expanded={dataMasterExpanded}
+              className="w-full min-h-[44px] flex items-center justify-between px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-white hover:bg-white/10 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+            >
+              <span>DATA MASTER</span>
+              <ChevronDown
+                className={`w-4 h-4 transition-transform ${
+                  dataMasterExpanded ? "rotate-0" : "-rotate-90"
+                }`}
+                aria-hidden="true"
+              />
+            </button>
+          ) : null}
+
+          {dataMasterExpanded || isCollapsedView
+            ? renderNavItemList(dataMasterNavItems, isCollapsedView)
+            : null}
+        </div>
+      ) : null}
 
       {authUser?.role === "master_admin" ? (
         <div className="pt-3 mt-3 border-t border-white/15">
@@ -418,8 +483,8 @@ export function Sidebar({
         aria-label="Navigasi Cepat Mobile"
         className="fixed bottom-0 inset-x-0 z-40 lg:hidden bg-[#1E3A5F] dark:bg-slate-950 text-white border-t border-white/15 px-1 py-1"
       >
-        <ul className="grid grid-cols-6 gap-0.5" role="list">
-          {navItems.map((item) => {
+        <ul className="grid grid-cols-5 gap-0.5" role="list">
+          {saprasNavItems.map((item) => {
             const Icon = item.icon;
             const isActive =
               pathname === item.href || pathname.startsWith(`${item.href}/`);

@@ -80,6 +80,7 @@ export function PeminjamanView() {
     bookings,
     notes,
     attachments,
+    lecturers,
     uiSimState,
     setUiSimState,
     addBooking,
@@ -102,6 +103,7 @@ export function PeminjamanView() {
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [borrowerName, setBorrowerName] = useState("");
   const [borrowerRole, setBorrowerRole] = useState<BorrowerRole>("Dosen");
+  const [selectedLecturerId, setSelectedLecturerId] = useState("");
   const [borrowerUnit, setBorrowerUnit] = useState("");
   const [borrowerPhone, setBorrowerPhone] = useState("");
   const [targetType, setTargetType] = useState<BookingTargetType>("Ruangan");
@@ -180,6 +182,7 @@ export function PeminjamanView() {
   const openBookingModal = () => {
     setBorrowerName("");
     setBorrowerRole("Dosen");
+    setSelectedLecturerId("");
     setBorrowerUnit("");
     setBorrowerPhone("");
     setTargetType("Ruangan");
@@ -953,6 +956,32 @@ export function PeminjamanView() {
             </div>
           ) : null}
 
+          {borrowerRole === "Dosen" && lecturers.length > 0 ? (
+            <Select
+              label="Pilih dari Data Master Dosen (Opsional)"
+              value={selectedLecturerId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setSelectedLecturerId(id);
+                const found = lecturers.find((l) => l.id === id);
+                if (found) {
+                  setBorrowerName(found.full_name);
+                  setBorrowerUnit(found.homebase_prodi);
+                  if (found.phone) setBorrowerPhone(found.phone);
+                }
+              }}
+              options={[
+                { value: "", label: "-- Pilih dosen atau ketik manual di bawah --" },
+                ...lecturers
+                  .filter((l) => l.is_active)
+                  .map((l) => ({
+                    value: l.id,
+                    label: `${l.nidn_nip} - ${l.full_name} (${l.homebase_prodi})`,
+                  })),
+              ]}
+            />
+          ) : null}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
               label="Nama Lengkap Peminjam *"
@@ -964,7 +993,11 @@ export function PeminjamanView() {
             <Select
               label="Kategori Peminjam *"
               value={borrowerRole}
-              onChange={(e) => setBorrowerRole(e.target.value as BorrowerRole)}
+              onChange={(e) => {
+                const nextRole = e.target.value as BorrowerRole;
+                setBorrowerRole(nextRole);
+                if (nextRole !== "Dosen") setSelectedLecturerId("");
+              }}
               options={BORROWER_ROLES.map((r) => ({ value: r, label: r }))}
             />
           </div>

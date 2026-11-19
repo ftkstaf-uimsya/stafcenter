@@ -53,17 +53,21 @@ export async function GET() {
     return NextResponse.json({ error: firstError.message }, { status: 500 });
   }
 
-  // Ambil catatan & lampiran secara opsional (tidak menggagalkan aplikasi bila migrasi 003 belum dijalankan)
-  const [notesRes, attachRes] = await Promise.all([
-    supabase
-      .from("sarpras_notes")
-      .select("*")
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("sarpras_attachments")
-      .select("*")
-      .order("created_at", { ascending: false }),
-  ]);
+  // Ambil catatan, lampiran, dan Data Master secara opsional (tidak menggagalkan aplikasi bila migrasi 003/005 belum dijalankan)
+  const [notesRes, attachRes, lecturersRes, coursesRes, officialsRes] =
+    await Promise.all([
+      supabase
+        .from("sarpras_notes")
+        .select("*")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("sarpras_attachments")
+        .select("*")
+        .order("created_at", { ascending: false }),
+      supabase.from("lecturers").select("*").order("full_name"),
+      supabase.from("courses").select("*").order("code"),
+      supabase.from("campus_officials").select("*").order("official_code"),
+    ]);
 
   return NextResponse.json(
     {
@@ -76,6 +80,9 @@ export async function GET() {
       consumableTransactions: ctRes.data || [],
       notes: notesRes.error ? [] : notesRes.data || [],
       attachments: attachRes.error ? [] : attachRes.data || [],
+      lecturers: lecturersRes.error ? [] : lecturersRes.data || [],
+      courses: coursesRes.error ? [] : coursesRes.data || [],
+      campusOfficials: officialsRes.error ? [] : officialsRes.data || [],
     },
     { status: 200 }
   );

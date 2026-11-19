@@ -39,14 +39,31 @@ export async function POST(request: NextRequest) {
 
     if (
       !entityType ||
-      !["booking", "maintenance", "asset", "room", "consumable"].includes(
-        entityType
-      ) ||
+      ![
+        "booking",
+        "maintenance",
+        "asset",
+        "room",
+        "consumable",
+        "lecturer",
+        "course",
+        "official",
+      ].includes(entityType) ||
       !entityId
     ) {
       return NextResponse.json(
         { error: "Target entitas lampiran tidak valid." },
         { status: 400 }
+      );
+    }
+
+    if (
+      ["room", "lecturer", "course", "official"].includes(entityType) &&
+      session.role !== "master_admin"
+    ) {
+      return NextResponse.json(
+        { error: "Hanya Master Admin yang berhak mengunggah lampiran Data Master." },
+        { status: 403 }
       );
     }
 

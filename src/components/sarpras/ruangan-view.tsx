@@ -37,6 +37,7 @@ import {
   BookingStatusBadge,
   RoomStatusBadge,
 } from "@/components/sarpras/status-badges";
+import { MasterAdminGuard } from "@/components/sarpras/master-admin-guard";
 import { formatCurrencyIDR } from "@/lib/supabase/client";
 
 const ROOM_CATEGORIES: RoomCategory[] = [
@@ -57,6 +58,9 @@ export function RuanganView() {
     maintenanceLogs,
     notes,
     attachments,
+    lecturers,
+    campusOfficials,
+    canManageDataMaster,
     uiSimState,
     setUiSimState,
     addBuilding,
@@ -86,6 +90,7 @@ export function RuanganView() {
   const [capacity, setCapacity] = useState("40");
   const [picName, setPicName] = useState("");
   const [picContact, setPicContact] = useState("");
+  const [picQuickPick, setPicQuickPick] = useState("");
   const [status, setStatus] = useState<RoomStatus>("Tersedia");
   const [facilitiesNotes, setFacilitiesNotes] = useState("");
 
@@ -148,6 +153,10 @@ export function RuanganView() {
     (filterCategory !== "ALL" ? 1 : 0) +
     (filterStatus !== "ALL" ? 1 : 0);
 
+  if (!canManageDataMaster) {
+    return <MasterAdminGuard sectionLabel="Master Gedung & Ruangan Kampus" />;
+  }
+
   if (uiSimState === "loading") {
     return (
       <LoadingStateView message="Memuat daftar gedung dan ruangan kampus..." />
@@ -174,6 +183,7 @@ export function RuanganView() {
     setCapacity("40");
     setPicName("");
     setPicContact("");
+    setPicQuickPick("");
     setStatus("Tersedia");
     setFacilitiesNotes("");
     setFormError("");
@@ -190,6 +200,7 @@ export function RuanganView() {
     setCapacity(String(room.capacity));
     setPicName(room.pic_name);
     setPicContact(room.pic_contact);
+    setPicQuickPick("");
     setStatus(room.status);
     setFacilitiesNotes(room.facilities_notes);
     setFormError("");
@@ -420,7 +431,7 @@ export function RuanganView() {
       <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-slate-300 dark:border-slate-800">
         <div>
           <p className="text-xs font-mono font-bold uppercase tracking-wider text-[#1E3A5F] dark:text-sky-400">
-            SUB-MODUL 02 • INFRASTRUKTUR GEDUNG & RUANG
+            DATA MASTER • INFRASTRUKTUR GEDUNG & RUANG
           </p>
           <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100">
             Master Gedung & Ruangan Kampus
@@ -877,20 +888,64 @@ export function RuanganView() {
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Input
-              label="Nama Penanggung Jawab (PIC) *"
-              placeholder="Nama lengkap staf/koordinator ruang"
-              value={picName}
-              onChange={(e) => setPicName(e.target.value)}
-              required
-            />
-            <Input
-              label="Nomor Kontak PIC"
-              placeholder="Contoh: 0812-3400-xxxx"
-              value={picContact}
-              onChange={(e) => setPicContact(e.target.value)}
-            />
+          <div className="space-y-3">
+            {campusOfficials.length > 0 || lecturers.length > 0 ? (
+              <Select
+                label="Ambil PIC dari Pengurus Kampus / Dosen (Opsional)"
+                value={picQuickPick}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setPicQuickPick(val);
+                  if (!val) return;
+                  if (val.startsWith("official:")) {
+                    const id = val.slice("official:".length);
+                    const found = campusOfficials.find((o) => o.id === id);
+                    if (found) {
+                      setPicName(found.full_name);
+                      if (found.phone) setPicContact(found.phone);
+                    }
+                  } else if (val.startsWith("lecturer:")) {
+                    const id = val.slice("lecturer:".length);
+                    const found = lecturers.find((l) => l.id === id);
+                    if (found) {
+                      setPicName(found.full_name);
+                      if (found.phone) setPicContact(found.phone);
+                    }
+                  }
+                }}
+                options={[
+                  { value: "", label: "-- Pilih cepat atau ketik manual di bawah --" },
+                  ...campusOfficials
+                    .filter((o) => o.is_active)
+                    .map((o) => ({
+                      value: `official:${o.id}`,
+                      label: `[Pengurus] ${o.full_name} (${o.position_title})`,
+                    })),
+                  ...lecturers
+                    .filter((l) => l.is_active)
+                    .map((l) => ({
+                      value: `lecturer:${l.id}`,
+                      label: `[Dosen] ${l.full_name} (${l.homebase_prodi})`,
+                    })),
+                ]}
+              />
+            ) : null}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                label="Nama Penanggung Jawab (PIC) *"
+                placeholder="Nama lengkap staf/koordinator ruang"
+                value={picName}
+                onChange={(e) => setPicName(e.target.value)}
+                required
+              />
+              <Input
+                label="Nomor Kontak PIC"
+                placeholder="Contoh: 0812-3400-xxxx"
+                value={picContact}
+                onChange={(e) => setPicContact(e.target.value)}
+              />
+            </div>
           </div>
 
           <Select

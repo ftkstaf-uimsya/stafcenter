@@ -3,11 +3,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  BookOpen,
   Boxes,
   CalendarClock,
   DoorOpen,
+  GraduationCap,
   Package,
   Search,
+  UserCog,
   Wrench,
   X,
 } from "lucide-react";
@@ -31,6 +34,10 @@ export function CommandSearch() {
     bookings,
     maintenanceLogs,
     consumables,
+    lecturers,
+    courses,
+    campusOfficials,
+    canManageDataMaster,
     commandSearchOpen,
     setCommandSearchOpen,
   } = useSarpras();
@@ -62,22 +69,84 @@ export function CommandSearch() {
     const q = query.trim().toLowerCase();
     const hits: SearchHit[] = [];
 
-    for (const r of rooms) {
-      if (
-        !q ||
-        r.code.toLowerCase().includes(q) ||
-        r.name.toLowerCase().includes(q) ||
-        r.pic_name.toLowerCase().includes(q)
-      ) {
-        hits.push({
-          id: `rm-${r.id}`,
-          category: "Ruangan",
-          code: r.code,
-          title: r.name,
-          meta: `PIC: ${r.pic_name} • ${r.status}`,
-          href: `/sarpras/ruangan?inspect=${r.id}`,
-          icon: <DoorOpen className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
-        });
+    if (canManageDataMaster) {
+      for (const r of rooms) {
+        if (
+          !q ||
+          r.code.toLowerCase().includes(q) ||
+          r.name.toLowerCase().includes(q) ||
+          r.pic_name.toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `rm-${r.id}`,
+            category: "Ruangan",
+            code: r.code,
+            title: r.name,
+            meta: `PIC: ${r.pic_name} • ${r.status}`,
+            href: `/sarpras/ruangan?inspect=${r.id}`,
+            icon: <DoorOpen className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
+          });
+        }
+      }
+
+      for (const l of lecturers) {
+        if (
+          !q ||
+          l.nidn_nip.toLowerCase().includes(q) ||
+          l.full_name.toLowerCase().includes(q) ||
+          l.homebase_prodi.toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `dsn-${l.id}`,
+            category: "Dosen",
+            code: l.nidn_nip,
+            title: l.full_name,
+            meta: `${l.homebase_prodi} • ${l.employment_status}`,
+            href: `/sarpras/dosen?inspect=${l.id}`,
+            icon: (
+              <GraduationCap className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />
+            ),
+          });
+        }
+      }
+
+      for (const c of courses) {
+        if (
+          !q ||
+          c.code.toLowerCase().includes(q) ||
+          c.name.toLowerCase().includes(q) ||
+          c.prodi.toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `mk-${c.id}`,
+            category: "Makul",
+            code: c.code,
+            title: c.name,
+            meta: `${c.prodi} • Smt ${c.semester} (${c.sks_theory + c.sks_practice} SKS)`,
+            href: `/sarpras/makul?inspect=${c.id}`,
+            icon: <BookOpen className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
+          });
+        }
+      }
+
+      for (const o of campusOfficials) {
+        if (
+          !q ||
+          o.official_code.toLowerCase().includes(q) ||
+          o.full_name.toLowerCase().includes(q) ||
+          o.position_title.toLowerCase().includes(q) ||
+          o.unit_name.toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `pgr-${o.id}`,
+            category: "Pengurus Kampus",
+            code: o.official_code,
+            title: o.full_name,
+            meta: `${o.position_title} • ${o.unit_name}`,
+            href: `/sarpras/pengurus?inspect=${o.id}`,
+            icon: <UserCog className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
+          });
+        }
       }
     }
 
@@ -159,7 +228,18 @@ export function CommandSearch() {
     }
 
     return hits.slice(0, 12);
-  }, [assets, bookings, consumables, maintenanceLogs, query, rooms]);
+  }, [
+    assets,
+    bookings,
+    campusOfficials,
+    canManageDataMaster,
+    consumables,
+    courses,
+    lecturers,
+    maintenanceLogs,
+    query,
+    rooms,
+  ]);
 
   if (!commandSearchOpen) return null;
 
