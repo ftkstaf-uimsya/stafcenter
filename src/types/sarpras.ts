@@ -63,7 +63,88 @@ export type SarprasEntityType =
   | "course"
   | "official"
   | "unit"
-  | "vendor";
+  | "vendor"
+  | "class"
+  | "office_kit"
+  | "office_loan";
+
+export type ProdiCode =
+  | "MPI"
+  | "PBA"
+  | "TBIG"
+  | "TBIN"
+  | "TMTK"
+  | "TIPA"
+  | "PAI";
+
+export type ClassSectionCode = "A" | "B" | "C" | "D";
+
+export interface AcademicClass {
+  id: string;
+  class_code: string;
+  prodi: ProdiCode;
+  unit_id?: string | null;
+  angkatan_year: string;
+  class_section: ClassSectionCode;
+  dpm_name: string;
+  dpm_phone: string;
+  students_count: number;
+  default_room_id?: string | null;
+  is_active: boolean;
+  notes?: string;
+  created_at: string;
+}
+
+export type OfficeKitCategory =
+  | "Kabel HDMI"
+  | "Stop Kontak"
+  | "Remote TV"
+  | "Kunci & Akses"
+  | "Adapter & Converter"
+  | "Lainnya";
+
+export type OfficeKitStatus = "Tersedia" | "Dipinjam" | "Perbaikan";
+
+export interface OfficeKitItem {
+  id: string;
+  kit_code: string;
+  name: string;
+  category: OfficeKitCategory;
+  brand_spec: string;
+  storage_tray: string;
+  linked_room_id?: string | null;
+  condition: AssetCondition;
+  status: OfficeKitStatus;
+  is_active: boolean;
+  notes?: string;
+  created_at: string;
+}
+
+export type OfficeKitLoanStatus = "Dipinjam" | "Dikembalikan";
+
+export interface OfficeKitLoan {
+  id: string;
+  loan_code: string;
+  class_id?: string | null;
+  class_code: string;
+  prodi: ProdiCode;
+  dpm_name: string;
+  borrower_name: string;
+  borrower_phone: string;
+  room_id?: string | null;
+  course_name?: string;
+  kit_item_ids: string[];
+  kit_items_label: string;
+  loan_date: string;
+  borrow_time: string;
+  expected_return_time: string;
+  returned_at?: string | null;
+  status: OfficeKitLoanStatus;
+  handed_by_staff?: string;
+  received_by_staff?: string;
+  return_condition_notes?: string;
+  created_at: string;
+}
 
 export type CampusUnitType =
   | "Fakultas"
@@ -309,6 +390,8 @@ export interface Booking {
   borrower_role: BorrowerRole;
   borrower_unit: string;
   unit_id?: string | null;
+  class_id?: string | null;
+  class_code?: string | null;
   borrower_lecturer_id?: string | null;
   borrower_official_id?: string | null;
   borrower_phone: string;

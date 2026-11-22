@@ -90,7 +90,7 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
 
           {/* Indikator Jujur Sumber Data */}
           <span
-            className={`hidden sm:inline-flex px-2.5 py-1 text-[11px] font-mono font-semibold rounded border ${
+            className={`hidden xl:inline-flex px-2.5 py-1 text-[11px] font-mono font-semibold rounded border whitespace-nowrap ${
               isLiveSupabase
                 ? "bg-emerald-50 text-emerald-900 border-emerald-700/50 dark:bg-emerald-950 dark:text-emerald-200 dark:border-emerald-500"
                 : "bg-amber-50 text-amber-900 border-amber-700/50 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-500"
@@ -101,9 +101,7 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
                 : "Menggunakan data simulasi awal kampus (Seed Data)"
             }
           >
-            {isLiveSupabase
-              ? "[SUPABASE TERHUBUNG]"
-              : "[REAL DATA: MODE SEED KAMPUS]"}
+            {isLiveSupabase ? "[DB: SUPABASE]" : "[MODE SEED]"}
           </span>
 
           {/* Info Sesi Staf & Tombol Keluar */}

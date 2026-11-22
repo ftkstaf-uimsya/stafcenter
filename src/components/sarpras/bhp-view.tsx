@@ -408,7 +408,7 @@ export function BhpView() {
           <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100">
             Barang Habis Pakai (BHP) & ATK Kampus
           </h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
             Pemantauan stok operasional harian dengan indikator peringatan merah
             bila di bawah batas minimum. Klik baris item untuk membuka kartu
             riwayat mutasi.
@@ -512,45 +512,52 @@ export function BhpView() {
         </div>
 
         <div className="divide-y divide-slate-200 dark:divide-slate-800">
-          {consumableTransactions.map((tx) => {
-            const item = consumables.find((c) => c.id === tx.consumable_id);
-            const isIn = tx.transaction_type === "Masuk";
-            return (
-              <div
-                key={tx.id}
-                className="px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
-              >
-                <div className="space-y-0.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone={isIn ? "success" : "warning"}>
-                      <span>
-                        {isIn
-                          ? `MASUK (+${tx.quantity} ${item?.unit || ""})`
-                          : `KELUAR (-${tx.quantity} ${item?.unit || ""})`}
+          {consumableTransactions.length === 0 ? (
+            <div className="px-5 py-8 text-center text-xs text-slate-600 dark:text-slate-400">
+              Belum ada riwayat barang masuk atau pengambilan BHP/ATK yang
+              tercatat.
+            </div>
+          ) : (
+            consumableTransactions.map((tx) => {
+              const item = consumables.find((c) => c.id === tx.consumable_id);
+              const isIn = tx.transaction_type === "Masuk";
+              return (
+                <div
+                  key={tx.id}
+                  className="px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge tone={isIn ? "success" : "warning"}>
+                        <span>
+                          {isIn
+                            ? `MASUK (+${tx.quantity} ${item?.unit || ""})`
+                            : `KELUAR (-${tx.quantity} ${item?.unit || ""})`}
+                        </span>
+                      </Badge>
+                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                        {item?.code || "-"}
                       </span>
-                    </Badge>
-                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                      {item?.code || "-"}
-                    </span>
-                    <span className="font-bold text-slate-900 dark:text-slate-100">
-                      {item?.name || "Item BHP"}
-                    </span>
+                      <span className="font-bold text-slate-900 dark:text-slate-100">
+                        {item?.name || "Item BHP"}
+                      </span>
+                    </div>
+                    <p className="text-slate-700 dark:text-slate-300">
+                      Keterangan: {tx.purpose_notes}
+                    </p>
                   </div>
-                  <p className="text-slate-700 dark:text-slate-300">
-                    Keterangan: {tx.purpose_notes}
-                  </p>
+                  <div className="sm:text-right text-slate-600 dark:text-slate-400 shrink-0">
+                    <p className="font-semibold text-slate-900 dark:text-slate-100">
+                      {tx.actor_name} ({tx.actor_unit})
+                    </p>
+                    <p className="font-mono">
+                      {tx.transaction_date.slice(0, 10)}
+                    </p>
+                  </div>
                 </div>
-                <div className="sm:text-right text-slate-600 dark:text-slate-400 shrink-0">
-                  <p className="font-semibold text-slate-900 dark:text-slate-100">
-                    {tx.actor_name} ({tx.actor_unit})
-                  </p>
-                  <p className="font-mono">
-                    {tx.transaction_date.slice(0, 10)}
-                  </p>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </section>
 

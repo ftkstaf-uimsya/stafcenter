@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Boxes,
   Building2,
+  Cable,
   CalendarClock,
   CheckCircle2,
   DoorOpen,
@@ -36,6 +37,8 @@ export function DashboardView() {
     bookings,
     maintenanceLogs,
     consumables,
+    officeKitItems,
+    officeKitLoans,
     canManageDataMaster,
     uiSimState,
     setUiSimState,
@@ -95,6 +98,9 @@ export function DashboardView() {
   const criticalConsumables = consumables.filter(
     (c) => c.current_stock < c.min_stock
   );
+  const activeOfficeKitLoans = officeKitLoans.filter(
+    (l) => l.status === "Dipinjam"
+  );
 
   const totalAssetValue = assets.reduce(
     (acc, item) => acc + item.acquisition_cost,
@@ -119,6 +125,13 @@ export function DashboardView() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <Link
+            href="/sarpras/sirkulasi-invent"
+            className="min-h-[44px] px-4 py-2.5 inline-flex items-center gap-2 rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+          >
+            <Cable className="w-4 h-4" aria-hidden="true" />
+            <span>Sirkulasi Invent</span>
+          </Link>
           <Link
             href="/sarpras/peminjaman"
             className="min-h-[44px] px-4 py-2.5 inline-flex items-center gap-2 rounded-md bg-[#1E3A5F] text-white hover:bg-[#152943] dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
@@ -513,6 +526,83 @@ export function DashboardView() {
             })}
           </div>
         </div>
+      </section>
+
+      {/* Panel Sirkulasi Invent Kantor Staf: Alat Sedang Dipinjam Kelas */}
+      <section className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div className="flex items-center gap-2.5">
+            <Cable
+              className="w-5 h-5 text-[#1E3A5F] dark:text-sky-400"
+              aria-hidden="true"
+            />
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                Sirkulasi Invent Kantor Staf (Alat Sedang Dipinjam Kelas)
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Pantauan Kabel HDMI, Stop Kontak, dan Remote TV yang sedang
+                dibawa perwakilan mahasiswa. Total tersedia di loker:{" "}
+                {officeKitItems.filter((i) => i.status === "Tersedia").length}{" "}
+                dari {officeKitItems.length} unit.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/sarpras/sirkulasi-invent"
+            className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
+          >
+            Buka Sirkulasi Invent ({activeOfficeKitLoans.length} aktif)
+          </Link>
+        </div>
+
+        {activeOfficeKitLoans.length === 0 ? (
+          <div className="p-4 rounded-md bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-700/40 flex items-center gap-2.5 text-xs text-emerald-900 dark:text-emerald-200">
+            <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span>
+              Seluruh Kabel HDMI, Stop Kontak, dan Remote TV berada di loker
+              kantor staf.
+            </span>
+          </div>
+        ) : (
+          <ul
+            className="grid grid-cols-1 md:grid-cols-2 gap-3"
+            role="list"
+          >
+            {activeOfficeKitLoans.map((loan) => {
+              const room = rooms.find((r) => r.id === loan.room_id);
+              return (
+                <li key={loan.id}>
+                  <Link
+                    href={`/sarpras/sirkulasi-invent?inspect=${encodeURIComponent(loan.id)}`}
+                    className="block p-3.5 rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/30 hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-colors space-y-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F]"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 font-mono font-bold rounded bg-[#1E3A5F] text-white dark:bg-sky-400 dark:text-slate-950">
+                          {loan.class_code}
+                        </span>
+                        <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
+                          {loan.loan_code}
+                        </span>
+                      </div>
+                      <span className="font-mono text-amber-900 dark:text-amber-300 font-semibold">
+                        {loan.borrow_time} - {loan.expected_return_time} WIB
+                      </span>
+                    </div>
+                    <p className="font-semibold text-slate-900 dark:text-slate-100">
+                      {loan.kit_items_label}
+                    </p>
+                    <p className="text-slate-700 dark:text-slate-300">
+                      Pengambil: {loan.borrower_name} • DPM: {loan.dpm_name}
+                      {room ? ` • Ruang ${room.code}` : ""}
+                    </p>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
       {/* Panel Bawah: Peringatan Stok BHP Minimum & Ringkasan Gedung (Variasi Komposisi RHYTHM 2) */}

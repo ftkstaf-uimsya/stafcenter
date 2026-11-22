@@ -83,6 +83,7 @@ export function PeminjamanView() {
     lecturers,
     campusOfficials,
     campusUnits,
+    academicClasses,
     authUser,
     uiSimState,
     setUiSimState,
@@ -108,6 +109,7 @@ export function PeminjamanView() {
   const [borrowerRole, setBorrowerRole] = useState<BorrowerRole>("Dosen");
   const [selectedLecturerId, setSelectedLecturerId] = useState("");
   const [selectedOfficialId, setSelectedOfficialId] = useState("");
+  const [selectedClassId, setSelectedClassId] = useState("");
   const [selectedUnitId, setSelectedUnitId] = useState("");
   const [borrowerUnit, setBorrowerUnit] = useState("");
   const [borrowerPhone, setBorrowerPhone] = useState("");
@@ -189,6 +191,7 @@ export function PeminjamanView() {
     setBorrowerRole("Dosen");
     setSelectedLecturerId("");
     setSelectedOfficialId("");
+    setSelectedClassId("");
     const firstActiveUnit = campusUnits.find((u) => u.is_active);
     setSelectedUnitId(firstActiveUnit?.id || "");
     setBorrowerUnit(firstActiveUnit?.name || "");
@@ -237,11 +240,19 @@ export function PeminjamanView() {
       return;
     }
 
+    const matchedClass = academicClasses.find((c) => c.id === selectedClassId);
+
     const res = addBooking({
       borrower_name: borrowerName.trim(),
       borrower_role: borrowerRole,
       borrower_unit: finalUnitName,
       unit_id: matchedUnit?.id || null,
+      class_id:
+        borrowerRole === "Mahasiswa/Ormawa" ? matchedClass?.id || null : null,
+      class_code:
+        borrowerRole === "Mahasiswa/Ormawa"
+          ? matchedClass?.class_code || null
+          : null,
       borrower_lecturer_id:
         borrowerRole === "Dosen" ? selectedLecturerId || null : null,
       borrower_official_id:
@@ -1041,6 +1052,48 @@ export function PeminjamanView() {
           ) : null}
 
           {borrowerRole === "Mahasiswa/Ormawa" &&
+          academicClasses.some((c) => c.is_active) ? (
+            <Select
+              label="Pilih dari Data Master Kelas & DPM (Opsional)"
+              value={selectedClassId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setSelectedClassId(id);
+                const cls = academicClasses.find((c) => c.id === id);
+                if (cls) {
+                  setBorrowerName(`${cls.dpm_name} (DPM ${cls.class_code})`);
+                  if (cls.dpm_phone && cls.dpm_phone !== "-") {
+                    setBorrowerPhone(cls.dpm_phone);
+                  }
+                  setAttendeesCount(String(cls.students_count));
+                  const matchedUnit =
+                    campusUnits.find((u) => u.id === cls.unit_id) ||
+                    campusUnits.find(
+                      (u) => u.code.toUpperCase() === cls.prodi.toUpperCase()
+                    );
+                  setSelectedUnitId(matchedUnit?.id || "");
+                  setBorrowerUnit(matchedUnit?.name || cls.prodi);
+                  if (cls.default_room_id) {
+                    setRoomId(cls.default_room_id);
+                  }
+                }
+              }}
+              options={[
+                {
+                  value: "",
+                  label: "-- Pilih kelas & DPM atau pilih Ormawa di bawah --",
+                },
+                ...academicClasses
+                  .filter((c) => c.is_active)
+                  .map((c) => ({
+                    value: c.id,
+                    label: `${c.class_code} - DPM: ${c.dpm_name} (${c.students_count} mhs)`,
+                  })),
+              ]}
+            />
+          ) : null}
+
+          {borrowerRole === "Mahasiswa/Ormawa" &&
           campusUnits.some((u) => u.is_active && u.unit_type === "Ormawa / UKM") ? (
             <Select
               label="Pilih dari Master Ormawa / UKM (Opsional)"
@@ -1048,6 +1101,7 @@ export function PeminjamanView() {
               onChange={(e) => {
                 const id = e.target.value;
                 setSelectedUnitId(id);
+                setSelectedClassId("");
                 const found = campusUnits.find((u) => u.id === id);
                 if (found) {
                   setBorrowerUnit(found.name);
@@ -1089,6 +1143,7 @@ export function PeminjamanView() {
                 setBorrowerRole(nextRole);
                 if (nextRole !== "Dosen") setSelectedLecturerId("");
                 if (nextRole !== "Staf") setSelectedOfficialId("");
+                if (nextRole !== "Mahasiswa/Ormawa") setSelectedClassId("");
               }}
               options={BORROWER_ROLES.map((r) => ({ value: r, label: r }))}
             />

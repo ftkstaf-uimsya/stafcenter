@@ -7,6 +7,7 @@ import {
   BookOpen,
   Boxes,
   Building2,
+  Cable,
   CalendarClock,
   ChevronDown,
   ChevronLeft,
@@ -17,6 +18,7 @@ import {
   LayoutDashboard,
   type LucideIcon,
   Package,
+  School,
   Tags,
   UserCog,
   Users,
@@ -59,6 +61,8 @@ export function Sidebar({
     campusOfficials,
     campusUnits,
     maintenanceVendors,
+    academicClasses,
+    officeKitLoans,
     canManageDataMaster,
     authUser,
     setCommandSearchOpen,
@@ -66,6 +70,9 @@ export function Sidebar({
   const [sarprasExpanded, setSarprasExpanded] = useState(true);
   const [dataMasterExpanded, setDataMasterExpanded] = useState(true);
 
+  const activeOfficeLoans = officeKitLoans.filter(
+    (l) => l.status === "Dipinjam"
+  ).length;
   const pendingBookings = bookings.filter(
     (b) => b.status === "Menunggu Persetujuan"
   ).length;
@@ -85,6 +92,14 @@ export function Sidebar({
       label: "Dashboard Ringkasan",
       shortLabel: "Ringkasan",
       icon: LayoutDashboard,
+    },
+    {
+      href: "/sarpras/sirkulasi-invent",
+      label: "Sirkulasi Invent",
+      shortLabel: "Sirkulasi",
+      icon: Cable,
+      badgeCount: activeOfficeLoans > 0 ? activeOfficeLoans : undefined,
+      badgeTone: "warning",
     },
     {
       href: "/sarpras/inventaris",
@@ -123,15 +138,24 @@ export function Sidebar({
   const dataMasterNavItems: NavSubItem[] = [
     {
       href: "/sarpras/ruangan",
-      label: "Master Gedung & Ruangan Kampus",
+      label: "Gedung & Ruangan",
       shortLabel: "Ruangan",
       icon: Building2,
       badgeCount: rooms.length,
       badgeTone: "info",
     },
     {
+      href: "/sarpras/kelas",
+      label: "Kelas & DPM",
+      shortLabel: "Kelas",
+      icon: School,
+      badgeCount:
+        academicClasses.length > 0 ? academicClasses.length : undefined,
+      badgeTone: "info",
+    },
+    {
       href: "/sarpras/dosen",
-      label: "DOSEN",
+      label: "Dosen",
       shortLabel: "Dosen",
       icon: GraduationCap,
       badgeCount: lecturers.length > 0 ? lecturers.length : undefined,
@@ -139,7 +163,7 @@ export function Sidebar({
     },
     {
       href: "/sarpras/makul",
-      label: "MAKUL",
+      label: "Mata Kuliah (Makul)",
       shortLabel: "Makul",
       icon: BookOpen,
       badgeCount: courses.length > 0 ? courses.length : undefined,
@@ -147,7 +171,7 @@ export function Sidebar({
     },
     {
       href: "/sarpras/pengurus",
-      label: "PENGURUS KAMPUS",
+      label: "Pengurus Kampus",
       shortLabel: "Pengurus",
       icon: UserCog,
       badgeCount:
@@ -156,7 +180,7 @@ export function Sidebar({
     },
     {
       href: "/sarpras/unit",
-      label: "UNIT / PRODI / ORMAWA",
+      label: "Unit, Prodi & Ormawa",
       shortLabel: "Unit Kerja",
       icon: Landmark,
       badgeCount: campusUnits.length > 0 ? campusUnits.length : undefined,
@@ -164,7 +188,7 @@ export function Sidebar({
     },
     {
       href: "/sarpras/vendor",
-      label: "TEKNISI & VENDOR",
+      label: "Teknisi & Vendor",
       shortLabel: "Vendor",
       icon: HardHat,
       badgeCount:
@@ -173,7 +197,7 @@ export function Sidebar({
     },
     {
       href: "/sarpras/referensi",
-      label: "MASTER REFERENSI",
+      label: "Master Referensi",
       shortLabel: "Referensi",
       icon: Tags,
     },
@@ -201,7 +225,7 @@ export function Sidebar({
               onClick={onCloseMobile}
               aria-current={isActive ? "page" : undefined}
               title={isCollapsedView ? item.label : undefined}
-              className={`min-h-[44px] flex items-center justify-between gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+              className={`min-h-[44px] lg:min-h-[38px] flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                 isActive
                   ? "bg-amber-500 text-slate-950 font-bold"
                   : "text-slate-100 hover:bg-white/10 hover:text-white"
@@ -240,18 +264,21 @@ export function Sidebar({
     </ul>
   );
 
-  const renderNavLinks = (isCollapsedView: boolean) => (
-    <div className="space-y-3">
-      {!isCollapsedView ? (
+  const renderNavLinks = (
+    isCollapsedView: boolean,
+    isMobileDrawer = false
+  ) => (
+    <div className="space-y-2.5">
+      {!isCollapsedView && isMobileDrawer ? (
         <button
           type="button"
           onClick={() => {
             onCloseMobile();
             setCommandSearchOpen(true);
           }}
-          className="w-full min-h-[40px] flex items-center justify-between px-3 py-2 rounded-md bg-white/10 hover:bg-white/15 border border-white/10 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+          className="w-full min-h-[44px] flex items-center justify-between px-3 py-2 rounded-md bg-white/10 hover:bg-white/15 border border-white/10 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
         >
-          <span>Cari ruang, aset, tiket...</span>
+          <span>Cari ruang, kelas, aset...</span>
           <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-black/30 text-slate-200">
             Ctrl+K
           </kbd>
@@ -264,7 +291,7 @@ export function Sidebar({
             type="button"
             onClick={() => setSarprasExpanded((prev) => !prev)}
             aria-expanded={sarprasExpanded}
-            className="w-full min-h-[44px] flex items-center justify-between px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-white hover:bg-white/10 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+            className="w-full min-h-[40px] flex items-center justify-between px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-white hover:bg-white/10 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
           >
             <span>SAPRAS</span>
             <ChevronDown
@@ -282,13 +309,13 @@ export function Sidebar({
       </div>
 
       {canManageDataMaster ? (
-        <div className="pt-3 mt-3 border-t border-white/15">
+        <div className="pt-2.5 mt-2.5 border-t border-white/15">
           {!isCollapsedView ? (
             <button
               type="button"
               onClick={() => setDataMasterExpanded((prev) => !prev)}
               aria-expanded={dataMasterExpanded}
-              className="w-full min-h-[44px] flex items-center justify-between px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-white hover:bg-white/10 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+              className="w-full min-h-[40px] flex items-center justify-between px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-white hover:bg-white/10 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
             >
               <span>DATA MASTER</span>
               <ChevronDown
@@ -322,7 +349,7 @@ export function Sidebar({
                   pathname === "/sarpras/akun" ? "page" : undefined
                 }
                 title={isCollapsedView ? "Kelola Akun Staf" : undefined}
-                className={`min-h-[44px] flex items-center justify-between gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                className={`min-h-[44px] lg:min-h-[38px] flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   pathname === "/sarpras/akun"
                     ? "bg-amber-500 text-slate-950 font-bold"
                     : "text-slate-100 hover:bg-white/10 hover:text-white"
@@ -479,7 +506,7 @@ export function Sidebar({
               </button>
             </div>
             <nav className="flex-1 p-3 overflow-y-auto">
-              {renderNavLinks(false)}
+              {renderNavLinks(false, true)}
             </nav>
             <div className="p-4 border-t border-white/15 text-xs text-slate-200 space-y-1">
               <p className="font-semibold text-white">
@@ -511,7 +538,7 @@ export function Sidebar({
         aria-label="Navigasi Cepat Mobile"
         className="fixed bottom-0 inset-x-0 z-40 lg:hidden bg-[#1E3A5F] dark:bg-slate-950 text-white border-t border-white/15 px-1 py-1"
       >
-        <ul className="grid grid-cols-5 gap-0.5" role="list">
+        <ul className="grid grid-cols-6 gap-0.5" role="list">
           {saprasNavItems.map((item) => {
             const Icon = item.icon;
             const isActive =

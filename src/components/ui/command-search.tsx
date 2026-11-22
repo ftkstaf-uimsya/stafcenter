@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import {
   BookOpen,
   Boxes,
+  Cable,
   CalendarClock,
   DoorOpen,
   GraduationCap,
   HardHat,
   Landmark,
   Package,
+  School,
   Search,
   UserCog,
   Wrench,
@@ -41,6 +43,9 @@ export function CommandSearch() {
     campusOfficials,
     campusUnits,
     maintenanceVendors,
+    academicClasses,
+    officeKitItems,
+    officeKitLoans,
     canManageDataMaster,
     commandSearchOpen,
     setCommandSearchOpen,
@@ -192,6 +197,64 @@ export function CommandSearch() {
           });
         }
       }
+      for (const cls of academicClasses) {
+        if (
+          !q ||
+          cls.class_code.toLowerCase().includes(q) ||
+          cls.prodi.toLowerCase().includes(q) ||
+          cls.dpm_name.toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `cls-${cls.id}`,
+            category: "Kelas & DPM",
+            code: cls.class_code,
+            title: `Prodi ${cls.prodi} (Angkatan '${cls.angkatan_year} Bagian ${cls.class_section})`,
+            meta: `DPM: ${cls.dpm_name} • ${cls.students_count} mhs`,
+            href: `/sarpras/kelas?inspect=${cls.id}`,
+            icon: <School className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
+          });
+        }
+      }
+    }
+
+    for (const loan of officeKitLoans) {
+      if (
+        !q ||
+        loan.loan_code.toLowerCase().includes(q) ||
+        loan.class_code.toLowerCase().includes(q) ||
+        loan.dpm_name.toLowerCase().includes(q) ||
+        loan.borrower_name.toLowerCase().includes(q) ||
+        loan.kit_items_label.toLowerCase().includes(q)
+      ) {
+        hits.push({
+          id: `srk-${loan.id}`,
+          category: "Sirkulasi Invent",
+          code: loan.loan_code,
+          title: `Kelas ${loan.class_code} - ${loan.borrower_name}`,
+          meta: `${loan.status} • ${loan.kit_items_label}`,
+          href: `/sarpras/sirkulasi-invent?inspect=${loan.id}`,
+          icon: <Cable className="w-4 h-4 text-amber-700 dark:text-amber-400" />,
+        });
+      }
+    }
+
+    for (const kit of officeKitItems) {
+      if (
+        !q ||
+        kit.kit_code.toLowerCase().includes(q) ||
+        kit.name.toLowerCase().includes(q) ||
+        kit.category.toLowerCase().includes(q)
+      ) {
+        hits.push({
+          id: `kit-${kit.id}`,
+          category: "Alat Kantor Staf",
+          code: kit.kit_code,
+          title: kit.name,
+          meta: `${kit.category} • ${kit.status}`,
+          href: `/sarpras/sirkulasi-invent?inspect=${kit.id}`,
+          icon: <Cable className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
+        });
+      }
     }
 
     for (const a of assets) {
@@ -273,6 +336,7 @@ export function CommandSearch() {
 
     return hits.slice(0, 12);
   }, [
+    academicClasses,
     assets,
     bookings,
     campusOfficials,
@@ -283,6 +347,8 @@ export function CommandSearch() {
     lecturers,
     maintenanceLogs,
     maintenanceVendors,
+    officeKitItems,
+    officeKitLoans,
     query,
     rooms,
   ]);

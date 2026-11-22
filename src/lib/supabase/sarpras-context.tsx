@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import {
+  AcademicClass,
   ActionResult,
   Asset,
   AssetCategory,
@@ -18,6 +19,7 @@ import {
   Building,
   CampusOfficial,
   CampusUnit,
+  ClassSectionCode,
   Consumable,
   ConsumableCategoryMaster,
   ConsumableTransaction,
@@ -29,6 +31,9 @@ import {
   MaintenanceLog,
   MaintenanceStatus,
   MaintenanceVendor,
+  OfficeKitItem,
+  OfficeKitLoan,
+  ProdiCode,
   Room,
   SarprasAttachment,
   SarprasEntityType,
@@ -49,6 +54,7 @@ import {
   normalizeSerialKey,
 } from "@/lib/sarpras/asset-import-shared";
 import {
+  INITIAL_ACADEMIC_CLASSES,
   INITIAL_ASSETS,
   INITIAL_ASSET_CATEGORIES,
   INITIAL_BOOKINGS,
@@ -64,11 +70,30 @@ import {
   INITIAL_LECTURERS,
   INITIAL_MAINTENANCE_LOGS,
   INITIAL_MAINTENANCE_VENDORS,
+  INITIAL_OFFICE_KIT_ITEMS,
+  INITIAL_OFFICE_KIT_LOANS,
   INITIAL_ROOMS,
 } from "@/lib/supabase/seed-data";
 
-const STORAGE_KEY = "stafcenter_sarpras_v1";
+const STORAGE_KEY = "stafcenter_sarpras_v2";
 const THEME_KEY = "stafcenter_theme_v1";
+
+export function normalizeAngkatanYear(input: string): string {
+  const digits = input.replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length >= 4) return digits.slice(-2);
+  if (digits.length === 1) return `0${digits}`;
+  return digits.slice(-2);
+}
+
+export function buildAcademicClassCode(
+  prodi: ProdiCode,
+  angkatanYear: string,
+  section: ClassSectionCode
+): string {
+  const yr = normalizeAngkatanYear(angkatanYear);
+  return `${prodi}-${yr}${section}`;
+}
 
 export interface AuthStaffUser {
   id: string;
@@ -104,6 +129,9 @@ interface SarprasContextValue {
   fundingSources: FundingSource[];
   consumableCategories: ConsumableCategoryMaster[];
   consumableUnits: ConsumableUnitMaster[];
+  academicClasses: AcademicClass[];
+  officeKitItems: OfficeKitItem[];
+  officeKitLoans: OfficeKitLoan[];
   extendedMasterReady: boolean;
   canManageDataMaster: boolean;
   isLiveSupabase: boolean;
@@ -288,6 +316,48 @@ interface SarprasContextValue {
     payload: Partial<Omit<ConsumableUnitMaster, "id" | "created_at">>
   ) => void;
   deleteConsumableUnit: (id: string) => Promise<ActionResult>;
+
+  // Data Master Kelas & DPM (Khusus Master Admin)
+  addAcademicClass: (
+    payload: Omit<AcademicClass, "id" | "class_code" | "created_at">
+  ) => ActionResult;
+  updateAcademicClass: (
+    id: string,
+    payload: Partial<Omit<AcademicClass, "id" | "class_code" | "created_at">>
+  ) => ActionResult;
+  deleteAcademicClass: (id: string) => Promise<ActionResult>;
+
+  // Sirkulasi Invent: Barang Kantor Staf & Peminjaman Cepat Kelas
+  addOfficeKitItem: (
+    payload: Omit<OfficeKitItem, "id" | "created_at">
+  ) => ActionResult;
+  updateOfficeKitItem: (
+    id: string,
+    payload: Partial<Omit<OfficeKitItem, "id" | "created_at">>
+  ) => void;
+  deleteOfficeKitItem: (id: string) => Promise<ActionResult>;
+  checkoutOfficeKitLoan: (payload: {
+    class_id?: string | null;
+    class_code: string;
+    prodi: ProdiCode;
+    dpm_name: string;
+    borrower_name: string;
+    borrower_phone: string;
+    room_id?: string | null;
+    course_name?: string;
+    kit_item_ids: string[];
+    loan_date: string;
+    borrow_time: string;
+    expected_return_time: string;
+  }) => ActionResult;
+  checkinOfficeKitLoan: (
+    id: string,
+    options?: {
+      returnConditionNotes?: string;
+      damagedItemIds?: string[];
+    }
+  ) => ActionResult;
+  deleteOfficeKitLoan: (id: string) => Promise<ActionResult>;
 }
 
 const SarprasContext = createContext<SarprasContextValue | null>(null);
@@ -364,6 +434,15 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
   const [consumableUnits, setConsumableUnits] = useState<
     ConsumableUnitMaster[]
   >(() => (isLiveSupabase ? [] : INITIAL_CONSUMABLE_UNITS));
+  const [academicClasses, setAcademicClasses] = useState<AcademicClass[]>(() =>
+    isLiveSupabase ? [] : INITIAL_ACADEMIC_CLASSES
+  );
+  const [officeKitItems, setOfficeKitItems] = useState<OfficeKitItem[]>(() =>
+    isLiveSupabase ? [] : INITIAL_OFFICE_KIT_ITEMS
+  );
+  const [officeKitLoans, setOfficeKitLoans] = useState<OfficeKitLoan[]>(() =>
+    isLiveSupabase ? [] : INITIAL_OFFICE_KIT_LOANS
+  );
   const [extendedMasterReady, setExtendedMasterReady] = useState<boolean>(
     !isLiveSupabase
   );
@@ -398,6 +477,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     setFundingSources([]);
     setConsumableCategories([]);
     setConsumableUnits([]);
+    setAcademicClasses([]);
+    setOfficeKitItems([]);
+    setOfficeKitLoans([]);
   }, []);
 
   const notify = useCallback(
@@ -613,6 +695,48 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       } else {
         setConsumableUnits(INITIAL_CONSUMABLE_UNITS);
       }
+
+      if (Array.isArray(data.academicClasses)) {
+        setAcademicClasses(
+          (data.academicClasses as AcademicClass[]).map((item) => ({
+            ...item,
+            students_count: Number(item.students_count) || 30,
+            dpm_phone: item.dpm_phone || "-",
+            is_active: item.is_active !== false,
+            notes: item.notes || "",
+          }))
+        );
+      } else {
+        setAcademicClasses(INITIAL_ACADEMIC_CLASSES);
+      }
+
+      if (Array.isArray(data.officeKitItems)) {
+        setOfficeKitItems(
+          (data.officeKitItems as OfficeKitItem[]).map((item) => ({
+            ...item,
+            is_active: item.is_active !== false,
+            notes: item.notes || "",
+          }))
+        );
+      } else {
+        setOfficeKitItems(INITIAL_OFFICE_KIT_ITEMS);
+      }
+
+      if (Array.isArray(data.officeKitLoans)) {
+        setOfficeKitLoans(
+          (data.officeKitLoans as OfficeKitLoan[]).map((item) => ({
+            ...item,
+            kit_item_ids: Array.isArray(item.kit_item_ids)
+              ? item.kit_item_ids
+              : [],
+            borrow_time: normalizeTimeHHMM(item.borrow_time),
+            expected_return_time: normalizeTimeHHMM(item.expected_return_time),
+            return_condition_notes: item.return_condition_notes || "",
+          }))
+        );
+      } else {
+        setOfficeKitLoans(INITIAL_OFFICE_KIT_LOANS);
+      }
     } catch {
       // Tetap gunakan state sebelumnya bila koneksi terputus
     } finally {
@@ -652,6 +776,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           if (parsed.consumableCategories)
             setConsumableCategories(parsed.consumableCategories);
           if (parsed.consumableUnits) setConsumableUnits(parsed.consumableUnits);
+          if (parsed.academicClasses) setAcademicClasses(parsed.academicClasses);
+          if (parsed.officeKitItems) setOfficeKitItems(parsed.officeKitItems);
+          if (parsed.officeKitLoans) setOfficeKitLoans(parsed.officeKitLoans);
         }
         setAuthLoading(false);
         setHydrated(true);
@@ -717,6 +844,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           fundingSources,
           consumableCategories,
           consumableUnits,
+          academicClasses,
+          officeKitItems,
+          officeKitLoans,
         })
       );
     } catch {
@@ -741,6 +871,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     fundingSources,
     consumableCategories,
     consumableUnits,
+    academicClasses,
+    officeKitItems,
+    officeKitLoans,
   ]);
 
   const signInWithUsername = useCallback(
@@ -843,6 +976,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     setFundingSources(INITIAL_FUNDING_SOURCES);
     setConsumableCategories(INITIAL_CONSUMABLE_CATEGORIES);
     setConsumableUnits(INITIAL_CONSUMABLE_UNITS);
+    setAcademicClasses(INITIAL_ACADEMIC_CLASSES);
+    setOfficeKitItems(INITIAL_OFFICE_KIT_ITEMS);
+    setOfficeKitLoans(INITIAL_OFFICE_KIT_LOANS);
     setUiSimState("normal");
     try {
       localStorage.removeItem(STORAGE_KEY);
@@ -1662,6 +1798,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               ...(extendedMasterReady
                 ? {
                     unit_id: payload.unit_id || null,
+                    class_id: payload.class_id || null,
+                    class_code: payload.class_code || null,
                     borrower_lecturer_id: payload.borrower_lecturer_id || null,
                     borrower_official_id: payload.borrower_official_id || null,
                   }
@@ -3635,6 +3773,656 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  // ============================================================================
+  // DATA MASTER KELAS & DPM
+  // ============================================================================
+
+  const addAcademicClass = useCallback(
+    (
+      payload: Omit<AcademicClass, "id" | "class_code" | "created_at">
+    ): ActionResult => {
+      if (!requireMasterAdminForDataMaster()) {
+        return { ok: false, error: "Akses Master Admin diperlukan." };
+      }
+      const normYear = normalizeAngkatanYear(payload.angkatan_year);
+      if (!/^\d{2}$/.test(normYear)) {
+        return {
+          ok: false,
+          error:
+            "Tahun angkatan harus diisi 2 angka belakang tahun (contoh: 24 untuk 2024).",
+        };
+      }
+      const classCode = buildAcademicClassCode(
+        payload.prodi,
+        normYear,
+        payload.class_section
+      );
+      const dup = academicClasses.some(
+        (c) => c.class_code.toUpperCase() === classCode.toUpperCase()
+      );
+      if (dup) {
+        return {
+          ok: false,
+          error: `Kelas ${classCode} sudah terdaftar di Data Master Kelas.`,
+        };
+      }
+
+      const id = generateUuid();
+      const matchedUnit = campusUnits.find(
+        (u) => u.code.toUpperCase() === payload.prodi.toUpperCase()
+      );
+      const newItem: AcademicClass = {
+        ...payload,
+        id,
+        class_code: classCode,
+        angkatan_year: normYear,
+        unit_id: payload.unit_id ?? matchedUnit?.id ?? null,
+        dpm_phone: payload.dpm_phone.trim() || "-",
+        created_at: new Date().toISOString(),
+      };
+      setAcademicClasses((prev) => [newItem, ...prev]);
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_academic_class",
+            data: {
+              id,
+              class_code: classCode,
+              prodi: payload.prodi,
+              unit_id: newItem.unit_id,
+              angkatan_year: normYear,
+              class_section: payload.class_section,
+              dpm_name: payload.dpm_name.trim(),
+              dpm_phone: newItem.dpm_phone,
+              students_count: newItem.students_count,
+              default_room_id: payload.default_room_id || null,
+              is_active: payload.is_active,
+              notes: payload.notes || null,
+            },
+          },
+          "Menambah Kelas & DPM",
+          "Kelas Tersimpan di Supabase",
+          `Kelas ${classCode} (DPM: ${newItem.dpm_name}) berhasil disimpan.`
+        );
+        return { ok: true };
+      }
+
+      notify(
+        "success",
+        "Kelas Ditambahkan",
+        `Kelas ${classCode} (DPM: ${newItem.dpm_name}) berhasil ditambahkan.`
+      );
+      return { ok: true };
+    },
+    [
+      academicClasses,
+      authUser,
+      campusUnits,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const updateAcademicClass = useCallback(
+    (
+      id: string,
+      payload: Partial<Omit<AcademicClass, "id" | "class_code" | "created_at">>
+    ): ActionResult => {
+      if (!requireMasterAdminForDataMaster()) {
+        return { ok: false, error: "Akses Master Admin diperlukan." };
+      }
+      const existing = academicClasses.find((c) => c.id === id);
+      if (!existing) {
+        return { ok: false, error: "Data kelas tidak ditemukan." };
+      }
+
+      const nextProdi = payload.prodi ?? existing.prodi;
+      const nextYear = normalizeAngkatanYear(
+        payload.angkatan_year ?? existing.angkatan_year
+      );
+      if (!/^\d{2}$/.test(nextYear)) {
+        return {
+          ok: false,
+          error:
+            "Tahun angkatan harus diisi 2 angka belakang tahun (contoh: 24 untuk 2024).",
+        };
+      }
+      const nextSection = payload.class_section ?? existing.class_section;
+      const nextCode = buildAcademicClassCode(nextProdi, nextYear, nextSection);
+
+      const dup = academicClasses.some(
+        (c) =>
+          c.id !== id && c.class_code.toUpperCase() === nextCode.toUpperCase()
+      );
+      if (dup) {
+        return {
+          ok: false,
+          error: `Kombinasi kelas ${nextCode} sudah digunakan kelas lain.`,
+        };
+      }
+
+      const matchedUnit = campusUnits.find(
+        (u) => u.code.toUpperCase() === nextProdi.toUpperCase()
+      );
+      const nextUnitId =
+        payload.unit_id !== undefined
+          ? payload.unit_id
+          : matchedUnit?.id ?? existing.unit_id ?? null;
+
+      const updatedFields: Partial<AcademicClass> = {
+        ...payload,
+        prodi: nextProdi,
+        angkatan_year: nextYear,
+        class_section: nextSection,
+        class_code: nextCode,
+        unit_id: nextUnitId,
+      };
+
+      setAcademicClasses((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, ...updatedFields } : item
+        )
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "update_academic_class",
+            id,
+            data: updatedFields,
+          },
+          "Memperbarui Data Kelas",
+          "Data Kelas Diperbarui",
+          `Perubahan kelas ${nextCode} tersimpan di Supabase.`
+        );
+        return { ok: true };
+      }
+
+      notify(
+        "success",
+        "Data Kelas Diperbarui",
+        `Perubahan kelas ${nextCode} berhasil disimpan.`
+      );
+      return { ok: true };
+    },
+    [
+      academicClasses,
+      authUser,
+      campusUnits,
+      isLiveSupabase,
+      notify,
+      requireMasterAdminForDataMaster,
+      sendMutation,
+    ]
+  );
+
+  const deleteAcademicClass = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireMasterAdminForDataMaster()) {
+        return { ok: false, error: "Akses Master Admin diperlukan." };
+      }
+      const target = academicClasses.find((c) => c.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_academic_class", id },
+          "Menghapus Data Kelas",
+          "Data Kelas Dihapus",
+          `Kelas ${target?.class_code || ""} telah dihapus dari Data Master.`
+        );
+      }
+
+      setAcademicClasses((prev) => prev.filter((item) => item.id !== id));
+      setOfficeKitLoans((prev) =>
+        prev.map((l) => (l.class_id === id ? { ...l, class_id: null } : l))
+      );
+      setBookings((prev) =>
+        prev.map((b) => (b.class_id === id ? { ...b, class_id: null } : b))
+      );
+      removeEntityArtifactsLocal("class", id);
+      notify(
+        "info",
+        "Data Kelas Dihapus",
+        `Kelas ${target?.class_code || ""} telah dihapus dari Data Master.`
+      );
+      return { ok: true };
+    },
+    [
+      academicClasses,
+      authUser,
+      isLiveSupabase,
+      notify,
+      removeEntityArtifactsLocal,
+      requireMasterAdminForDataMaster,
+      sendConfirmedMutation,
+    ]
+  );
+
+  // ============================================================================
+  // SIRKULASI INVENT: BARANG KANTOR STAF & PEMINJAMAN CEPAT KELAS
+  // ============================================================================
+
+  const addOfficeKitItem = useCallback(
+    (payload: Omit<OfficeKitItem, "id" | "created_at">): ActionResult => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const cleanCode = payload.kit_code.trim().toUpperCase();
+      if (!cleanCode || !payload.name.trim()) {
+        return {
+          ok: false,
+          error: "Kode Barang dan Nama Barang Kantor Staf wajib diisi.",
+        };
+      }
+      const dup = officeKitItems.some(
+        (item) => item.kit_code.toUpperCase() === cleanCode
+      );
+      if (dup) {
+        return {
+          ok: false,
+          error: `Kode barang "${cleanCode}" sudah terdaftar di Katalog Kantor Staf.`,
+        };
+      }
+
+      const id = generateUuid();
+      const newItem: OfficeKitItem = {
+        ...payload,
+        id,
+        kit_code: cleanCode,
+        name: payload.name.trim(),
+        created_at: new Date().toISOString(),
+      };
+      setOfficeKitItems((prev) => [newItem, ...prev]);
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_office_kit_item",
+            data: {
+              id,
+              kit_code: newItem.kit_code,
+              name: newItem.name,
+              category: newItem.category,
+              brand_spec: newItem.brand_spec || "-",
+              storage_tray: newItem.storage_tray || "Loker Kantor Staf",
+              linked_room_id: newItem.linked_room_id || null,
+              condition: newItem.condition,
+              status: newItem.status,
+              is_active: newItem.is_active,
+              notes: newItem.notes || null,
+            },
+          },
+          "Menambah Barang Kantor Staf",
+          "Barang Kantor Staf Tersimpan",
+          `${newItem.kit_code} (${newItem.name}) berhasil disimpan.`
+        );
+        return { ok: true };
+      }
+
+      notify(
+        "success",
+        "Barang Kantor Staf Ditambahkan",
+        `${newItem.kit_code} (${newItem.name}) siap dipinjamkan.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      officeKitItems,
+      requireStaffForLiveWrite,
+      sendMutation,
+    ]
+  );
+
+  const updateOfficeKitItem = useCallback(
+    (
+      id: string,
+      payload: Partial<Omit<OfficeKitItem, "id" | "created_at">>
+    ) => {
+      if (!requireStaffForLiveWrite()) return;
+      setOfficeKitItems((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_office_kit_item", id, data: payload },
+          "Memperbarui Barang Kantor Staf",
+          "Barang Kantor Staf Diperbarui",
+          "Perubahan data barang kantor staf tersimpan di Supabase."
+        );
+        return;
+      }
+
+      notify(
+        "success",
+        "Barang Kantor Staf Diperbarui",
+        "Perubahan data barang kantor staf berhasil disimpan."
+      );
+    },
+    [authUser, isLiveSupabase, notify, requireStaffForLiveWrite, sendMutation]
+  );
+
+  const deleteOfficeKitItem = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const target = officeKitItems.find((item) => item.id === id);
+      if (target?.status === "Dipinjam") {
+        return {
+          ok: false,
+          error: `Barang ${target.kit_code} sedang dipinjam kelas. Catat pengembalian terlebih dahulu.`,
+        };
+      }
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_office_kit_item", id },
+          "Menghapus Barang Kantor Staf",
+          "Barang Kantor Staf Dihapus",
+          `${target?.kit_code || ""} telah dihapus dari katalog.`
+        );
+      }
+
+      setOfficeKitItems((prev) => prev.filter((item) => item.id !== id));
+      removeEntityArtifactsLocal("office_kit", id);
+      notify(
+        "info",
+        "Barang Kantor Staf Dihapus",
+        `${target?.kit_code || ""} telah dihapus dari katalog kantor staf.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      officeKitItems,
+      removeEntityArtifactsLocal,
+      requireStaffForLiveWrite,
+      sendConfirmedMutation,
+    ]
+  );
+
+  const checkoutOfficeKitLoan = useCallback(
+    (payload: {
+      class_id?: string | null;
+      class_code: string;
+      prodi: ProdiCode;
+      dpm_name: string;
+      borrower_name: string;
+      borrower_phone: string;
+      room_id?: string | null;
+      course_name?: string;
+      kit_item_ids: string[];
+      loan_date: string;
+      borrow_time: string;
+      expected_return_time: string;
+    }): ActionResult => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      if (!payload.kit_item_ids || payload.kit_item_ids.length === 0) {
+        return {
+          ok: false,
+          error:
+            "Pilih minimal 1 barang (Kabel HDMI, Stop Kontak, atau Remote TV) untuk dipinjamkan.",
+        };
+      }
+      if (payload.expected_return_time <= payload.borrow_time) {
+        return {
+          ok: false,
+          error: "Estimasi jam kembali harus lebih besar daripada jam pinjam.",
+        };
+      }
+
+      const selectedItems = officeKitItems.filter((item) =>
+        payload.kit_item_ids.includes(item.id)
+      );
+      if (selectedItems.length === 0) {
+        return { ok: false, error: "Barang yang dipilih tidak ditemukan." };
+      }
+
+      const busyItem = selectedItems.find((item) => item.status !== "Tersedia");
+      if (busyItem) {
+        return {
+          ok: false,
+          error: `Barang ${busyItem.kit_code} (${busyItem.name}) saat ini berstatus "${busyItem.status}" dan tidak tersedia.`,
+        };
+      }
+
+      const seq = String(
+        extractMaxSequence(officeKitLoans.map((l) => l.loan_code)) + 1
+      ).padStart(3, "0");
+      const id = generateUuid();
+      const loan_code = `SRK-${getCurrentYearMonth()}-${seq}`;
+      const kit_items_label = selectedItems
+        .map((item) => `${item.kit_code} (${item.name})`)
+        .join(", ");
+      const staffName = authUser?.fullName || "Staf Piket Kantor";
+
+      const newLoan: OfficeKitLoan = {
+        id,
+        loan_code,
+        class_id: payload.class_id || null,
+        class_code: payload.class_code,
+        prodi: payload.prodi,
+        dpm_name: payload.dpm_name,
+        borrower_name: payload.borrower_name.trim(),
+        borrower_phone: payload.borrower_phone.trim() || "-",
+        room_id: payload.room_id || null,
+        course_name: payload.course_name?.trim() || "",
+        kit_item_ids: selectedItems.map((i) => i.id),
+        kit_items_label,
+        loan_date: payload.loan_date,
+        borrow_time: payload.borrow_time,
+        expected_return_time: payload.expected_return_time,
+        returned_at: null,
+        status: "Dipinjam",
+        handed_by_staff: staffName,
+        created_at: new Date().toISOString(),
+      };
+
+      setOfficeKitLoans((prev) => [newLoan, ...prev]);
+      const idSet = new Set(selectedItems.map((i) => i.id));
+      setOfficeKitItems((prev) =>
+        prev.map((item) =>
+          idSet.has(item.id) ? { ...item, status: "Dipinjam" } : item
+        )
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "checkout_office_kit_loan",
+            itemIds: newLoan.kit_item_ids,
+            data: {
+              id,
+              loan_code,
+              class_id: newLoan.class_id,
+              class_code: newLoan.class_code,
+              prodi: newLoan.prodi,
+              dpm_name: newLoan.dpm_name,
+              borrower_name: newLoan.borrower_name,
+              borrower_phone: newLoan.borrower_phone,
+              room_id: newLoan.room_id,
+              course_name: newLoan.course_name || null,
+              kit_item_ids: newLoan.kit_item_ids,
+              kit_items_label: newLoan.kit_items_label,
+              loan_date: newLoan.loan_date,
+              borrow_time: newLoan.borrow_time,
+              expected_return_time: newLoan.expected_return_time,
+              status: "Dipinjam",
+              handed_by_staff: staffName,
+            },
+          },
+          "Mencatat Sirkulasi Alat Kantor Staf",
+          "Alat Diserahkan ke Kelas",
+          `${loan_code}: ${selectedItems.length} barang dipinjamkan ke kelas ${newLoan.class_code}.`
+        );
+        return { ok: true };
+      }
+
+      notify(
+        "success",
+        "Alat Diserahkan ke Kelas",
+        `${loan_code}: ${selectedItems.length} barang dicatat dipinjam kelas ${newLoan.class_code}.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      officeKitItems,
+      officeKitLoans,
+      requireStaffForLiveWrite,
+      sendMutation,
+    ]
+  );
+
+  const checkinOfficeKitLoan = useCallback(
+    (
+      id: string,
+      options?: {
+        returnConditionNotes?: string;
+        damagedItemIds?: string[];
+      }
+    ): ActionResult => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const target = officeKitLoans.find((l) => l.id === id);
+      if (!target) {
+        return { ok: false, error: "Tiket sirkulasi tidak ditemukan." };
+      }
+
+      const returnedAt = new Date().toISOString();
+      const staffName = authUser?.fullName || "Staf Piket Kantor";
+      const notesText =
+        options?.returnConditionNotes?.trim() ||
+        "Seluruh peralatan dikembalikan lengkap ke kantor staf dalam kondisi baik.";
+      const damagedSet = new Set(options?.damagedItemIds || []);
+      const loanItemSet = new Set(target.kit_item_ids);
+
+      setOfficeKitLoans((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                status: "Dikembalikan",
+                returned_at: returnedAt,
+                received_by_staff: staffName,
+                return_condition_notes: notesText,
+              }
+            : item
+        )
+      );
+
+      setOfficeKitItems((prev) =>
+        prev.map((item) => {
+          if (!loanItemSet.has(item.id)) return item;
+          if (damagedSet.has(item.id)) {
+            return {
+              ...item,
+              status: "Perbaikan",
+              condition: "Rusak Ringan",
+            };
+          }
+          return { ...item, status: "Tersedia" };
+        })
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "checkin_office_kit_loan",
+            id,
+            itemIds: target.kit_item_ids,
+            damagedItemIds: Array.from(damagedSet),
+            data: {
+              status: "Dikembalikan",
+              returned_at: returnedAt,
+              received_by_staff: staffName,
+              return_condition_notes: notesText,
+            },
+          },
+          "Mencatat Pengembalian Alat Staf",
+          "Pengembalian Alat Diterima",
+          `${target.loan_code} (${target.class_code}) telah selesai dikembalikan.`
+        );
+        return { ok: true };
+      }
+
+      notify(
+        "success",
+        "Pengembalian Alat Diterima",
+        `${target.loan_code} (${target.class_code}) telah selesai dikembalikan ke kantor staf.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      officeKitLoans,
+      requireStaffForLiveWrite,
+      sendMutation,
+    ]
+  );
+
+  const deleteOfficeKitLoan = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const target = officeKitLoans.find((l) => l.id === id);
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_office_kit_loan", id },
+          "Menghapus Riwayat Sirkulasi",
+          "Riwayat Sirkulasi Dihapus",
+          `Tiket ${target?.loan_code || ""} telah dihapus dari daftar.`
+        );
+      }
+
+      setOfficeKitLoans((prev) => prev.filter((item) => item.id !== id));
+      if (target?.status === "Dipinjam" && target.kit_item_ids.length > 0) {
+        const idSet = new Set(target.kit_item_ids);
+        setOfficeKitItems((prev) =>
+          prev.map((item) =>
+            idSet.has(item.id) && item.status === "Dipinjam"
+              ? { ...item, status: "Tersedia" }
+              : item
+          )
+        );
+      }
+      removeEntityArtifactsLocal("office_loan", id);
+      notify(
+        "info",
+        "Riwayat Sirkulasi Dihapus",
+        `Tiket ${target?.loan_code || ""} telah dihapus.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      officeKitLoans,
+      removeEntityArtifactsLocal,
+      requireStaffForLiveWrite,
+      sendConfirmedMutation,
+    ]
+  );
+
   const value = useMemo<SarprasContextValue>(
     () => ({
       buildings: uiSimState === "empty" ? [] : buildings,
@@ -3657,6 +4445,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       consumableCategories:
         uiSimState === "empty" ? [] : consumableCategories,
       consumableUnits: uiSimState === "empty" ? [] : consumableUnits,
+      academicClasses: uiSimState === "empty" ? [] : academicClasses,
+      officeKitItems: uiSimState === "empty" ? [] : officeKitItems,
+      officeKitLoans: uiSimState === "empty" ? [] : officeKitLoans,
       extendedMasterReady,
       canManageDataMaster,
       isLiveSupabase,
@@ -3728,6 +4519,15 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       addConsumableUnit,
       updateConsumableUnit,
       deleteConsumableUnit,
+      addAcademicClass,
+      updateAcademicClass,
+      deleteAcademicClass,
+      addOfficeKitItem,
+      updateOfficeKitItem,
+      deleteOfficeKitItem,
+      checkoutOfficeKitLoan,
+      checkinOfficeKitLoan,
+      deleteOfficeKitLoan,
     }),
     [
       uiSimState,
@@ -3749,6 +4549,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       fundingSources,
       consumableCategories,
       consumableUnits,
+      academicClasses,
+      officeKitItems,
+      officeKitLoans,
       extendedMasterReady,
       canManageDataMaster,
       isLiveSupabase,
@@ -3817,6 +4620,15 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       addConsumableUnit,
       updateConsumableUnit,
       deleteConsumableUnit,
+      addAcademicClass,
+      updateAcademicClass,
+      deleteAcademicClass,
+      addOfficeKitItem,
+      updateOfficeKitItem,
+      deleteOfficeKitItem,
+      checkoutOfficeKitLoan,
+      checkinOfficeKitLoan,
+      deleteOfficeKitLoan,
     ]
   );
 

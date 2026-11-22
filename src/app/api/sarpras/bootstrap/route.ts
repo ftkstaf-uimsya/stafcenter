@@ -66,6 +66,9 @@ export async function GET() {
     fundingSourcesRes,
     consumableCategoriesRes,
     consumableUnitsRes,
+    academicClassesRes,
+    officeKitItemsRes,
+    officeKitLoansRes,
   ] = await Promise.all([
     supabase
       .from("sarpras_notes")
@@ -84,6 +87,12 @@ export async function GET() {
     supabase.from("funding_sources").select("*").order("code"),
     supabase.from("consumable_categories").select("*").order("code"),
     supabase.from("consumable_units").select("*").order("code"),
+    supabase.from("academic_classes").select("*").order("class_code"),
+    supabase.from("office_kit_items").select("*").order("kit_code"),
+    supabase
+      .from("office_kit_loans")
+      .select("*")
+      .order("created_at", { ascending: false }),
   ]);
 
   return NextResponse.json(
@@ -114,6 +123,15 @@ export async function GET() {
       consumableUnits: consumableUnitsRes.error
         ? null
         : consumableUnitsRes.data || [],
+      academicClasses: academicClassesRes.error
+        ? null
+        : academicClassesRes.data || [],
+      officeKitItems: officeKitItemsRes.error
+        ? null
+        : officeKitItemsRes.data || [],
+      officeKitLoans: officeKitLoansRes.error
+        ? null
+        : officeKitLoansRes.data || [],
     },
     { status: 200 }
   );

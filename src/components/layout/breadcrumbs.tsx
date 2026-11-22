@@ -7,6 +7,10 @@ import { ChevronRight } from "lucide-react";
 
 const ROUTE_META: Record<string, { group: string; label: string }> = {
   "/sarpras/dashboard": { group: "SAPRAS", label: "Ringkasan Operasional" },
+  "/sarpras/sirkulasi-invent": {
+    group: "SAPRAS",
+    label: "Sirkulasi Invent",
+  },
   "/sarpras/inventaris": {
     group: "SAPRAS",
     label: "Inventaris Aset & Barang",
@@ -19,10 +23,14 @@ const ROUTE_META: Record<string, { group: string; label: string }> = {
   "/sarpras/bhp": { group: "SAPRAS", label: "Barang Habis Pakai (ATK)" },
   "/sarpras/ruangan": {
     group: "Data Master",
-    label: "Master Gedung & Ruangan Kampus",
+    label: "Gedung & Ruangan",
+  },
+  "/sarpras/kelas": {
+    group: "Data Master",
+    label: "Kelas & DPM",
   },
   "/sarpras/dosen": { group: "Data Master", label: "Dosen" },
-  "/sarpras/makul": { group: "Data Master", label: "Makul (Mata Kuliah)" },
+  "/sarpras/makul": { group: "Data Master", label: "Mata Kuliah (Makul)" },
   "/sarpras/pengurus": { group: "Data Master", label: "Pengurus Kampus" },
   "/sarpras/unit": {
     group: "Data Master",
@@ -30,11 +38,11 @@ const ROUTE_META: Record<string, { group: string; label: string }> = {
   },
   "/sarpras/vendor": {
     group: "Data Master",
-    label: "Teknisi & Vendor Pemeliharaan",
+    label: "Teknisi & Vendor",
   },
   "/sarpras/referensi": {
     group: "Data Master",
-    label: "Master Referensi & Klasifikasi",
+    label: "Master Referensi",
   },
   "/sarpras/akun": { group: "Master Admin", label: "Manajemen Akun Staf" },
   "/login": { group: "", label: "Autentikasi & Sesi Staf" },

@@ -92,6 +92,25 @@ type MutationPayload =
   | { action: "insert_consumable_unit"; data: Record<string, unknown> }
   | { action: "update_consumable_unit"; id: string; data: Record<string, unknown> }
   | { action: "delete_consumable_unit"; id: string }
+  | { action: "insert_academic_class"; data: Record<string, unknown> }
+  | { action: "update_academic_class"; id: string; data: Record<string, unknown> }
+  | { action: "delete_academic_class"; id: string }
+  | { action: "insert_office_kit_item"; data: Record<string, unknown> }
+  | { action: "update_office_kit_item"; id: string; data: Record<string, unknown> }
+  | { action: "delete_office_kit_item"; id: string }
+  | {
+      action: "checkout_office_kit_loan";
+      data: Record<string, unknown>;
+      itemIds: string[];
+    }
+  | {
+      action: "checkin_office_kit_loan";
+      id: string;
+      data: Record<string, unknown>;
+      itemIds: string[];
+      damagedItemIds?: string[];
+    }
+  | { action: "delete_office_kit_loan"; id: string }
   | { action: "insert_note"; data: Record<string, unknown> }
   | { action: "delete_attachment"; id: string; filePath?: string };
 
@@ -129,6 +148,9 @@ const DATA_MASTER_ACTIONS = new Set([
   "insert_consumable_unit",
   "update_consumable_unit",
   "delete_consumable_unit",
+  "insert_academic_class",
+  "update_academic_class",
+  "delete_academic_class",
 ]);
 
 const DATA_MASTER_ENTITY_TYPES = new Set<string>([
@@ -138,9 +160,19 @@ const DATA_MASTER_ENTITY_TYPES = new Set<string>([
   "official",
   "unit",
   "vendor",
+  "class",
 ]);
 
 function formatDataMasterError(message: string): string {
+  if (
+    message.includes("academic_classes") ||
+    message.includes("office_kit_items") ||
+    message.includes("office_kit_loans")
+  ) {
+    if (message.includes("does not exist") || message.includes("schema cache")) {
+      return "Tabel Master Kelas & Sirkulasi Invent belum dibuat. Jalankan migrasi supabase/migrations/007_sirkulasi_invent_and_classes.sql di SQL Editor Supabase.";
+    }
+  }
   if (
     message.includes("campus_units") ||
     message.includes("maintenance_vendors") ||
@@ -1233,6 +1265,187 @@ export async function POST(request: NextRequest) {
             { error: formatDataMasterError(error.message) },
             { status: 400 }
           );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_academic_class": {
+        const { error } = await supabase
+          .from("academic_classes")
+          .insert(body.data);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_academic_class": {
+        const { error } = await supabase
+          .from("academic_classes")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_academic_class": {
+        await cleanupEntityArtifacts(supabase, "class", body.id);
+        const { error } = await supabase
+          .from("academic_classes")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_office_kit_item": {
+        const { error } = await supabase
+          .from("office_kit_items")
+          .insert(body.data);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_office_kit_item": {
+        const { error } = await supabase
+          .from("office_kit_items")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_office_kit_item": {
+        const { data: kitRow } = await supabase
+          .from("office_kit_items")
+          .select("kit_code, status")
+          .eq("id", body.id)
+          .maybeSingle();
+        if (kitRow?.status === "Dipinjam") {
+          return NextResponse.json(
+            {
+              error: `Barang "${kitRow.kit_code}" sedang dipinjam kelas. Catat pengembalian terlebih dahulu sebelum menghapus.`,
+            },
+            { status: 409 }
+          );
+        }
+        await cleanupEntityArtifacts(supabase, "office_kit", body.id);
+        const { error } = await supabase
+          .from("office_kit_items")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "checkout_office_kit_loan": {
+        const itemIds = Array.isArray(body.itemIds) ? body.itemIds : [];
+        if (itemIds.length === 0) {
+          return NextResponse.json(
+            { error: "Pilih minimal 1 barang kantor staf untuk dipinjamkan." },
+            { status: 400 }
+          );
+        }
+        const { error: insertErr } = await supabase
+          .from("office_kit_loans")
+          .insert(body.data);
+        if (insertErr) {
+          return NextResponse.json(
+            { error: formatDataMasterError(insertErr.message) },
+            { status: 400 }
+          );
+        }
+        await supabase
+          .from("office_kit_items")
+          .update({ status: "Dipinjam", updated_at: nowIso })
+          .in("id", itemIds);
+        return NextResponse.json({ ok: true });
+      }
+      case "checkin_office_kit_loan": {
+        const { error: updErr } = await supabase
+          .from("office_kit_loans")
+          .update({ ...body.data, updated_at: nowIso })
+          .eq("id", body.id);
+        if (updErr) {
+          return NextResponse.json(
+            { error: formatDataMasterError(updErr.message) },
+            { status: 400 }
+          );
+        }
+        const damagedSet = new Set(
+          Array.isArray(body.damagedItemIds) ? body.damagedItemIds : []
+        );
+        const itemIds = Array.isArray(body.itemIds) ? body.itemIds : [];
+        const okIds = itemIds.filter((id) => !damagedSet.has(id));
+        const damagedIds = itemIds.filter((id) => damagedSet.has(id));
+        if (okIds.length > 0) {
+          await supabase
+            .from("office_kit_items")
+            .update({ status: "Tersedia", updated_at: nowIso })
+            .in("id", okIds);
+        }
+        if (damagedIds.length > 0) {
+          await supabase
+            .from("office_kit_items")
+            .update({
+              status: "Perbaikan",
+              condition: "Rusak Ringan",
+              updated_at: nowIso,
+            })
+            .in("id", damagedIds);
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_office_kit_loan": {
+        const { data: existingLoan } = await supabase
+          .from("office_kit_loans")
+          .select("id, status, kit_item_ids")
+          .eq("id", body.id)
+          .maybeSingle();
+
+        await cleanupEntityArtifacts(supabase, "office_loan", body.id);
+        const { error } = await supabase
+          .from("office_kit_loans")
+          .delete()
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatDataMasterError(error.message) },
+            { status: 400 }
+          );
+        }
+
+        if (
+          existingLoan?.status === "Dipinjam" &&
+          Array.isArray(existingLoan.kit_item_ids) &&
+          existingLoan.kit_item_ids.length > 0
+        ) {
+          await supabase
+            .from("office_kit_items")
+            .update({ status: "Tersedia", updated_at: nowIso })
+            .in("id", existingLoan.kit_item_ids as string[])
+            .eq("status", "Dipinjam");
         }
         return NextResponse.json({ ok: true });
       }
