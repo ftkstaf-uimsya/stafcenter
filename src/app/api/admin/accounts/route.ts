@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getVerifiedServerSession } from "@/lib/auth/session";
+import {
+  getVerifiedServerSession,
+  verifySameOriginRequest,
+} from "@/lib/auth/session";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { StaffRole } from "@/types/sarpras";
 
@@ -41,6 +44,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const csrf = verifySameOriginRequest(request);
+  if (!csrf.ok) {
+    return NextResponse.json({ error: csrf.error }, { status: 403 });
+  }
+
   const session = await getVerifiedServerSession();
   if (!session) {
     return NextResponse.json(
@@ -96,9 +104,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (password.length < 6) {
+    if (password.length < 8) {
       return NextResponse.json(
-        { error: "Kata sandi awal minimal 6 karakter." },
+        { error: "Kata sandi awal minimal 8 karakter." },
         { status: 400 }
       );
     }

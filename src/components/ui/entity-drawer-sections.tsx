@@ -27,6 +27,15 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function isSafeExternalUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return (
+    url.startsWith("https://") ||
+    url.startsWith("http://") ||
+    url.startsWith("blob:")
+  );
+}
+
 export function EntityDrawerSections({
   entityType,
   entityId,
@@ -101,7 +110,7 @@ export function EntityDrawerSections({
               <span>{uploading ? "Mengunggah..." : "Unggah Berkas"}</span>
               <input
                 type="file"
-                accept="image/*,.pdf"
+                accept="image/jpeg,image/png,image/webp,application/pdf,.jpg,.jpeg,.png,.webp,.pdf"
                 onChange={handleFileChange}
                 disabled={uploading}
                 className="sr-only"
@@ -117,13 +126,16 @@ export function EntityDrawerSections({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {entityAttachments.map((att) => {
                 const isImage = att.mime_type.startsWith("image/");
+                const safeHref = isSafeExternalUrl(att.file_url)
+                  ? att.file_url
+                  : "#";
                 return (
                   <div
                     key={att.id}
                     className="p-2.5 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center justify-between gap-2 text-xs"
                   >
                     <a
-                      href={att.file_url}
+                      href={safeHref}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 min-w-0 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded"

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getVerifiedServerSession } from "@/lib/auth/session";
+import {
+  getVerifiedServerSession,
+  verifySameOriginRequest,
+} from "@/lib/auth/session";
 import {
   getSupabaseServerClient,
   isServerSupabaseConfigured,
@@ -23,6 +26,11 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
+  const csrf = verifySameOriginRequest(request);
+  if (!csrf.ok) {
+    return NextResponse.json({ error: csrf.error }, { status: 403 });
+  }
+
   try {
     const formData = await request.formData();
     const file = formData.get("file");
@@ -167,8 +175,26 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = await file.arrayBuffer();
+    const nodeBuf = Buffer.from(buffer);
+    const hasZipSignature =
+      nodeBuf.length >= 4 &&
+      nodeBuf[0] === 0x50 &&
+      nodeBuf[1] === 0x4b &&
+      nodeBuf[2] === 0x03 &&
+      nodeBuf[3] === 0x04;
+    if (!hasZipSignature) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Berkas tidak valid. Pastikan Anda mengunggah dokumen Excel (.xlsx) asli.",
+        },
+        { status: 400 }
+      );
+    }
+
     const result = await parseAssetImportWorkbook(
-      buffer,
+      nodeBuf,
       rooms,
       existingAssets,
       categories,

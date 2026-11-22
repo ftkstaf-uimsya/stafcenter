@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getVerifiedServerSession } from "@/lib/auth/session";
+import {
+  getVerifiedServerSession,
+  verifySameOriginRequest,
+} from "@/lib/auth/session";
 import {
   getSupabaseServerClient,
   isServerSupabaseConfigured,
@@ -140,6 +143,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const csrf = verifySameOriginRequest(request);
+  if (!csrf.ok) {
+    return NextResponse.json({ error: csrf.error }, { status: 403 });
+  }
+
   let clientData:
     | {
         rooms?: RoomLookupRef[];

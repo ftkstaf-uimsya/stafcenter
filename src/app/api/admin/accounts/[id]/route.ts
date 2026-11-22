@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getVerifiedServerSession } from "@/lib/auth/session";
+import {
+  getVerifiedServerSession,
+  verifySameOriginRequest,
+} from "@/lib/auth/session";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { StaffRole } from "@/types/sarpras";
 
 export async function PATCH(
   request: NextRequest,
-  context: { params: { id: string } }
+  context: { params: Promise<{ id: string }> | { id: string } }
 ) {
+  const csrf = verifySameOriginRequest(request);
+  if (!csrf.ok) {
+    return NextResponse.json({ error: csrf.error }, { status: 403 });
+  }
+
   const session = await getVerifiedServerSession();
   if (!session) {
     return NextResponse.json(
@@ -29,7 +37,7 @@ export async function PATCH(
     );
   }
 
-  const targetId = context.params.id;
+  const { id: targetId } = await context.params;
 
   try {
     const { data: existing, error: fetchErr } = await supabase
@@ -80,9 +88,9 @@ export async function PATCH(
       );
     }
 
-    if (newPassword && newPassword.length < 6) {
+    if (newPassword && newPassword.length < 8) {
       return NextResponse.json(
-        { error: "Kata sandi baru minimal 6 karakter." },
+        { error: "Kata sandi baru minimal 8 karakter." },
         { status: 400 }
       );
     }
@@ -145,9 +153,14 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
-  context: { params: { id: string } }
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> | { id: string } }
 ) {
+  const csrf = verifySameOriginRequest(request);
+  if (!csrf.ok) {
+    return NextResponse.json({ error: csrf.error }, { status: 403 });
+  }
+
   const session = await getVerifiedServerSession();
   if (!session) {
     return NextResponse.json(
@@ -170,7 +183,7 @@ export async function DELETE(
     );
   }
 
-  const targetId = context.params.id;
+  const { id: targetId } = await context.params;
   if (targetId === session.id) {
     return NextResponse.json(
       { error: "Tidak dapat menghapus akun yang sedang Anda gunakan." },

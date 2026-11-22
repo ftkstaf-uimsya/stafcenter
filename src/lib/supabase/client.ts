@@ -1,4 +1,3 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { AssetCategoryCode, Booking } from "@/types/sarpras";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -11,18 +10,6 @@ export function isSupabaseConfigured(): boolean {
     !supabaseUrl.includes("your-project") &&
     !supabaseAnonKey.includes("your-")
   );
-}
-
-let supabaseInstance: SupabaseClient | null = null;
-
-export function getSupabaseBrowserClient(): SupabaseClient | null {
-  if (!isSupabaseConfigured()) {
-    return null;
-  }
-  if (!supabaseInstance) {
-    supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
-  }
-  return supabaseInstance;
 }
 
 export const ASSET_CATEGORY_LABELS: Record<string, string> = {

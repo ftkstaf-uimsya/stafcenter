@@ -20,23 +20,74 @@ function getSigningSecret(): string {
   if (explicit && explicit.length >= 16) {
     return explicit;
   }
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "stafcenter-dev-secret";
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (serviceKey && !serviceKey.includes("your-")) {
+    return crypto
+      .createHash("sha256")
+      .update(`stafcenter-session:${serviceKey}`)
+      .digest("hex");
+  }
+  if (process.env.NODE_ENV === "production") {
+    return "";
+  }
   return crypto
     .createHash("sha256")
-    .update(`stafcenter-session:${serviceKey}`)
+    .update("stafcenter-session:stafcenter-dev-secret")
     .digest("hex");
 }
 
-function signTokenPayload(encodedPayload: string): string {
+function signTokenPayload(encodedPayload: string, secret: string): string {
   return crypto
-    .createHmac("sha256", getSigningSecret())
+    .createHmac("sha256", secret)
     .update(encodedPayload)
     .digest("base64url");
+}
+
+export function verifySameOriginRequest(
+  request: Request
+): { ok: true } | { ok: false; error: string } {
+  const fetchSite = (request.headers.get("sec-fetch-site") || "").toLowerCase();
+  if (fetchSite === "cross-site") {
+    return {
+      ok: false,
+      error: "Permintaan lintas situs (CSRF) ditolak oleh server.",
+    };
+  }
+
+  const origin = request.headers.get("origin");
+  const rawHost =
+    request.headers.get("x-forwarded-host") || request.headers.get("host");
+
+  if (origin && rawHost) {
+    try {
+      const originHost = new URL(origin).host.toLowerCase();
+      const targetHost = rawHost.split(",")[0].trim().toLowerCase();
+      if (originHost !== targetHost) {
+        return {
+          ok: false,
+          error: "Origin permintaan tidak sesuai dengan host server.",
+        };
+      }
+    } catch {
+      return {
+        ok: false,
+        error: "Header Origin permintaan tidak valid.",
+      };
+    }
+  }
+
+  return { ok: true };
 }
 
 export function createSessionToken(
   user: Omit<SessionStaffPayload, "exp">
 ): string {
+  const secret = getSigningSecret();
+  if (!secret) {
+    throw new Error(
+      "AUTH_SESSION_SECRET atau SUPABASE_SERVICE_ROLE_KEY wajib dikonfigurasi di environment produksi."
+    );
+  }
   const payload: SessionStaffPayload = {
     ...user,
     exp: Date.now() + SESSION_TTL_MS,
@@ -44,7 +95,7 @@ export function createSessionToken(
   const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString(
     "base64url"
   );
-  const sig = signTokenPayload(encoded);
+  const sig = signTokenPayload(encoded, secret);
   return `${encoded}.${sig}`;
 }
 
@@ -52,12 +103,15 @@ export function verifySessionToken(
   token: string | undefined | null
 ): SessionStaffPayload | null {
   if (!token) return null;
+  const secret = getSigningSecret();
+  if (!secret) return null;
+
   const parts = token.split(".");
   if (parts.length !== 2) return null;
   const [encoded, sig] = parts;
   if (!encoded || !sig) return null;
 
-  const expected = signTokenPayload(encoded);
+  const expected = signTokenPayload(encoded, secret);
   const sigBuf = Buffer.from(sig);
   const expBuf = Buffer.from(expected);
   if (sigBuf.length !== expBuf.length) return null;
@@ -76,7 +130,7 @@ export function verifySessionToken(
 }
 
 export async function getVerifiedServerSession(): Promise<SessionStaffPayload | null> {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   const parsed = verifySessionToken(rawToken);
   if (!parsed) return null;

@@ -187,13 +187,13 @@ export function AkunView() {
       return;
     }
 
-    if (!editingAccount && formPassword.length < 6) {
-      setFormError("Kata sandi awal akun baru minimal 6 karakter.");
+    if (!editingAccount && formPassword.length < 8) {
+      setFormError("Kata sandi awal akun baru minimal 8 karakter.");
       return;
     }
 
-    if (editingAccount && formPassword && formPassword.length < 6) {
-      setFormError("Kata sandi baru minimal 6 karakter.");
+    if (editingAccount && formPassword && formPassword.length < 8) {
+      setFormError("Kata sandi baru minimal 8 karakter.");
       return;
     }
 
@@ -562,7 +562,7 @@ export function AkunView() {
             <Input
               label="Kata Sandi Awal *"
               type="password"
-              placeholder="Minimal 6 karakter"
+              placeholder="Minimal 8 karakter"
               value={formPassword}
               onChange={(e) => setFormPassword(e.target.value)}
               required

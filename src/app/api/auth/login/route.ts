@@ -2,11 +2,42 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   createSessionToken,
   SESSION_COOKIE_NAME,
+  verifySameOriginRequest,
 } from "@/lib/auth/session";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { StaffRole } from "@/types/sarpras";
 
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 5;
+const failedLoginAttempts = new Map<string, { count: number; resetAt: number }>();
+
+function getClientIp(request: NextRequest): string {
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) {
+    return xff.split(",")[0].trim();
+  }
+  return request.headers.get("x-real-ip")?.trim() || "local";
+}
+
+function recordFailedAttempt(key: string): { count: number; resetAt: number } {
+  const now = Date.now();
+  const current = failedLoginAttempts.get(key);
+  if (!current || now >= current.resetAt) {
+    const entry = { count: 1, resetAt: now + LOGIN_WINDOW_MS };
+    failedLoginAttempts.set(key, entry);
+    return entry;
+  }
+  current.count += 1;
+  failedLoginAttempts.set(key, current);
+  return current;
+}
+
 export async function POST(request: NextRequest) {
+  const csrf = verifySameOriginRequest(request);
+  if (!csrf.ok) {
+    return NextResponse.json({ error: csrf.error }, { status: 403 });
+  }
+
   try {
     const body = (await request.json()) as {
       username?: string;
@@ -20,6 +51,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Username dan kata sandi wajib diisi." },
         { status: 400 }
+      );
+    }
+
+    const rateKey = `${getClientIp(request)}:${username.toLowerCase()}`;
+    const existingAttempt = failedLoginAttempts.get(rateKey);
+    const now = Date.now();
+    if (existingAttempt && now >= existingAttempt.resetAt) {
+      failedLoginAttempts.delete(rateKey);
+    } else if (existingAttempt && existingAttempt.count >= LOGIN_MAX_ATTEMPTS) {
+      const retrySeconds = Math.max(
+        1,
+        Math.ceil((existingAttempt.resetAt - now) / 1000)
+      );
+      return NextResponse.json(
+        {
+          error:
+            "Terlalu banyak percobaan masuk yang gagal. Silakan tunggu beberapa menit sebelum mencoba kembali.",
+        },
+        {
+          status: 429,
+          headers: { "Retry-After": String(retrySeconds) },
+        }
       );
     }
 
@@ -54,18 +107,21 @@ export async function POST(request: NextRequest) {
         );
       }
       return NextResponse.json(
-        { error: `Gagal memverifikasi akun: ${error.message}` },
+        { error: "Gagal memverifikasi akun pada layanan autentikasi." },
         { status: 500 }
       );
     }
 
     const row = Array.isArray(data) ? data[0] : data;
     if (!row) {
+      recordFailedAttempt(rateKey);
       return NextResponse.json(
         { error: "Username atau kata sandi tidak cocok, atau akun nonaktif." },
         { status: 401 }
       );
     }
+
+    failedLoginAttempts.delete(rateKey);
 
     const userPayload = {
       id: row.id as string,

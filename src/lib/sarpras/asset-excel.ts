@@ -16,6 +16,7 @@ import {
   MAX_IMPORT_ROWS,
   RawImportAssetRow,
   RoomLookupRef,
+  sanitizeSpreadsheetText,
   validateImportAssetRows,
 } from "@/lib/sarpras/asset-import-shared";
 
@@ -72,14 +73,18 @@ export async function buildAssetImportTemplateBuffer(
     categories.length > 0 ? categories : DEFAULT_ASSET_CATEGORY_REFS;
 
   // 1. Isi Sheet Referensi_Enum
-  const categoryOptions = activeCategories.map(formatCategoryDropdownOption);
+  const categoryOptions = activeCategories.map((c) =>
+    sanitizeSpreadsheetText(formatCategoryDropdownOption(c))
+  );
   const roomOptions = [
-    ...rooms.map(formatRoomDropdownOption),
+    ...rooms.map((r) => sanitizeSpreadsheetText(formatRoomDropdownOption(r))),
     GUDANG_ROOM_LABEL,
   ];
   const conditionOptions = [...ASSET_CONDITION_LIST];
   const portableOptions = [...ASSET_PORTABLE_OPTIONS];
-  const fundingOptions = fundingSources.map(formatFundingSourceDropdownOption);
+  const fundingOptions = fundingSources.map((f) =>
+    sanitizeSpreadsheetText(formatFundingSourceDropdownOption(f))
+  );
 
   refSheet.columns = [
     { header: "Kategori Inventaris", key: "cat", width: 30 },

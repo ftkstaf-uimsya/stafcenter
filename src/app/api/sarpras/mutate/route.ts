@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getVerifiedServerSession } from "@/lib/auth/session";
+import {
+  getVerifiedServerSession,
+  verifySameOriginRequest,
+} from "@/lib/auth/session";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import {
   ASSET_CATEGORY_LABELS,
@@ -163,38 +166,327 @@ const DATA_MASTER_ENTITY_TYPES = new Set<string>([
   "class",
 ]);
 
-function formatDataMasterError(message: string): string {
+const TABLE_ALLOWED_COLUMNS: Record<string, readonly string[]> = {
+  buildings: ["id", "code", "name", "floors_count", "zone", "description"],
+  rooms: [
+    "id",
+    "code",
+    "name",
+    "building_id",
+    "floor",
+    "category",
+    "capacity",
+    "pic_name",
+    "pic_contact",
+    "pic_official_id",
+    "pic_lecturer_id",
+    "status",
+    "facilities_notes",
+  ],
+  assets: [
+    "id",
+    "inventory_code",
+    "name",
+    "brand_model",
+    "category",
+    "category_label",
+    "room_id",
+    "procurement_year",
+    "funding_source",
+    "funding_source_id",
+    "acquisition_cost",
+    "condition",
+    "is_portable",
+    "serial_number",
+    "photo_url",
+    "notes",
+  ],
+  bookings: [
+    "id",
+    "booking_code",
+    "borrower_name",
+    "borrower_role",
+    "borrower_unit",
+    "unit_id",
+    "class_id",
+    "class_code",
+    "borrower_lecturer_id",
+    "borrower_official_id",
+    "borrower_phone",
+    "target_type",
+    "room_id",
+    "asset_id",
+    "deleted_target_label",
+    "activity_name",
+    "attendees_count",
+    "booking_date",
+    "start_time",
+    "end_time",
+    "status",
+    "return_condition_notes",
+    "approved_by",
+    "approved_by_official_id",
+  ],
+  maintenance_logs: [
+    "id",
+    "ticket_code",
+    "asset_id",
+    "room_id",
+    "deleted_target_label",
+    "reporter_name",
+    "reporter_role",
+    "issue_title",
+    "issue_description",
+    "damage_severity",
+    "priority",
+    "photo_url",
+    "status",
+    "technician_vendor",
+    "vendor_id",
+    "repair_cost",
+    "reported_at",
+    "completed_at",
+    "resolution_notes",
+  ],
+  consumables: [
+    "id",
+    "code",
+    "name",
+    "category",
+    "unit",
+    "current_stock",
+    "min_stock",
+    "storage_location",
+    "last_restocked_at",
+  ],
+  consumable_transactions: [
+    "id",
+    "consumable_id",
+    "transaction_type",
+    "quantity",
+    "actor_name",
+    "actor_unit",
+    "unit_id",
+    "purpose_notes",
+    "transaction_date",
+  ],
+  lecturers: [
+    "id",
+    "nidn_nip",
+    "full_name",
+    "homebase_prodi",
+    "unit_id",
+    "employment_status",
+    "academic_rank",
+    "email",
+    "phone",
+    "office_room_id",
+    "is_active",
+    "notes",
+  ],
+  courses: [
+    "id",
+    "code",
+    "name",
+    "prodi",
+    "unit_id",
+    "semester",
+    "curriculum_year",
+    "sks_theory",
+    "sks_practice",
+    "course_type",
+    "lecturer_id",
+    "preferred_room_id",
+    "is_active",
+    "description",
+  ],
+  campus_officials: [
+    "id",
+    "official_code",
+    "full_name",
+    "position_title",
+    "unit_name",
+    "unit_id",
+    "category",
+    "email",
+    "phone",
+    "period_label",
+    "is_active",
+    "notes",
+  ],
+  campus_units: [
+    "id",
+    "code",
+    "name",
+    "unit_type",
+    "parent_unit_id",
+    "leader_name",
+    "phone",
+    "email",
+    "is_active",
+    "notes",
+  ],
+  maintenance_vendors: [
+    "id",
+    "vendor_code",
+    "name",
+    "vendor_type",
+    "specialty",
+    "pic_name",
+    "phone",
+    "email",
+    "address",
+    "is_active",
+    "notes",
+  ],
+  asset_categories: [
+    "id",
+    "code",
+    "name",
+    "useful_life_years",
+    "description",
+    "is_active",
+  ],
+  funding_sources: [
+    "id",
+    "code",
+    "name",
+    "source_type",
+    "is_active",
+    "notes",
+  ],
+  consumable_categories: ["id", "code", "name", "description", "is_active"],
+  consumable_units: ["id", "code", "name", "description", "is_active"],
+  academic_classes: [
+    "id",
+    "class_code",
+    "prodi",
+    "unit_id",
+    "angkatan_year",
+    "class_section",
+    "dpm_name",
+    "dpm_phone",
+    "students_count",
+    "default_room_id",
+    "is_active",
+    "notes",
+  ],
+  office_kit_items: [
+    "id",
+    "kit_code",
+    "name",
+    "category",
+    "brand_spec",
+    "storage_tray",
+    "linked_room_id",
+    "condition",
+    "status",
+    "is_active",
+    "notes",
+  ],
+  office_kit_loans: [
+    "id",
+    "loan_code",
+    "class_id",
+    "class_code",
+    "prodi",
+    "dpm_name",
+    "borrower_name",
+    "borrower_phone",
+    "room_id",
+    "course_name",
+    "kit_item_ids",
+    "kit_items_label",
+    "loan_date",
+    "borrow_time",
+    "expected_return_time",
+    "returned_at",
+    "status",
+    "handed_by_staff",
+    "received_by_staff",
+    "return_condition_notes",
+  ],
+  sarpras_notes: ["id", "entity_type", "entity_id", "note_text"],
+};
+
+function sanitizeTablePayload(
+  table: string,
+  raw: Record<string, unknown> | undefined | null,
+  isUpdate = false
+): Record<string, unknown> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+  const allowed = TABLE_ALLOWED_COLUMNS[table];
+  if (!allowed) {
+    return {};
+  }
+  const out: Record<string, unknown> = {};
+  for (const col of allowed) {
+    if (isUpdate && col === "id") continue;
+    if (Object.prototype.hasOwnProperty.call(raw, col)) {
+      const val = raw[col];
+      if (val !== undefined) {
+        out[col] = val;
+      }
+    }
+  }
+  return out;
+}
+
+function formatSafeDbError(message: string): string {
+  const lower = (message || "").toLowerCase();
   if (
-    message.includes("academic_classes") ||
-    message.includes("office_kit_items") ||
-    message.includes("office_kit_loans")
+    lower.includes("academic_classes") ||
+    lower.includes("office_kit_items") ||
+    lower.includes("office_kit_loans")
   ) {
-    if (message.includes("does not exist") || message.includes("schema cache")) {
+    if (lower.includes("does not exist") || lower.includes("schema cache")) {
       return "Tabel Master Kelas & Sirkulasi Invent belum dibuat. Jalankan migrasi supabase/migrations/007_sirkulasi_invent_and_classes.sql di SQL Editor Supabase.";
     }
   }
   if (
-    message.includes("campus_units") ||
-    message.includes("maintenance_vendors") ||
-    message.includes("asset_categories") ||
-    message.includes("funding_sources") ||
-    message.includes("consumable_categories") ||
-    message.includes("consumable_units")
+    lower.includes("campus_units") ||
+    lower.includes("maintenance_vendors") ||
+    lower.includes("asset_categories") ||
+    lower.includes("funding_sources") ||
+    lower.includes("consumable_categories") ||
+    lower.includes("consumable_units")
   ) {
-    if (message.includes("does not exist") || message.includes("schema cache")) {
+    if (lower.includes("does not exist") || lower.includes("schema cache")) {
       return "Tabel Data Master lanjutan belum dibuat. Jalankan migrasi supabase/migrations/006_extended_master_data.sql di SQL Editor Supabase.";
     }
   }
   if (
-    message.includes("lecturers") ||
-    message.includes("courses") ||
-    message.includes("campus_officials")
+    lower.includes("lecturers") ||
+    lower.includes("courses") ||
+    lower.includes("campus_officials")
   ) {
-    if (message.includes("does not exist") || message.includes("schema cache")) {
+    if (lower.includes("does not exist") || lower.includes("schema cache")) {
       return "Tabel Data Master belum dibuat. Jalankan migrasi supabase/migrations/005_data_master.sql di SQL Editor Supabase.";
     }
   }
-  return message;
+  if (
+    lower.includes("stok barang habis pakai tidak mencukupi")
+  ) {
+    return "Stok barang habis pakai tidak mencukupi untuk pengeluaran ini.";
+  }
+  if (lower.includes("23505") || lower.includes("duplicate key")) {
+    return "Data sudah terdaftar (kode atau pengenal duplikat).";
+  }
+  if (lower.includes("23503") || lower.includes("foreign key constraint")) {
+    return "Referensi data terkait tidak valid atau masih digunakan oleh transaksi lain.";
+  }
+  if (lower.includes("23514") || lower.includes("check constraint")) {
+    return "Nilai kolom tidak memenuhi aturan atau pilihan yang valid.";
+  }
+  if (lower.includes("23502") || lower.includes("not-null constraint")) {
+    return "Terdapat kolom wajib yang belum diisi.";
+  }
+  if (lower.includes("22p02") || lower.includes("invalid input syntax")) {
+    return "Format ID atau tipe data tidak valid.";
+  }
+  return "Permintaan mutasi data tidak dapat diproses oleh server.";
 }
 
 const ACTIVE_BOOKING_STATUSES = new Set([
@@ -315,7 +607,10 @@ async function handleRoomOrAssetDelete(
     .eq(fkCol, id);
 
   if (bkErr) {
-    return NextResponse.json({ error: bkErr.message }, { status: 400 });
+    return NextResponse.json(
+      { error: formatSafeDbError(bkErr.message) },
+      { status: 400 }
+    );
   }
 
   const { data: relatedMaint, error: mErr } = await supabase
@@ -324,7 +619,10 @@ async function handleRoomOrAssetDelete(
     .eq(fkCol, id);
 
   if (mErr) {
-    return NextResponse.json({ error: mErr.message }, { status: 400 });
+    return NextResponse.json(
+      { error: formatSafeDbError(mErr.message) },
+      { status: 400 }
+    );
   }
 
   const activeBk = (relatedBookings || []).filter((b) =>
@@ -381,7 +679,10 @@ async function handleRoomOrAssetDelete(
           .delete()
           .eq("id", bk.id);
         if (delBkErr) {
-          return NextResponse.json({ error: delBkErr.message }, { status: 400 });
+          return NextResponse.json(
+            { error: formatSafeDbError(delBkErr.message) },
+            { status: 400 }
+          );
         }
       }
     }
@@ -400,7 +701,10 @@ async function handleRoomOrAssetDelete(
           .delete()
           .eq("id", mt.id);
         if (delMtErr) {
-          return NextResponse.json({ error: delMtErr.message }, { status: 400 });
+          return NextResponse.json(
+            { error: formatSafeDbError(delMtErr.message) },
+            { status: 400 }
+          );
         }
       }
     }
@@ -439,13 +743,21 @@ async function handleRoomOrAssetDelete(
         { status: 409 }
       );
     }
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return NextResponse.json(
+      { error: formatSafeDbError(msg) },
+      { status: 400 }
+    );
   }
 
   return NextResponse.json({ ok: true });
 }
 
 export async function POST(request: NextRequest) {
+  const csrf = verifySameOriginRequest(request);
+  if (!csrf.ok) {
+    return NextResponse.json({ error: csrf.error }, { status: 403 });
+  }
+
   const session = await getVerifiedServerSession();
   if (!session) {
     return NextResponse.json(
@@ -478,16 +790,28 @@ export async function POST(request: NextRequest) {
 
     switch (body.action) {
       case "insert_building": {
-        const { error } = await supabase.from("buildings").insert(body.data);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        const cleanData = sanitizeTablePayload("buildings", body.data, false);
+        const { error } = await supabase.from("buildings").insert(cleanData);
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "update_building": {
+        const cleanData = sanitizeTablePayload("buildings", body.data, true);
         const { error } = await supabase
           .from("buildings")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "delete_building": {
@@ -496,7 +820,10 @@ export async function POST(request: NextRequest) {
           .select("id", { count: "exact", head: true })
           .eq("building_id", body.id);
         if (countErr) {
-          return NextResponse.json({ error: countErr.message }, { status: 400 });
+          return NextResponse.json(
+            { error: formatSafeDbError(countErr.message) },
+            { status: 400 }
+          );
         }
         if ((count || 0) > 0) {
           return NextResponse.json(
@@ -510,20 +837,37 @@ export async function POST(request: NextRequest) {
           .from("buildings")
           .delete()
           .eq("id", body.id);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "insert_room": {
-        const { error } = await supabase.from("rooms").insert(body.data);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        const cleanData = sanitizeTablePayload("rooms", body.data, false);
+        const { error } = await supabase.from("rooms").insert(cleanData);
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "update_room": {
+        const cleanData = sanitizeTablePayload("rooms", body.data, true);
         const { error } = await supabase
           .from("rooms")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "delete_room": {
@@ -537,8 +881,14 @@ export async function POST(request: NextRequest) {
         );
       }
       case "insert_asset": {
-        const { error } = await supabase.from("assets").insert(body.data);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        const cleanData = sanitizeTablePayload("assets", body.data, false);
+        const { error } = await supabase.from("assets").insert(cleanData);
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "bulk_insert_assets": {
@@ -565,10 +915,11 @@ export async function POST(request: NextRequest) {
         if (roomsRes.error || assetsRes.error) {
           return NextResponse.json(
             {
-              error:
+              error: formatSafeDbError(
                 roomsRes.error?.message ||
-                assetsRes.error?.message ||
-                "Gagal memverifikasi data referensi aset.",
+                  assetsRes.error?.message ||
+                  "Gagal memverifikasi data referensi aset."
+              ),
             },
             { status: 500 }
           );
@@ -718,7 +1069,10 @@ export async function POST(request: NextRequest) {
 
         const { error } = await supabase.from("assets").insert(dbRows);
         if (error) {
-          return NextResponse.json({ error: error.message }, { status: 400 });
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
         }
 
         return NextResponse.json({
@@ -728,11 +1082,17 @@ export async function POST(request: NextRequest) {
         });
       }
       case "update_asset": {
+        const cleanData = sanitizeTablePayload("assets", body.data, true);
         const { error } = await supabase
           .from("assets")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "delete_asset": {
@@ -746,16 +1106,28 @@ export async function POST(request: NextRequest) {
         );
       }
       case "insert_booking": {
-        const { error } = await supabase.from("bookings").insert(body.data);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        const cleanData = sanitizeTablePayload("bookings", body.data, false);
+        const { error } = await supabase.from("bookings").insert(cleanData);
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "update_booking_status": {
+        const cleanData = sanitizeTablePayload("bookings", body.data, true);
         const { error } = await supabase
           .from("bookings")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
 
         if (body.roomId && body.nextRoomStatus) {
           await supabase
@@ -777,7 +1149,12 @@ export async function POST(request: NextRequest) {
           .from("bookings")
           .delete()
           .eq("id", body.id);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
 
         if (existing?.status === "Sedang Dipinjam" && existing.room_id) {
           await supabase
@@ -789,10 +1166,20 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "insert_maintenance": {
+        const cleanData = sanitizeTablePayload(
+          "maintenance_logs",
+          body.data,
+          false
+        );
         const { error } = await supabase
           .from("maintenance_logs")
-          .insert(body.data);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+          .insert(cleanData);
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
 
         if (body.roomId && body.setRoomRepair) {
           await supabase
@@ -803,11 +1190,21 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "update_maintenance": {
+        const cleanData = sanitizeTablePayload(
+          "maintenance_logs",
+          body.data,
+          true
+        );
         const { error } = await supabase
           .from("maintenance_logs")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
 
         if (body.roomId && body.setRoomAvailable) {
           await supabase
@@ -829,7 +1226,12 @@ export async function POST(request: NextRequest) {
           .from("maintenance_logs")
           .delete()
           .eq("id", body.id);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
 
         if (existing) {
           await reconcileMaintenanceTargets(
@@ -842,16 +1244,28 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "insert_consumable": {
-        const { error } = await supabase.from("consumables").insert(body.data);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        const cleanData = sanitizeTablePayload("consumables", body.data, false);
+        const { error } = await supabase.from("consumables").insert(cleanData);
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "update_consumable": {
+        const cleanData = sanitizeTablePayload("consumables", body.data, true);
         const { error } = await supabase
           .from("consumables")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "delete_consumable": {
@@ -860,34 +1274,51 @@ export async function POST(request: NextRequest) {
           .from("consumables")
           .delete()
           .eq("id", body.id);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "insert_consumable_tx": {
+        const cleanData = sanitizeTablePayload(
+          "consumable_transactions",
+          body.data,
+          false
+        );
         const { error } = await supabase
           .from("consumable_transactions")
-          .insert(body.data);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+          .insert(cleanData);
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       case "insert_lecturer": {
-        const { error } = await supabase.from("lecturers").insert(body.data);
+        const cleanData = sanitizeTablePayload("lecturers", body.data, false);
+        const { error } = await supabase.from("lecturers").insert(cleanData);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "update_lecturer": {
+        const cleanData = sanitizeTablePayload("lecturers", body.data, true);
         const { error } = await supabase
           .from("lecturers")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -901,30 +1332,32 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "insert_course": {
-        const { error } = await supabase.from("courses").insert(body.data);
+        const cleanData = sanitizeTablePayload("courses", body.data, false);
+        const { error } = await supabase.from("courses").insert(cleanData);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "update_course": {
+        const cleanData = sanitizeTablePayload("courses", body.data, true);
         const { error } = await supabase
           .from("courses")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -938,32 +1371,42 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "insert_official": {
+        const cleanData = sanitizeTablePayload(
+          "campus_officials",
+          body.data,
+          false
+        );
         const { error } = await supabase
           .from("campus_officials")
-          .insert(body.data);
+          .insert(cleanData);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "update_official": {
+        const cleanData = sanitizeTablePayload(
+          "campus_officials",
+          body.data,
+          true
+        );
         const { error } = await supabase
           .from("campus_officials")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -977,30 +1420,36 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "insert_campus_unit": {
-        const { error } = await supabase.from("campus_units").insert(body.data);
+        const cleanData = sanitizeTablePayload(
+          "campus_units",
+          body.data,
+          false
+        );
+        const { error } = await supabase.from("campus_units").insert(cleanData);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "update_campus_unit": {
+        const cleanData = sanitizeTablePayload("campus_units", body.data, true);
         const { error } = await supabase
           .from("campus_units")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -1014,32 +1463,42 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "insert_vendor": {
+        const cleanData = sanitizeTablePayload(
+          "maintenance_vendors",
+          body.data,
+          false
+        );
         const { error } = await supabase
           .from("maintenance_vendors")
-          .insert(body.data);
+          .insert(cleanData);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "update_vendor": {
+        const cleanData = sanitizeTablePayload(
+          "maintenance_vendors",
+          body.data,
+          true
+        );
         const { error } = await supabase
           .from("maintenance_vendors")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -1053,32 +1512,42 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "insert_asset_category": {
+        const cleanData = sanitizeTablePayload(
+          "asset_categories",
+          body.data,
+          false
+        );
         const { error } = await supabase
           .from("asset_categories")
-          .insert(body.data);
+          .insert(cleanData);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "update_asset_category": {
+        const cleanData = sanitizeTablePayload(
+          "asset_categories",
+          body.data,
+          true
+        );
         const { error } = await supabase
           .from("asset_categories")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -1110,32 +1579,42 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "insert_funding_source": {
+        const cleanData = sanitizeTablePayload(
+          "funding_sources",
+          body.data,
+          false
+        );
         const { error } = await supabase
           .from("funding_sources")
-          .insert(body.data);
+          .insert(cleanData);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "update_funding_source": {
+        const cleanData = sanitizeTablePayload(
+          "funding_sources",
+          body.data,
+          true
+        );
         const { error } = await supabase
           .from("funding_sources")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -1148,32 +1627,42 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "insert_consumable_category": {
+        const cleanData = sanitizeTablePayload(
+          "consumable_categories",
+          body.data,
+          false
+        );
         const { error } = await supabase
           .from("consumable_categories")
-          .insert(body.data);
+          .insert(cleanData);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "update_consumable_category": {
+        const cleanData = sanitizeTablePayload(
+          "consumable_categories",
+          body.data,
+          true
+        );
         const { error } = await supabase
           .from("consumable_categories")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -1205,32 +1694,42 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "insert_consumable_unit": {
+        const cleanData = sanitizeTablePayload(
+          "consumable_units",
+          body.data,
+          false
+        );
         const { error } = await supabase
           .from("consumable_units")
-          .insert(body.data);
+          .insert(cleanData);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "update_consumable_unit": {
+        const cleanData = sanitizeTablePayload(
+          "consumable_units",
+          body.data,
+          true
+        );
         const { error } = await supabase
           .from("consumable_units")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -1262,32 +1761,42 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "insert_academic_class": {
+        const cleanData = sanitizeTablePayload(
+          "academic_classes",
+          body.data,
+          false
+        );
         const { error } = await supabase
           .from("academic_classes")
-          .insert(body.data);
+          .insert(cleanData);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "update_academic_class": {
+        const cleanData = sanitizeTablePayload(
+          "academic_classes",
+          body.data,
+          true
+        );
         const { error } = await supabase
           .from("academic_classes")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -1301,32 +1810,42 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "insert_office_kit_item": {
+        const cleanData = sanitizeTablePayload(
+          "office_kit_items",
+          body.data,
+          false
+        );
         const { error } = await supabase
           .from("office_kit_items")
-          .insert(body.data);
+          .insert(cleanData);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
         return NextResponse.json({ ok: true });
       }
       case "update_office_kit_item": {
+        const cleanData = sanitizeTablePayload(
+          "office_kit_items",
+          body.data,
+          true
+        );
         const { error } = await supabase
           .from("office_kit_items")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -1353,7 +1872,7 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -1367,12 +1886,17 @@ export async function POST(request: NextRequest) {
             { status: 400 }
           );
         }
+        const cleanData = sanitizeTablePayload(
+          "office_kit_loans",
+          body.data,
+          false
+        );
         const { error: insertErr } = await supabase
           .from("office_kit_loans")
-          .insert(body.data);
+          .insert(cleanData);
         if (insertErr) {
           return NextResponse.json(
-            { error: formatDataMasterError(insertErr.message) },
+            { error: formatSafeDbError(insertErr.message) },
             { status: 400 }
           );
         }
@@ -1383,13 +1907,18 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "checkin_office_kit_loan": {
+        const cleanData = sanitizeTablePayload(
+          "office_kit_loans",
+          body.data,
+          true
+        );
         const { error: updErr } = await supabase
           .from("office_kit_loans")
-          .update({ ...body.data, updated_at: nowIso })
+          .update({ ...cleanData, updated_at: nowIso })
           .eq("id", body.id);
         if (updErr) {
           return NextResponse.json(
-            { error: formatDataMasterError(updErr.message) },
+            { error: formatSafeDbError(updErr.message) },
             { status: 400 }
           );
         }
@@ -1431,7 +1960,7 @@ export async function POST(request: NextRequest) {
           .eq("id", body.id);
         if (error) {
           return NextResponse.json(
-            { error: formatDataMasterError(error.message) },
+            { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
         }
@@ -1460,8 +1989,9 @@ export async function POST(request: NextRequest) {
             { status: 403 }
           );
         }
+        const cleanData = sanitizeTablePayload("sarpras_notes", body.data, false);
         const { error } = await supabase.from("sarpras_notes").insert({
-          ...body.data,
+          ...cleanData,
           author_id: session.id,
           author_name: session.fullName || session.username,
         });
@@ -1476,18 +2006,26 @@ export async function POST(request: NextRequest) {
               { status: 400 }
             );
           }
-          return NextResponse.json({ error: msg }, { status: 400 });
+          return NextResponse.json(
+            { error: formatSafeDbError(msg) },
+            { status: 400 }
+          );
         }
         return NextResponse.json({ ok: true });
       }
       case "delete_attachment": {
         const { data: attRow } = await supabase
           .from("sarpras_attachments")
-          .select("entity_type")
+          .select("id, entity_type, file_path")
           .eq("id", body.id)
           .maybeSingle();
+        if (!attRow) {
+          return NextResponse.json(
+            { error: "Lampiran tidak ditemukan." },
+            { status: 404 }
+          );
+        }
         if (
-          attRow &&
           DATA_MASTER_ENTITY_TYPES.has(String(attRow.entity_type)) &&
           session.role !== "master_admin"
         ) {
@@ -1496,14 +2034,21 @@ export async function POST(request: NextRequest) {
             { status: 403 }
           );
         }
-        if (body.filePath) {
-          await supabase.storage.from("sarpras-files").remove([body.filePath]);
+        if (attRow.file_path) {
+          await supabase.storage
+            .from("sarpras-files")
+            .remove([String(attRow.file_path)]);
         }
         const { error } = await supabase
           .from("sarpras_attachments")
           .delete()
           .eq("id", body.id);
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
         return NextResponse.json({ ok: true });
       }
       default:

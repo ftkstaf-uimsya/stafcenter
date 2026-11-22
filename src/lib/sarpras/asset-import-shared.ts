@@ -146,7 +146,19 @@ export function normalizeSerialKey(value: string | null | undefined): string | n
 
 export function cleanCellText(value: unknown): string {
   if (value === null || value === undefined) return "";
-  return String(value).replace(/\u0000/g, "").trim();
+  const trimmed = String(value).replace(/\u0000/g, "").trim();
+  if (/^[=@]/.test(trimmed) || /^[+\-][a-zA-Z(=@]/.test(trimmed)) {
+    return trimmed.replace(/^[=+\-@]+/, "").trim();
+  }
+  return trimmed;
+}
+
+export function sanitizeSpreadsheetText(val: string): string {
+  if (!val) return "";
+  if (/^[=+\-@\t\r]/.test(val)) {
+    return `'${val}`;
+  }
+  return val;
 }
 
 export function formatCategoryDropdownOption(

@@ -190,6 +190,7 @@ CREATE OR REPLACE FUNCTION public.fn_sync_asset_condition_from_maintenance()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY INVOKER
+SET search_path = public
 AS $$
 BEGIN
   IF NEW.asset_id IS NOT NULL THEN
@@ -222,6 +223,7 @@ CREATE OR REPLACE FUNCTION public.fn_apply_consumable_transaction()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY INVOKER
+SET search_path = public
 AS $$
 BEGIN
   IF NEW.transaction_type = 'Masuk' THEN
@@ -312,26 +314,26 @@ ALTER TABLE public.maintenance_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.consumables ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.consumable_transactions ENABLE ROW LEVEL SECURITY;
 
--- Kebijakan akses baca & operasional untuk staf terautentikasi (dan anon pada fase integrasi awal)
-CREATE POLICY "Read buildings for campus users" ON public.buildings FOR SELECT TO anon, authenticated USING (true);
+-- Kebijakan akses baca & operasional eksklusif untuk staf terautentikasi (akses anon dinonaktifkan)
+CREATE POLICY "Read buildings for authenticated staff" ON public.buildings FOR SELECT TO authenticated USING ((select auth.uid()) IS NOT NULL);
 CREATE POLICY "Manage buildings for authenticated staff" ON public.buildings FOR ALL TO authenticated USING ((select auth.uid()) IS NOT NULL) WITH CHECK ((select auth.uid()) IS NOT NULL);
 
-CREATE POLICY "Read rooms for campus users" ON public.rooms FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Read rooms for authenticated staff" ON public.rooms FOR SELECT TO authenticated USING ((select auth.uid()) IS NOT NULL);
 CREATE POLICY "Manage rooms for authenticated staff" ON public.rooms FOR ALL TO authenticated USING ((select auth.uid()) IS NOT NULL) WITH CHECK ((select auth.uid()) IS NOT NULL);
 
-CREATE POLICY "Read assets for campus users" ON public.assets FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Read assets for authenticated staff" ON public.assets FOR SELECT TO authenticated USING ((select auth.uid()) IS NOT NULL);
 CREATE POLICY "Manage assets for authenticated staff" ON public.assets FOR ALL TO authenticated USING ((select auth.uid()) IS NOT NULL) WITH CHECK ((select auth.uid()) IS NOT NULL);
 
-CREATE POLICY "Read bookings for campus users" ON public.bookings FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Read bookings for authenticated staff" ON public.bookings FOR SELECT TO authenticated USING ((select auth.uid()) IS NOT NULL);
 CREATE POLICY "Manage bookings for authenticated staff" ON public.bookings FOR ALL TO authenticated USING ((select auth.uid()) IS NOT NULL) WITH CHECK ((select auth.uid()) IS NOT NULL);
 
-CREATE POLICY "Read maintenance logs for campus users" ON public.maintenance_logs FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Read maintenance_logs for authenticated staff" ON public.maintenance_logs FOR SELECT TO authenticated USING ((select auth.uid()) IS NOT NULL);
 CREATE POLICY "Manage maintenance logs for authenticated staff" ON public.maintenance_logs FOR ALL TO authenticated USING ((select auth.uid()) IS NOT NULL) WITH CHECK ((select auth.uid()) IS NOT NULL);
 
-CREATE POLICY "Read consumables for campus users" ON public.consumables FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Read consumables for authenticated staff" ON public.consumables FOR SELECT TO authenticated USING ((select auth.uid()) IS NOT NULL);
 CREATE POLICY "Manage consumables for authenticated staff" ON public.consumables FOR ALL TO authenticated USING ((select auth.uid()) IS NOT NULL) WITH CHECK ((select auth.uid()) IS NOT NULL);
 
-CREATE POLICY "Read consumable transactions for campus users" ON public.consumable_transactions FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Read consumable_transactions for authenticated staff" ON public.consumable_transactions FOR SELECT TO authenticated USING ((select auth.uid()) IS NOT NULL);
 CREATE POLICY "Manage consumable transactions for authenticated staff" ON public.consumable_transactions FOR ALL TO authenticated USING ((select auth.uid()) IS NOT NULL) WITH CHECK ((select auth.uid()) IS NOT NULL);
 
 -- SEED DATA AWAL BERNUANSA KAMPUS
