@@ -496,37 +496,78 @@ const ACTIVE_BOOKING_STATUSES = new Set([
 ]);
 
 const OPEN_MAINT_STATUSES = new Set(["Dilaporkan", "Dalam Pengerjaan"]);
+const ARTIFACTS_MISSING_CACHE_MS = 5 * 60 * 1000;
+let artifactsTablesMissingUntil = 0;
+
+function isMissingRelationError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  const msg = (err.message || "").toLowerCase();
+  const code = (err.code || "").toUpperCase();
+  return (
+    code === "42P01" ||
+    code === "PGRST205" ||
+    msg.includes("does not exist") ||
+    msg.includes("schema cache")
+  );
+}
+
+async function cleanupEntityArtifactsBatch(
+  supabase: SupabaseAdminClient,
+  entityType: SarprasEntityType,
+  entityIds: string[]
+) {
+  if (entityIds.length === 0) return;
+  if (Date.now() < artifactsTablesMissingUntil) return;
+
+  const [notesDelRes, attachReadRes] = await Promise.all([
+    supabase
+      .from("sarpras_notes")
+      .delete()
+      .eq("entity_type", entityType)
+      .in("entity_id", entityIds),
+    supabase
+      .from("sarpras_attachments")
+      .select("id, file_path")
+      .eq("entity_type", entityType)
+      .in("entity_id", entityIds),
+  ]);
+
+  if (
+    isMissingRelationError(notesDelRes.error) &&
+    isMissingRelationError(attachReadRes.error)
+  ) {
+    artifactsTablesMissingUntil = Date.now() + ARTIFACTS_MISSING_CACHE_MS;
+    return;
+  }
+
+  if (
+    !attachReadRes.error &&
+    attachReadRes.data &&
+    attachReadRes.data.length > 0
+  ) {
+    const filePaths = attachReadRes.data
+      .map((a) => a.file_path as string)
+      .filter(Boolean);
+    const cleanupJobs: Array<PromiseLike<unknown>> = [
+      supabase
+        .from("sarpras_attachments")
+        .delete()
+        .eq("entity_type", entityType)
+        .in("entity_id", entityIds),
+    ];
+    if (filePaths.length > 0) {
+      cleanupJobs.push(supabase.storage.from("sarpras-files").remove(filePaths));
+    }
+    await Promise.all(cleanupJobs);
+  }
+}
 
 async function cleanupEntityArtifacts(
   supabase: SupabaseAdminClient,
   entityType: SarprasEntityType,
   entityId: string
 ) {
-  await supabase
-    .from("sarpras_notes")
-    .delete()
-    .eq("entity_type", entityType)
-    .eq("entity_id", entityId);
-
-  const { data: attachments, error: attachReadErr } = await supabase
-    .from("sarpras_attachments")
-    .select("id, file_path")
-    .eq("entity_type", entityType)
-    .eq("entity_id", entityId);
-
-  if (!attachReadErr && attachments && attachments.length > 0) {
-    const filePaths = attachments
-      .map((a) => a.file_path as string)
-      .filter(Boolean);
-    if (filePaths.length > 0) {
-      await supabase.storage.from("sarpras-files").remove(filePaths);
-    }
-    await supabase
-      .from("sarpras_attachments")
-      .delete()
-      .eq("entity_type", entityType)
-      .eq("entity_id", entityId);
-  }
+  return cleanupEntityArtifactsBatch(supabase, entityType, [entityId]);
 }
 
 async function reconcileMaintenanceTargets(
@@ -535,57 +576,69 @@ async function reconcileMaintenanceTargets(
   roomId: string | null,
   nowIso: string
 ) {
-  if (assetId) {
-    const { data: remainingMaint } = await supabase
-      .from("maintenance_logs")
-      .select("damage_severity, status")
-      .eq("asset_id", assetId)
-      .neq("status", "Selesai Diperbaiki");
+  const [remMaintRes, assetRowRes, urgentRoomRes] = await Promise.all([
+    assetId
+      ? supabase
+          .from("maintenance_logs")
+          .select("damage_severity, status")
+          .eq("asset_id", assetId)
+          .neq("status", "Selesai Diperbaiki")
+      : Promise.resolve({ data: null }),
+    assetId
+      ? supabase
+          .from("assets")
+          .select("condition")
+          .eq("id", assetId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    roomId
+      ? supabase
+          .from("maintenance_logs")
+          .select("id")
+          .eq("room_id", roomId)
+          .neq("status", "Selesai Diperbaiki")
+          .eq("priority", "Tinggi/Darurat")
+      : Promise.resolve({ data: null }),
+  ]);
 
-    const hasHeavy = (remainingMaint || []).some(
+  const updates: Array<PromiseLike<unknown>> = [];
+
+  if (assetId && assetRowRes.data) {
+    const remainingMaint = remMaintRes.data || [];
+    const hasHeavy = remainingMaint.some(
       (m) => m.damage_severity === "Rusak Berat"
     );
-    const hasLight = (remainingMaint || []).some(
+    const hasLight = remainingMaint.some(
       (m) => m.damage_severity === "Rusak Ringan"
     );
-
-    const { data: assetRow } = await supabase
-      .from("assets")
-      .select("condition")
-      .eq("id", assetId)
-      .maybeSingle();
-
-    if (assetRow) {
-      let nextCondition = assetRow.condition as string;
-      if (hasHeavy) nextCondition = "Rusak Berat";
-      else if (hasLight) nextCondition = "Rusak Ringan";
-      else if (nextCondition === "Rusak Berat" || nextCondition === "Rusak Ringan") {
-        nextCondition = "Baik";
-      }
-      if (nextCondition !== assetRow.condition) {
-        await supabase
+    let nextCondition = assetRowRes.data.condition as string;
+    if (hasHeavy) nextCondition = "Rusak Berat";
+    else if (hasLight) nextCondition = "Rusak Ringan";
+    else if (nextCondition === "Rusak Berat" || nextCondition === "Rusak Ringan") {
+      nextCondition = "Baik";
+    }
+    if (nextCondition !== assetRowRes.data.condition) {
+      updates.push(
+        supabase
           .from("assets")
           .update({ condition: nextCondition, updated_at: nowIso })
-          .eq("id", assetId);
-      }
+          .eq("id", assetId)
+      );
     }
   }
 
-  if (roomId) {
-    const { data: urgentOpen } = await supabase
-      .from("maintenance_logs")
-      .select("id")
-      .eq("room_id", roomId)
-      .neq("status", "Selesai Diperbaiki")
-      .eq("priority", "Tinggi/Darurat");
-
-    if (!urgentOpen || urgentOpen.length === 0) {
-      await supabase
+  if (roomId && (!urgentRoomRes.data || urgentRoomRes.data.length === 0)) {
+    updates.push(
+      supabase
         .from("rooms")
         .update({ status: "Tersedia", updated_at: nowIso })
         .eq("id", roomId)
-        .eq("status", "Perbaikan");
-    }
+        .eq("status", "Perbaikan")
+    );
+  }
+
+  if (updates.length > 0) {
+    await Promise.all(updates);
   }
 }
 
@@ -601,34 +654,37 @@ async function handleRoomOrAssetDelete(
   const otherCol = kind === "room" ? "asset_id" : "room_id";
   const downgradedTargetType = kind === "room" ? "Alat" : "Ruangan";
 
-  const { data: relatedBookings, error: bkErr } = await supabase
-    .from("bookings")
-    .select("id, booking_code, status, target_type, room_id, asset_id")
-    .eq(fkCol, id);
+  const [bkRes, maintRes] = await Promise.all([
+    supabase
+      .from("bookings")
+      .select("id, booking_code, status, target_type, room_id, asset_id")
+      .eq(fkCol, id),
+    supabase
+      .from("maintenance_logs")
+      .select("id, ticket_code, status, room_id, asset_id")
+      .eq(fkCol, id),
+  ]);
 
-  if (bkErr) {
+  if (bkRes.error) {
     return NextResponse.json(
-      { error: formatSafeDbError(bkErr.message) },
+      { error: formatSafeDbError(bkRes.error.message) },
+      { status: 400 }
+    );
+  }
+  if (maintRes.error) {
+    return NextResponse.json(
+      { error: formatSafeDbError(maintRes.error.message) },
       { status: 400 }
     );
   }
 
-  const { data: relatedMaint, error: mErr } = await supabase
-    .from("maintenance_logs")
-    .select("id, ticket_code, status, room_id, asset_id")
-    .eq(fkCol, id);
+  const relatedBookings = bkRes.data || [];
+  const relatedMaint = maintRes.data || [];
 
-  if (mErr) {
-    return NextResponse.json(
-      { error: formatSafeDbError(mErr.message) },
-      { status: 400 }
-    );
-  }
-
-  const activeBk = (relatedBookings || []).filter((b) =>
+  const activeBk = relatedBookings.filter((b) =>
     ACTIVE_BOOKING_STATUSES.has(String(b.status))
   );
-  const openMaint = (relatedMaint || []).filter((m) =>
+  const openMaint = relatedMaint.filter((m) =>
     OPEN_MAINT_STATUSES.has(String(m.status))
   );
 
@@ -661,48 +717,71 @@ async function handleRoomOrAssetDelete(
   }
 
   if (mode === "cascade") {
-    for (const bk of relatedBookings || []) {
-      const hasOther = Boolean(bk[otherCol]);
-      if (hasOther) {
-        await supabase
+    const bookingIdsToDowngrade: string[] = [];
+    const bookingIdsToDelete: string[] = [];
+    for (const bk of relatedBookings) {
+      if (bk[otherCol]) {
+        bookingIdsToDowngrade.push(String(bk.id));
+      } else {
+        bookingIdsToDelete.push(String(bk.id));
+      }
+    }
+
+    const maintIdsToClearAsset: string[] = [];
+    const maintIdsToDelete: string[] = [];
+    for (const mt of relatedMaint) {
+      if (mt[otherCol] && kind === "asset") {
+        maintIdsToClearAsset.push(String(mt.id));
+      } else {
+        maintIdsToDelete.push(String(mt.id));
+      }
+    }
+
+    const batchJobs: Array<PromiseLike<{ error?: { message: string } | null } | void>> = [];
+
+    if (bookingIdsToDowngrade.length > 0) {
+      batchJobs.push(
+        supabase
           .from("bookings")
           .update({
             [fkCol]: null,
             target_type: downgradedTargetType,
             updated_at: nowIso,
           })
-          .eq("id", bk.id);
-      } else {
-        await cleanupEntityArtifacts(supabase, "booking", String(bk.id));
-        const { error: delBkErr } = await supabase
-          .from("bookings")
-          .delete()
-          .eq("id", bk.id);
-        if (delBkErr) {
-          return NextResponse.json(
-            { error: formatSafeDbError(delBkErr.message) },
-            { status: 400 }
-          );
-        }
-      }
+          .in("id", bookingIdsToDowngrade)
+      );
     }
-
-    for (const mt of relatedMaint || []) {
-      const hasOther = Boolean(mt[otherCol]);
-      if (hasOther && kind === "asset") {
-        await supabase
+    if (bookingIdsToDelete.length > 0) {
+      batchJobs.push(
+        cleanupEntityArtifactsBatch(supabase, "booking", bookingIdsToDelete)
+      );
+      batchJobs.push(
+        supabase.from("bookings").delete().in("id", bookingIdsToDelete)
+      );
+    }
+    if (maintIdsToClearAsset.length > 0) {
+      batchJobs.push(
+        supabase
           .from("maintenance_logs")
           .update({ asset_id: null, updated_at: nowIso })
-          .eq("id", mt.id);
-      } else {
-        await cleanupEntityArtifacts(supabase, "maintenance", String(mt.id));
-        const { error: delMtErr } = await supabase
-          .from("maintenance_logs")
-          .delete()
-          .eq("id", mt.id);
-        if (delMtErr) {
+          .in("id", maintIdsToClearAsset)
+      );
+    }
+    if (maintIdsToDelete.length > 0) {
+      batchJobs.push(
+        cleanupEntityArtifactsBatch(supabase, "maintenance", maintIdsToDelete)
+      );
+      batchJobs.push(
+        supabase.from("maintenance_logs").delete().in("id", maintIdsToDelete)
+      );
+    }
+
+    if (batchJobs.length > 0) {
+      const results = await Promise.all(batchJobs);
+      for (const res of results) {
+        if (res && typeof res === "object" && "error" in res && res.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(delMtErr.message) },
+            { error: formatSafeDbError(res.error.message) },
             { status: 400 }
           );
         }
@@ -710,27 +789,29 @@ async function handleRoomOrAssetDelete(
     }
   } else {
     // Mode "archive": untuk tiket gabungan ('Ruangan & Alat'), lepaskan FK & sesuaikan target_type
-    for (const bk of relatedBookings || []) {
-      if (bk[otherCol]) {
-        await supabase
-          .from("bookings")
-          .update({
-            [fkCol]: null,
-            target_type: downgradedTargetType,
-            updated_at: nowIso,
-          })
-          .eq("id", bk.id);
-      }
+    const bookingIdsToDowngrade = relatedBookings
+      .filter((bk) => Boolean(bk[otherCol]))
+      .map((bk) => String(bk.id));
+    if (bookingIdsToDowngrade.length > 0) {
+      await supabase
+        .from("bookings")
+        .update({
+          [fkCol]: null,
+          target_type: downgradedTargetType,
+          updated_at: nowIso,
+        })
+        .in("id", bookingIdsToDowngrade);
     }
   }
 
-  await cleanupEntityArtifacts(supabase, kind, id);
-
   const table = kind === "room" ? "rooms" : "assets";
-  const { error: delErr } = await supabase.from(table).delete().eq("id", id);
+  const [, delRes] = await Promise.all([
+    cleanupEntityArtifacts(supabase, kind, id),
+    supabase.from(table).delete().eq("id", id),
+  ]);
 
-  if (delErr) {
-    const msg = delErr.message || "";
+  if (delRes.error) {
+    const msg = delRes.error.message || "";
     if (
       msg.includes("chk_booking_target") ||
       msg.includes("chk_maintenance_target")
@@ -1118,44 +1199,48 @@ export async function POST(request: NextRequest) {
       }
       case "update_booking_status": {
         const cleanData = sanitizeTablePayload("bookings", body.data, true);
-        const { error } = await supabase
-          .from("bookings")
-          .update({ ...cleanData, updated_at: nowIso })
-          .eq("id", body.id);
-        if (error) {
+        const jobs: [
+          PromiseLike<{ error: { message: string } | null }>,
+          PromiseLike<unknown>
+        ] = [
+          supabase
+            .from("bookings")
+            .update({ ...cleanData, updated_at: nowIso })
+            .eq("id", body.id),
+          body.roomId && body.nextRoomStatus
+            ? supabase
+                .from("rooms")
+                .update({ status: body.nextRoomStatus, updated_at: nowIso })
+                .eq("id", body.roomId)
+            : Promise.resolve(null),
+        ];
+        const [bkUpdRes] = await Promise.all(jobs);
+        if (bkUpdRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(bkUpdRes.error.message) },
             { status: 400 }
           );
-        }
-
-        if (body.roomId && body.nextRoomStatus) {
-          await supabase
-            .from("rooms")
-            .update({ status: body.nextRoomStatus, updated_at: nowIso })
-            .eq("id", body.roomId);
         }
         return NextResponse.json({ ok: true });
       }
       case "delete_booking": {
-        const { data: existing } = await supabase
-          .from("bookings")
-          .select("id, status, room_id")
-          .eq("id", body.id)
-          .maybeSingle();
-
-        await cleanupEntityArtifacts(supabase, "booking", body.id);
-        const { error } = await supabase
-          .from("bookings")
-          .delete()
-          .eq("id", body.id);
-        if (error) {
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, "booking", body.id),
+          supabase
+            .from("bookings")
+            .delete()
+            .eq("id", body.id)
+            .select("id, status, room_id")
+            .maybeSingle(),
+        ]);
+        if (delRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(delRes.error.message) },
             { status: 400 }
           );
         }
 
+        const existing = delRes.data;
         if (existing?.status === "Sedang Dipinjam" && existing.room_id) {
           await supabase
             .from("rooms")
@@ -1171,21 +1256,20 @@ export async function POST(request: NextRequest) {
           body.data,
           false
         );
-        const { error } = await supabase
-          .from("maintenance_logs")
-          .insert(cleanData);
-        if (error) {
+        const [insRes] = await Promise.all([
+          supabase.from("maintenance_logs").insert(cleanData),
+          body.roomId && body.setRoomRepair
+            ? supabase
+                .from("rooms")
+                .update({ status: "Perbaikan", updated_at: nowIso })
+                .eq("id", body.roomId)
+            : Promise.resolve(null),
+        ]);
+        if (insRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(insRes.error.message) },
             { status: 400 }
           );
-        }
-
-        if (body.roomId && body.setRoomRepair) {
-          await supabase
-            .from("rooms")
-            .update({ status: "Perbaikan", updated_at: nowIso })
-            .eq("id", body.roomId);
         }
         return NextResponse.json({ ok: true });
       }
@@ -1195,44 +1279,44 @@ export async function POST(request: NextRequest) {
           body.data,
           true
         );
-        const { error } = await supabase
-          .from("maintenance_logs")
-          .update({ ...cleanData, updated_at: nowIso })
-          .eq("id", body.id);
-        if (error) {
+        const [updRes] = await Promise.all([
+          supabase
+            .from("maintenance_logs")
+            .update({ ...cleanData, updated_at: nowIso })
+            .eq("id", body.id),
+          body.roomId && body.setRoomAvailable
+            ? supabase
+                .from("rooms")
+                .update({ status: "Tersedia", updated_at: nowIso })
+                .eq("id", body.roomId)
+            : Promise.resolve(null),
+        ]);
+        if (updRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(updRes.error.message) },
             { status: 400 }
           );
-        }
-
-        if (body.roomId && body.setRoomAvailable) {
-          await supabase
-            .from("rooms")
-            .update({ status: "Tersedia", updated_at: nowIso })
-            .eq("id", body.roomId);
         }
         return NextResponse.json({ ok: true });
       }
       case "delete_maintenance": {
-        const { data: existing } = await supabase
-          .from("maintenance_logs")
-          .select("id, asset_id, room_id")
-          .eq("id", body.id)
-          .maybeSingle();
-
-        await cleanupEntityArtifacts(supabase, "maintenance", body.id);
-        const { error } = await supabase
-          .from("maintenance_logs")
-          .delete()
-          .eq("id", body.id);
-        if (error) {
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, "maintenance", body.id),
+          supabase
+            .from("maintenance_logs")
+            .delete()
+            .eq("id", body.id)
+            .select("id, asset_id, room_id")
+            .maybeSingle(),
+        ]);
+        if (delRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(delRes.error.message) },
             { status: 400 }
           );
         }
 
+        const existing = delRes.data;
         if (existing) {
           await reconcileMaintenanceTargets(
             supabase,
@@ -1269,14 +1353,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "delete_consumable": {
-        await cleanupEntityArtifacts(supabase, "consumable", body.id);
-        const { error } = await supabase
-          .from("consumables")
-          .delete()
-          .eq("id", body.id);
-        if (error) {
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, "consumable", body.id),
+          supabase.from("consumables").delete().eq("id", body.id),
+        ]);
+        if (delRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(delRes.error.message) },
             { status: 400 }
           );
         }
@@ -1325,14 +1408,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "delete_lecturer": {
-        await cleanupEntityArtifacts(supabase, "lecturer", body.id);
-        const { error } = await supabase
-          .from("lecturers")
-          .delete()
-          .eq("id", body.id);
-        if (error) {
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, "lecturer", body.id),
+          supabase.from("lecturers").delete().eq("id", body.id),
+        ]);
+        if (delRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(delRes.error.message) },
             { status: 400 }
           );
         }
@@ -1364,14 +1446,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "delete_course": {
-        await cleanupEntityArtifacts(supabase, "course", body.id);
-        const { error } = await supabase
-          .from("courses")
-          .delete()
-          .eq("id", body.id);
-        if (error) {
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, "course", body.id),
+          supabase.from("courses").delete().eq("id", body.id),
+        ]);
+        if (delRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(delRes.error.message) },
             { status: 400 }
           );
         }
@@ -1413,14 +1494,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "delete_official": {
-        await cleanupEntityArtifacts(supabase, "official", body.id);
-        const { error } = await supabase
-          .from("campus_officials")
-          .delete()
-          .eq("id", body.id);
-        if (error) {
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, "official", body.id),
+          supabase.from("campus_officials").delete().eq("id", body.id),
+        ]);
+        if (delRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(delRes.error.message) },
             { status: 400 }
           );
         }
@@ -1456,14 +1536,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "delete_campus_unit": {
-        await cleanupEntityArtifacts(supabase, "unit", body.id);
-        const { error } = await supabase
-          .from("campus_units")
-          .delete()
-          .eq("id", body.id);
-        if (error) {
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, "unit", body.id),
+          supabase.from("campus_units").delete().eq("id", body.id),
+        ]);
+        if (delRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(delRes.error.message) },
             { status: 400 }
           );
         }
@@ -1505,14 +1584,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "delete_vendor": {
-        await cleanupEntityArtifacts(supabase, "vendor", body.id);
-        const { error } = await supabase
-          .from("maintenance_vendors")
-          .delete()
-          .eq("id", body.id);
-        if (error) {
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, "vendor", body.id),
+          supabase.from("maintenance_vendors").delete().eq("id", body.id),
+        ]);
+        if (delRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(delRes.error.message) },
             { status: 400 }
           );
         }
@@ -1803,14 +1881,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "delete_academic_class": {
-        await cleanupEntityArtifacts(supabase, "class", body.id);
-        const { error } = await supabase
-          .from("academic_classes")
-          .delete()
-          .eq("id", body.id);
-        if (error) {
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, "class", body.id),
+          supabase.from("academic_classes").delete().eq("id", body.id),
+        ]);
+        if (delRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(delRes.error.message) },
             { status: 400 }
           );
         }
@@ -1865,14 +1942,13 @@ export async function POST(request: NextRequest) {
             { status: 409 }
           );
         }
-        await cleanupEntityArtifacts(supabase, "office_kit", body.id);
-        const { error } = await supabase
-          .from("office_kit_items")
-          .delete()
-          .eq("id", body.id);
-        if (error) {
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, "office_kit", body.id),
+          supabase.from("office_kit_items").delete().eq("id", body.id),
+        ]);
+        if (delRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(delRes.error.message) },
             { status: 400 }
           );
         }
@@ -1891,19 +1967,19 @@ export async function POST(request: NextRequest) {
           body.data,
           false
         );
-        const { error: insertErr } = await supabase
-          .from("office_kit_loans")
-          .insert(cleanData);
-        if (insertErr) {
+        const [insRes] = await Promise.all([
+          supabase.from("office_kit_loans").insert(cleanData),
+          supabase
+            .from("office_kit_items")
+            .update({ status: "Dipinjam", updated_at: nowIso })
+            .in("id", itemIds),
+        ]);
+        if (insRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(insertErr.message) },
+            { error: formatSafeDbError(insRes.error.message) },
             { status: 400 }
           );
         }
-        await supabase
-          .from("office_kit_items")
-          .update({ status: "Dipinjam", updated_at: nowIso })
-          .in("id", itemIds);
         return NextResponse.json({ ok: true });
       }
       case "checkin_office_kit_loan": {
@@ -1912,59 +1988,61 @@ export async function POST(request: NextRequest) {
           body.data,
           true
         );
-        const { error: updErr } = await supabase
-          .from("office_kit_loans")
-          .update({ ...cleanData, updated_at: nowIso })
-          .eq("id", body.id);
-        if (updErr) {
-          return NextResponse.json(
-            { error: formatSafeDbError(updErr.message) },
-            { status: 400 }
-          );
-        }
         const damagedSet = new Set(
           Array.isArray(body.damagedItemIds) ? body.damagedItemIds : []
         );
         const itemIds = Array.isArray(body.itemIds) ? body.itemIds : [];
         const okIds = itemIds.filter((id) => !damagedSet.has(id));
         const damagedIds = itemIds.filter((id) => damagedSet.has(id));
-        if (okIds.length > 0) {
-          await supabase
-            .from("office_kit_items")
-            .update({ status: "Tersedia", updated_at: nowIso })
-            .in("id", okIds);
-        }
-        if (damagedIds.length > 0) {
-          await supabase
-            .from("office_kit_items")
-            .update({
-              status: "Perbaikan",
-              condition: "Rusak Ringan",
-              updated_at: nowIso,
-            })
-            .in("id", damagedIds);
+
+        const [updRes] = await Promise.all([
+          supabase
+            .from("office_kit_loans")
+            .update({ ...cleanData, updated_at: nowIso })
+            .eq("id", body.id),
+          okIds.length > 0
+            ? supabase
+                .from("office_kit_items")
+                .update({ status: "Tersedia", updated_at: nowIso })
+                .in("id", okIds)
+            : Promise.resolve(null),
+          damagedIds.length > 0
+            ? supabase
+                .from("office_kit_items")
+                .update({
+                  status: "Perbaikan",
+                  condition: "Rusak Ringan",
+                  updated_at: nowIso,
+                })
+                .in("id", damagedIds)
+            : Promise.resolve(null),
+        ]);
+        if (updRes.error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(updRes.error.message) },
+            { status: 400 }
+          );
         }
         return NextResponse.json({ ok: true });
       }
       case "delete_office_kit_loan": {
-        const { data: existingLoan } = await supabase
-          .from("office_kit_loans")
-          .select("id, status, kit_item_ids")
-          .eq("id", body.id)
-          .maybeSingle();
-
-        await cleanupEntityArtifacts(supabase, "office_loan", body.id);
-        const { error } = await supabase
-          .from("office_kit_loans")
-          .delete()
-          .eq("id", body.id);
-        if (error) {
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, "office_loan", body.id),
+          supabase
+            .from("office_kit_loans")
+            .delete()
+            .eq("id", body.id)
+            .select("id, status, kit_item_ids")
+            .maybeSingle(),
+        ]);
+        if (delRes.error) {
           return NextResponse.json(
-            { error: formatSafeDbError(error.message) },
+            { error: formatSafeDbError(delRes.error.message) },
             { status: 400 }
           );
         }
 
+        const existingLoan = delRes.data;
         if (
           existingLoan?.status === "Dipinjam" &&
           Array.isArray(existingLoan.kit_item_ids) &&
@@ -1979,6 +2057,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       case "insert_note": {
+        artifactsTablesMissingUntil = 0;
         const entityType = String(body.data?.entity_type || "");
         if (
           DATA_MASTER_ENTITY_TYPES.has(entityType) &&

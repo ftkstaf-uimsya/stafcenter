@@ -1028,6 +1028,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       shouldRefreshAfter = false,
       noticeType: ToastNotice["type"] = "success"
     ) => {
+      if (!shouldRefreshAfter) {
+        notify(noticeType, successTitle, successMessage);
+      }
       try {
         const res = await fetch("/api/sarpras/mutate", {
           method: "POST",
@@ -1046,8 +1049,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         }
         if (shouldRefreshAfter) {
           await refreshFromSupabase();
+          notify(noticeType, successTitle, successMessage);
         }
-        notify(noticeType, successTitle, successMessage);
       } catch {
         notify(
           "error",
@@ -1066,7 +1069,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       payload: Record<string, unknown>,
       actionLabel: string,
       successTitle: string,
-      successMessage: string
+      successMessage: string,
+      onSuccess?: () => void
     ): Promise<ActionResult> => {
       try {
         const res = await fetch("/api/sarpras/mutate", {
@@ -1081,7 +1085,11 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           notify("error", `Gagal ${actionLabel}`, errMsg);
           return { ok: false, error: errMsg };
         }
-        await refreshFromSupabase();
+        if (onSuccess) {
+          onSuccess();
+        } else {
+          await refreshFromSupabase();
+        }
         notify("info", successTitle, successMessage);
         return { ok: true };
       } catch {
@@ -1194,13 +1202,17 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = buildings.find((b) => b.id === id);
+      const applyLocalDelete = () => {
+        setBuildings((prev) => prev.filter((b) => b.id !== id));
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_building", id },
           "Menghapus Gedung",
           "Gedung Dihapus dari Supabase",
-          `Gedung ${target?.code || ""} telah dihapus dari database.`
+          `Gedung ${target?.code || ""} telah dihapus dari database.`,
+          applyLocalDelete
         );
       }
 
@@ -1211,7 +1223,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: errMsg };
       }
 
-      setBuildings((prev) => prev.filter((b) => b.id !== id));
+      applyLocalDelete();
       notify(
         "info",
         "Gedung Dihapus",
@@ -1336,56 +1348,61 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       const mode = options?.mode || "archive";
       const forceActive = Boolean(options?.forceActive);
       const target = rooms.find((r) => r.id === id);
+      const label = target
+        ? `Ruang ${target.code} (${target.name}) [Dihapus]`
+        : "Ruangan [Dihapus]";
+
+      const applyLocalDelete = () => {
+        setRooms((prev) => prev.filter((item) => item.id !== id));
+        setAssets((prev) =>
+          prev.map((a) => (a.room_id === id ? { ...a, room_id: null } : a))
+        );
+        if (mode === "cascade") {
+          setBookings((prev) =>
+            prev
+              .filter((b) => !(b.room_id === id && !b.asset_id))
+              .map((b) =>
+                b.room_id === id && b.asset_id
+                  ? { ...b, room_id: null, target_type: "Alat" }
+                  : b
+              )
+          );
+          setMaintenanceLogs((prev) => prev.filter((m) => m.room_id !== id));
+        } else {
+          setBookings((prev) =>
+            prev.map((b) =>
+              b.room_id === id
+                ? {
+                    ...b,
+                    room_id: null,
+                    target_type: b.asset_id ? "Alat" : b.target_type,
+                    deleted_target_label: label,
+                  }
+                : b
+            )
+          );
+          setMaintenanceLogs((prev) =>
+            prev.map((m) =>
+              m.room_id === id
+                ? { ...m, room_id: null, deleted_target_label: label }
+                : m
+            )
+          );
+        }
+        removeEntityArtifactsLocal("room", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_room", id, mode, forceActive },
           "Menghapus Ruangan",
           "Ruangan Dihapus dari Supabase",
-          `Ruang ${target?.code || ""} telah dihapus dari database.`
+          `Ruang ${target?.code || ""} telah dihapus dari database.`,
+          applyLocalDelete
         );
       }
 
-      const label = target
-        ? `Ruang ${target.code} (${target.name}) [Dihapus]`
-        : "Ruangan [Dihapus]";
-      setRooms((prev) => prev.filter((item) => item.id !== id));
-      setAssets((prev) =>
-        prev.map((a) => (a.room_id === id ? { ...a, room_id: null } : a))
-      );
-      if (mode === "cascade") {
-        setBookings((prev) =>
-          prev
-            .filter((b) => !(b.room_id === id && !b.asset_id))
-            .map((b) =>
-              b.room_id === id && b.asset_id
-                ? { ...b, room_id: null, target_type: "Alat" }
-                : b
-            )
-        );
-        setMaintenanceLogs((prev) => prev.filter((m) => m.room_id !== id));
-      } else {
-        setBookings((prev) =>
-          prev.map((b) =>
-            b.room_id === id
-              ? {
-                  ...b,
-                  room_id: null,
-                  target_type: b.asset_id ? "Alat" : b.target_type,
-                  deleted_target_label: label,
-                }
-              : b
-          )
-        );
-        setMaintenanceLogs((prev) =>
-          prev.map((m) =>
-            m.room_id === id
-              ? { ...m, room_id: null, deleted_target_label: label }
-              : m
-          )
-        );
-      }
-      removeEntityArtifactsLocal("room", id);
+      applyLocalDelete();
 
       notify(
         "info",
@@ -1671,57 +1688,62 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       const mode = options?.mode || "archive";
       const forceActive = Boolean(options?.forceActive);
       const target = assets.find((a) => a.id === id);
+      const label = target
+        ? `Aset ${target.inventory_code} (${target.name}) [Dihapus]`
+        : "Aset [Dihapus]";
+
+      const applyLocalDelete = () => {
+        setAssets((prev) => prev.filter((item) => item.id !== id));
+        if (mode === "cascade") {
+          setBookings((prev) =>
+            prev
+              .filter((b) => !(b.asset_id === id && !b.room_id))
+              .map((b) =>
+                b.asset_id === id && b.room_id
+                  ? { ...b, asset_id: null, target_type: "Ruangan" }
+                  : b
+              )
+          );
+          setMaintenanceLogs((prev) =>
+            prev
+              .filter((m) => !(m.asset_id === id && !m.room_id))
+              .map((m) => (m.asset_id === id ? { ...m, asset_id: null } : m))
+          );
+        } else {
+          setBookings((prev) =>
+            prev.map((b) =>
+              b.asset_id === id
+                ? {
+                    ...b,
+                    asset_id: null,
+                    target_type: b.room_id ? "Ruangan" : b.target_type,
+                    deleted_target_label: label,
+                  }
+                : b
+            )
+          );
+          setMaintenanceLogs((prev) =>
+            prev.map((m) =>
+              m.asset_id === id
+                ? { ...m, asset_id: null, deleted_target_label: label }
+                : m
+            )
+          );
+        }
+        removeEntityArtifactsLocal("asset", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_asset", id, mode, forceActive },
           "Menghapus Aset",
           "Aset Dihapus dari Supabase",
-          `Aset ${target?.inventory_code || ""} dihapus dari database.`
+          `Aset ${target?.inventory_code || ""} dihapus dari database.`,
+          applyLocalDelete
         );
       }
 
-      const label = target
-        ? `Aset ${target.inventory_code} (${target.name}) [Dihapus]`
-        : "Aset [Dihapus]";
-      setAssets((prev) => prev.filter((item) => item.id !== id));
-      if (mode === "cascade") {
-        setBookings((prev) =>
-          prev
-            .filter((b) => !(b.asset_id === id && !b.room_id))
-            .map((b) =>
-              b.asset_id === id && b.room_id
-                ? { ...b, asset_id: null, target_type: "Ruangan" }
-                : b
-            )
-        );
-        setMaintenanceLogs((prev) =>
-          prev
-            .filter((m) => !(m.asset_id === id && !m.room_id))
-            .map((m) => (m.asset_id === id ? { ...m, asset_id: null } : m))
-        );
-      } else {
-        setBookings((prev) =>
-          prev.map((b) =>
-            b.asset_id === id
-              ? {
-                  ...b,
-                  asset_id: null,
-                  target_type: b.room_id ? "Ruangan" : b.target_type,
-                  deleted_target_label: label,
-                }
-              : b
-          )
-        );
-        setMaintenanceLogs((prev) =>
-          prev.map((m) =>
-            m.asset_id === id
-              ? { ...m, asset_id: null, deleted_target_label: label }
-              : m
-          )
-        );
-      }
-      removeEntityArtifactsLocal("asset", id);
+      applyLocalDelete();
 
       notify(
         "info",
@@ -1947,27 +1969,31 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = bookings.find((b) => b.id === id);
+      const applyLocalDelete = () => {
+        setBookings((prev) => prev.filter((item) => item.id !== id));
+        if (target?.status === "Sedang Dipinjam" && target.room_id) {
+          setRooms((prev) =>
+            prev.map((r) =>
+              r.id === target.room_id && r.status === "Digunakan"
+                ? { ...r, status: "Tersedia" }
+                : r
+            )
+          );
+        }
+        removeEntityArtifactsLocal("booking", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_booking", id },
           "Menghapus Peminjaman",
           "Tiket Peminjaman Dihapus",
-          `Tiket ${target?.booking_code || ""} telah dihapus dari database.`
+          `Tiket ${target?.booking_code || ""} telah dihapus dari database.`,
+          applyLocalDelete
         );
       }
 
-      setBookings((prev) => prev.filter((item) => item.id !== id));
-      if (target?.status === "Sedang Dipinjam" && target.room_id) {
-        setRooms((prev) =>
-          prev.map((r) =>
-            r.id === target.room_id && r.status === "Digunakan"
-              ? { ...r, status: "Tersedia" }
-              : r
-          )
-        );
-      }
-      removeEntityArtifactsLocal("booking", id);
+      applyLocalDelete();
       notify(
         "info",
         "Tiket Peminjaman Dihapus",
@@ -2211,62 +2237,66 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = maintenanceLogs.find((m) => m.id === id);
+      const applyLocalDelete = () => {
+        const remaining = maintenanceLogs.filter((m) => m.id !== id);
+        setMaintenanceLogs(remaining);
+        if (target?.asset_id) {
+          const openForAsset = remaining.filter(
+            (m) =>
+              m.asset_id === target.asset_id && m.status !== "Selesai Diperbaiki"
+          );
+          const hasHeavy = openForAsset.some(
+            (m) => m.damage_severity === "Rusak Berat"
+          );
+          const hasLight = openForAsset.some(
+            (m) => m.damage_severity === "Rusak Ringan"
+          );
+          setAssets((prev) =>
+            prev.map((a) => {
+              if (a.id !== target.asset_id) return a;
+              if (hasHeavy) return { ...a, condition: "Rusak Berat" };
+              if (hasLight) return { ...a, condition: "Rusak Ringan" };
+              if (
+                a.condition === "Rusak Berat" ||
+                a.condition === "Rusak Ringan"
+              ) {
+                return { ...a, condition: "Baik" };
+              }
+              return a;
+            })
+          );
+        }
+        if (target?.room_id) {
+          const hasUrgent = remaining.some(
+            (m) =>
+              m.room_id === target.room_id &&
+              m.status !== "Selesai Diperbaiki" &&
+              m.priority === "Tinggi/Darurat"
+          );
+          if (!hasUrgent) {
+            setRooms((prev) =>
+              prev.map((r) =>
+                r.id === target.room_id && r.status === "Perbaikan"
+                  ? { ...r, status: "Tersedia" }
+                  : r
+              )
+            );
+          }
+        }
+        removeEntityArtifactsLocal("maintenance", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_maintenance", id },
           "Menghapus Tiket Kerusakan",
           "Tiket Kerusakan Dihapus",
-          `Tiket ${target?.ticket_code || ""} telah dihapus dari database.`
+          `Tiket ${target?.ticket_code || ""} telah dihapus dari database.`,
+          applyLocalDelete
         );
       }
 
-      const remaining = maintenanceLogs.filter((m) => m.id !== id);
-      setMaintenanceLogs(remaining);
-      if (target?.asset_id) {
-        const openForAsset = remaining.filter(
-          (m) =>
-            m.asset_id === target.asset_id && m.status !== "Selesai Diperbaiki"
-        );
-        const hasHeavy = openForAsset.some(
-          (m) => m.damage_severity === "Rusak Berat"
-        );
-        const hasLight = openForAsset.some(
-          (m) => m.damage_severity === "Rusak Ringan"
-        );
-        setAssets((prev) =>
-          prev.map((a) => {
-            if (a.id !== target.asset_id) return a;
-            if (hasHeavy) return { ...a, condition: "Rusak Berat" };
-            if (hasLight) return { ...a, condition: "Rusak Ringan" };
-            if (
-              a.condition === "Rusak Berat" ||
-              a.condition === "Rusak Ringan"
-            ) {
-              return { ...a, condition: "Baik" };
-            }
-            return a;
-          })
-        );
-      }
-      if (target?.room_id) {
-        const hasUrgent = remaining.some(
-          (m) =>
-            m.room_id === target.room_id &&
-            m.status !== "Selesai Diperbaiki" &&
-            m.priority === "Tinggi/Darurat"
-        );
-        if (!hasUrgent) {
-          setRooms((prev) =>
-            prev.map((r) =>
-              r.id === target.room_id && r.status === "Perbaikan"
-                ? { ...r, status: "Tersedia" }
-                : r
-            )
-          );
-        }
-      }
-      removeEntityArtifactsLocal("maintenance", id);
+      applyLocalDelete();
       notify(
         "info",
         "Tiket Kerusakan Dihapus",
@@ -2364,21 +2394,25 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = consumables.find((c) => c.id === id);
+      const applyLocalDelete = () => {
+        setConsumables((prev) => prev.filter((item) => item.id !== id));
+        setConsumableTransactions((prev) =>
+          prev.filter((tx) => tx.consumable_id !== id)
+        );
+        removeEntityArtifactsLocal("consumable", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_consumable", id },
           "Menghapus Item BHP",
           "Item BHP Dihapus dari Supabase",
-          `${target?.code || ""} (${target?.name || ""}) telah dihapus dari database.`
+          `${target?.code || ""} (${target?.name || ""}) telah dihapus dari database.`,
+          applyLocalDelete
         );
       }
 
-      setConsumables((prev) => prev.filter((item) => item.id !== id));
-      setConsumableTransactions((prev) =>
-        prev.filter((tx) => tx.consumable_id !== id)
-      );
-      removeEntityArtifactsLocal("consumable", id);
+      applyLocalDelete();
       notify(
         "info",
         "Item BHP Dihapus",
@@ -2465,7 +2499,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           "Mencatat Mutasi Stok",
           `Mutasi Stok (${payload.transaction_type}) Tersimpan`,
           `${payload.quantity} ${target.unit} ${target.name} berhasil dicatat ke database.`,
-          true
+          false
         );
         return { ok: true };
       }
@@ -2732,21 +2766,25 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = lecturers.find((l) => l.id === id);
+      const applyLocalDelete = () => {
+        setLecturers((prev) => prev.filter((item) => item.id !== id));
+        setCourses((prev) =>
+          prev.map((c) => (c.lecturer_id === id ? { ...c, lecturer_id: null } : c))
+        );
+        removeEntityArtifactsLocal("lecturer", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_lecturer", id },
           "Menghapus Data Dosen",
           "Data Dosen Dihapus",
-          `Dosen ${target?.full_name || ""} telah dihapus dari database.`
+          `Dosen ${target?.full_name || ""} telah dihapus dari database.`,
+          applyLocalDelete
         );
       }
 
-      setLecturers((prev) => prev.filter((item) => item.id !== id));
-      setCourses((prev) =>
-        prev.map((c) => (c.lecturer_id === id ? { ...c, lecturer_id: null } : c))
-      );
-      removeEntityArtifactsLocal("lecturer", id);
+      applyLocalDelete();
       notify(
         "info",
         "Data Dosen Dihapus",
@@ -2859,18 +2897,22 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = courses.find((c) => c.id === id);
+      const applyLocalDelete = () => {
+        setCourses((prev) => prev.filter((item) => item.id !== id));
+        removeEntityArtifactsLocal("course", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_course", id },
           "Menghapus Mata Kuliah",
           "Mata Kuliah Dihapus",
-          `${target?.code || ""} (${target?.name || ""}) telah dihapus.`
+          `${target?.code || ""} (${target?.name || ""}) telah dihapus.`,
+          applyLocalDelete
         );
       }
 
-      setCourses((prev) => prev.filter((item) => item.id !== id));
-      removeEntityArtifactsLocal("course", id);
+      applyLocalDelete();
       notify(
         "info",
         "Mata Kuliah Dihapus",
@@ -2984,18 +3026,22 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = campusOfficials.find((o) => o.id === id);
+      const applyLocalDelete = () => {
+        setCampusOfficials((prev) => prev.filter((item) => item.id !== id));
+        removeEntityArtifactsLocal("official", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_official", id },
           "Menghapus Pengurus Kampus",
           "Pengurus Kampus Dihapus",
-          `${target?.full_name || ""} telah dihapus dari Data Master.`
+          `${target?.full_name || ""} telah dihapus dari Data Master.`,
+          applyLocalDelete
         );
       }
 
-      setCampusOfficials((prev) => prev.filter((item) => item.id !== id));
-      removeEntityArtifactsLocal("official", id);
+      applyLocalDelete();
       notify(
         "info",
         "Pengurus Kampus Dihapus",
@@ -3106,39 +3152,43 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = campusUnits.find((u) => u.id === id);
+      const applyLocalDelete = () => {
+        setCampusUnits((prev) =>
+          prev
+            .filter((item) => item.id !== id)
+            .map((item) =>
+              item.parent_unit_id === id ? { ...item, parent_unit_id: null } : item
+            )
+        );
+        setLecturers((prev) =>
+          prev.map((l) => (l.unit_id === id ? { ...l, unit_id: null } : l))
+        );
+        setCourses((prev) =>
+          prev.map((c) => (c.unit_id === id ? { ...c, unit_id: null } : c))
+        );
+        setCampusOfficials((prev) =>
+          prev.map((o) => (o.unit_id === id ? { ...o, unit_id: null } : o))
+        );
+        setBookings((prev) =>
+          prev.map((b) => (b.unit_id === id ? { ...b, unit_id: null } : b))
+        );
+        setConsumableTransactions((prev) =>
+          prev.map((t) => (t.unit_id === id ? { ...t, unit_id: null } : t))
+        );
+        removeEntityArtifactsLocal("unit", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_campus_unit", id },
           "Menghapus Unit Kampus",
           "Unit Kampus Dihapus",
-          `${target?.name || ""} telah dihapus dari Data Master.`
+          `${target?.name || ""} telah dihapus dari Data Master.`,
+          applyLocalDelete
         );
       }
 
-      setCampusUnits((prev) =>
-        prev
-          .filter((item) => item.id !== id)
-          .map((item) =>
-            item.parent_unit_id === id ? { ...item, parent_unit_id: null } : item
-          )
-      );
-      setLecturers((prev) =>
-        prev.map((l) => (l.unit_id === id ? { ...l, unit_id: null } : l))
-      );
-      setCourses((prev) =>
-        prev.map((c) => (c.unit_id === id ? { ...c, unit_id: null } : c))
-      );
-      setCampusOfficials((prev) =>
-        prev.map((o) => (o.unit_id === id ? { ...o, unit_id: null } : o))
-      );
-      setBookings((prev) =>
-        prev.map((b) => (b.unit_id === id ? { ...b, unit_id: null } : b))
-      );
-      setConsumableTransactions((prev) =>
-        prev.map((t) => (t.unit_id === id ? { ...t, unit_id: null } : t))
-      );
-      removeEntityArtifactsLocal("unit", id);
+      applyLocalDelete();
       notify(
         "info",
         "Unit Kampus Dihapus",
@@ -3249,21 +3299,25 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = maintenanceVendors.find((v) => v.id === id);
+      const applyLocalDelete = () => {
+        setMaintenanceVendors((prev) => prev.filter((item) => item.id !== id));
+        setMaintenanceLogs((prev) =>
+          prev.map((m) => (m.vendor_id === id ? { ...m, vendor_id: null } : m))
+        );
+        removeEntityArtifactsLocal("vendor", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_vendor", id },
           "Menghapus Teknisi / Vendor",
           "Teknisi / Vendor Dihapus",
-          `${target?.name || ""} telah dihapus dari Data Master.`
+          `${target?.name || ""} telah dihapus dari Data Master.`,
+          applyLocalDelete
         );
       }
 
-      setMaintenanceVendors((prev) => prev.filter((item) => item.id !== id));
-      setMaintenanceLogs((prev) =>
-        prev.map((m) => (m.vendor_id === id ? { ...m, vendor_id: null } : m))
-      );
-      removeEntityArtifactsLocal("vendor", id);
+      applyLocalDelete();
       notify(
         "info",
         "Teknisi / Vendor Dihapus",
@@ -3367,13 +3421,17 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = assetCategories.find((c) => c.id === id);
+      const applyLocalDelete = () => {
+        setAssetCategories((prev) => prev.filter((item) => item.id !== id));
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_asset_category", id },
           "Menghapus Kategori Aset",
           "Kategori Aset Dihapus",
-          `Kategori ${target?.code || ""} telah dihapus.`
+          `Kategori ${target?.code || ""} telah dihapus.`,
+          applyLocalDelete
         );
       }
 
@@ -3386,7 +3444,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: err };
       }
 
-      setAssetCategories((prev) => prev.filter((item) => item.id !== id));
+      applyLocalDelete();
       notify(
         "info",
         "Kategori Aset Dihapus",
@@ -3490,22 +3548,26 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = fundingSources.find((f) => f.id === id);
+      const applyLocalDelete = () => {
+        setFundingSources((prev) => prev.filter((item) => item.id !== id));
+        setAssets((prev) =>
+          prev.map((a) =>
+            a.funding_source_id === id ? { ...a, funding_source_id: null } : a
+          )
+        );
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_funding_source", id },
           "Menghapus Sumber Dana",
           "Sumber Dana Dihapus",
-          `Sumber dana ${target?.name || ""} telah dihapus.`
+          `Sumber dana ${target?.name || ""} telah dihapus.`,
+          applyLocalDelete
         );
       }
 
-      setFundingSources((prev) => prev.filter((item) => item.id !== id));
-      setAssets((prev) =>
-        prev.map((a) =>
-          a.funding_source_id === id ? { ...a, funding_source_id: null } : a
-        )
-      );
+      applyLocalDelete();
       notify(
         "info",
         "Sumber Dana Dihapus",
@@ -3610,13 +3672,17 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = consumableCategories.find((c) => c.id === id);
+      const applyLocalDelete = () => {
+        setConsumableCategories((prev) => prev.filter((item) => item.id !== id));
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_consumable_category", id },
           "Menghapus Kategori BHP",
           "Kategori BHP Dihapus",
-          `Kategori BHP ${target?.name || ""} telah dihapus.`
+          `Kategori BHP ${target?.name || ""} telah dihapus.`,
+          applyLocalDelete
         );
       }
 
@@ -3629,7 +3695,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: err };
       }
 
-      setConsumableCategories((prev) => prev.filter((item) => item.id !== id));
+      applyLocalDelete();
       notify(
         "info",
         "Kategori BHP Dihapus",
@@ -3735,13 +3801,17 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = consumableUnits.find((u) => u.id === id);
+      const applyLocalDelete = () => {
+        setConsumableUnits((prev) => prev.filter((item) => item.id !== id));
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_consumable_unit", id },
           "Menghapus Satuan BHP",
           "Satuan BHP Dihapus",
-          `Satuan ${target?.name || ""} telah dihapus.`
+          `Satuan ${target?.name || ""} telah dihapus.`,
+          applyLocalDelete
         );
       }
 
@@ -3754,7 +3824,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: err };
       }
 
-      setConsumableUnits((prev) => prev.filter((item) => item.id !== id));
+      applyLocalDelete();
       notify(
         "info",
         "Satuan BHP Dihapus",
@@ -3965,24 +4035,28 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = academicClasses.find((c) => c.id === id);
+      const applyLocalDelete = () => {
+        setAcademicClasses((prev) => prev.filter((item) => item.id !== id));
+        setOfficeKitLoans((prev) =>
+          prev.map((l) => (l.class_id === id ? { ...l, class_id: null } : l))
+        );
+        setBookings((prev) =>
+          prev.map((b) => (b.class_id === id ? { ...b, class_id: null } : b))
+        );
+        removeEntityArtifactsLocal("class", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_academic_class", id },
           "Menghapus Data Kelas",
           "Data Kelas Dihapus",
-          `Kelas ${target?.class_code || ""} telah dihapus dari Data Master.`
+          `Kelas ${target?.class_code || ""} telah dihapus dari Data Master.`,
+          applyLocalDelete
         );
       }
 
-      setAcademicClasses((prev) => prev.filter((item) => item.id !== id));
-      setOfficeKitLoans((prev) =>
-        prev.map((l) => (l.class_id === id ? { ...l, class_id: null } : l))
-      );
-      setBookings((prev) =>
-        prev.map((b) => (b.class_id === id ? { ...b, class_id: null } : b))
-      );
-      removeEntityArtifactsLocal("class", id);
+      applyLocalDelete();
       notify(
         "info",
         "Data Kelas Dihapus",
@@ -4121,17 +4195,22 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         };
       }
 
+      const applyLocalDelete = () => {
+        setOfficeKitItems((prev) => prev.filter((item) => item.id !== id));
+        removeEntityArtifactsLocal("office_kit", id);
+      };
+
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_office_kit_item", id },
           "Menghapus Barang Kantor Staf",
           "Barang Kantor Staf Dihapus",
-          `${target?.kit_code || ""} telah dihapus dari katalog.`
+          `${target?.kit_code || ""} telah dihapus dari katalog.`,
+          applyLocalDelete
         );
       }
 
-      setOfficeKitItems((prev) => prev.filter((item) => item.id !== id));
-      removeEntityArtifactsLocal("office_kit", id);
+      applyLocalDelete();
       notify(
         "info",
         "Barang Kantor Staf Dihapus",
@@ -4383,28 +4462,32 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = officeKitLoans.find((l) => l.id === id);
+      const applyLocalDelete = () => {
+        setOfficeKitLoans((prev) => prev.filter((item) => item.id !== id));
+        if (target?.status === "Dipinjam" && target.kit_item_ids.length > 0) {
+          const idSet = new Set(target.kit_item_ids);
+          setOfficeKitItems((prev) =>
+            prev.map((item) =>
+              idSet.has(item.id) && item.status === "Dipinjam"
+                ? { ...item, status: "Tersedia" }
+                : item
+            )
+          );
+        }
+        removeEntityArtifactsLocal("office_loan", id);
+      };
 
       if (isLiveSupabase && authUser) {
         return sendConfirmedMutation(
           { action: "delete_office_kit_loan", id },
           "Menghapus Riwayat Sirkulasi",
           "Riwayat Sirkulasi Dihapus",
-          `Tiket ${target?.loan_code || ""} telah dihapus dari daftar.`
+          `Tiket ${target?.loan_code || ""} telah dihapus dari daftar.`,
+          applyLocalDelete
         );
       }
 
-      setOfficeKitLoans((prev) => prev.filter((item) => item.id !== id));
-      if (target?.status === "Dipinjam" && target.kit_item_ids.length > 0) {
-        const idSet = new Set(target.kit_item_ids);
-        setOfficeKitItems((prev) =>
-          prev.map((item) =>
-            idSet.has(item.id) && item.status === "Dipinjam"
-              ? { ...item, status: "Tersedia" }
-              : item
-          )
-        );
-      }
-      removeEntityArtifactsLocal("office_loan", id);
+      applyLocalDelete();
       notify(
         "info",
         "Riwayat Sirkulasi Dihapus",

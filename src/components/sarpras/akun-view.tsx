@@ -217,6 +217,12 @@ export function AkunView() {
           setFormError(data.error || "Gagal memperbarui akun staf.");
           return;
         }
+        if (data.account) {
+          const updated = data.account as StaffAccount;
+          setAccounts((prev) =>
+            prev.map((acc) => (acc.id === editingAccount.id ? updated : acc))
+          );
+        }
         notify(
           "success",
           "Akun Staf Diperbarui",
@@ -239,6 +245,10 @@ export function AkunView() {
           setFormError(data.error || "Gagal menambah akun staf.");
           return;
         }
+        if (data.account) {
+          const created = data.account as StaffAccount;
+          setAccounts((prev) => [...prev, created]);
+        }
         notify(
           "success",
           "Akun Staf Ditambahkan",
@@ -246,7 +256,6 @@ export function AkunView() {
         );
       }
       setModalOpen(false);
-      await loadAccounts();
     } catch {
       setFormError("Terjadi gangguan jaringan saat menyimpan akun.");
     } finally {
@@ -258,7 +267,9 @@ export function AkunView() {
     if (!deletingAccount) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/admin/accounts/${deletingAccount.id}`, {
+      const targetId = deletingAccount.id;
+      const targetUsername = deletingAccount.username;
+      const res = await fetch(`/api/admin/accounts/${targetId}`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -266,13 +277,13 @@ export function AkunView() {
         notify("error", "Gagal Menghapus Akun", data.error || "Operasi ditolak.");
         return;
       }
+      setAccounts((prev) => prev.filter((acc) => acc.id !== targetId));
       notify(
         "info",
         "Akun Staf Dihapus",
-        `Akun "${deletingAccount.username}" telah dihapus permanen.`
+        `Akun "${targetUsername}" telah dihapus permanen.`
       );
       setDeletingAccount(null);
-      await loadAccounts();
     } catch {
       notify("error", "Gagal Menghapus Akun", "Koneksi ke server terputus.");
     } finally {

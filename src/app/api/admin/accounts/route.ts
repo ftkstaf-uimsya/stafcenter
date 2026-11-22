@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getVerifiedServerSession,
+  invalidateStaffSessionCache,
   verifySameOriginRequest,
 } from "@/lib/auth/session";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
@@ -131,6 +132,9 @@ export async function POST(request: NextRequest) {
     }
 
     const account = Array.isArray(data) ? data[0] : data;
+    if (account?.id) {
+      invalidateStaffSessionCache(String(account.id));
+    }
     return NextResponse.json({ account }, { status: 201 });
   } catch {
     return NextResponse.json(

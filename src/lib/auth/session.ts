@@ -5,6 +5,7 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 export const SESSION_COOKIE_NAME = "stafcenter_session";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const SESSION_VERIFY_TTL_MS = 30 * 1000;
 
 export interface SessionStaffPayload {
   id: string;
@@ -13,6 +14,19 @@ export interface SessionStaffPayload {
   email: string;
   role: StaffRole;
   exp: number;
+}
+
+const verifiedSessionCache = new Map<
+  string,
+  { data: Omit<SessionStaffPayload, "exp">; expiresAt: number }
+>();
+
+export function invalidateStaffSessionCache(staffId?: string): void {
+  if (staffId) {
+    verifiedSessionCache.delete(staffId);
+  } else {
+    verifiedSessionCache.clear();
+  }
 }
 
 function getSigningSecret(): string {
@@ -135,6 +149,15 @@ export async function getVerifiedServerSession(): Promise<SessionStaffPayload | 
   const parsed = verifySessionToken(rawToken);
   if (!parsed) return null;
 
+  const now = Date.now();
+  const cached = verifiedSessionCache.get(parsed.id);
+  if (cached && now < cached.expiresAt) {
+    return {
+      ...cached.data,
+      exp: parsed.exp,
+    };
+  }
+
   const supabase = getSupabaseServerClient();
   if (!supabase) return null;
 
@@ -146,15 +169,25 @@ export async function getVerifiedServerSession(): Promise<SessionStaffPayload | 
     .maybeSingle();
 
   if (error || !data || !data.is_active) {
+    verifiedSessionCache.delete(parsed.id);
     return null;
   }
 
-  return {
+  const staffData: Omit<SessionStaffPayload, "exp"> = {
     id: data.id,
     username: data.username,
     fullName: data.full_name,
     email: data.email || "",
     role: data.role as StaffRole,
+  };
+
+  verifiedSessionCache.set(parsed.id, {
+    data: staffData,
+    expiresAt: now + SESSION_VERIFY_TTL_MS,
+  });
+
+  return {
+    ...staffData,
     exp: parsed.exp,
   };
 }

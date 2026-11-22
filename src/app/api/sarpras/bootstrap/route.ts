@@ -21,7 +21,29 @@ export async function GET() {
     );
   }
 
-  const [bRes, rRes, aRes, bkRes, mRes, cRes, ctRes] = await Promise.all([
+  const [
+    bRes,
+    rRes,
+    aRes,
+    bkRes,
+    mRes,
+    cRes,
+    ctRes,
+    notesRes,
+    attachRes,
+    lecturersRes,
+    coursesRes,
+    officialsRes,
+    unitsRes,
+    vendorsRes,
+    assetCategoriesRes,
+    fundingSourcesRes,
+    consumableCategoriesRes,
+    consumableUnitsRes,
+    academicClassesRes,
+    officeKitItemsRes,
+    officeKitLoansRes,
+  ] = await Promise.all([
     supabase.from("buildings").select("*").order("code"),
     supabase.from("rooms").select("*").order("code"),
     supabase.from("assets").select("*").order("inventory_code"),
@@ -38,38 +60,6 @@ export async function GET() {
       .from("consumable_transactions")
       .select("*")
       .order("transaction_date", { ascending: false }),
-  ]);
-
-  const firstError =
-    bRes.error ||
-    rRes.error ||
-    aRes.error ||
-    bkRes.error ||
-    mRes.error ||
-    cRes.error ||
-    ctRes.error;
-
-  if (firstError) {
-    return NextResponse.json({ error: firstError.message }, { status: 500 });
-  }
-
-  // Ambil catatan, lampiran, dan Data Master secara opsional (tidak menggagalkan aplikasi bila migrasi 003/005/006 belum dijalankan)
-  const [
-    notesRes,
-    attachRes,
-    lecturersRes,
-    coursesRes,
-    officialsRes,
-    unitsRes,
-    vendorsRes,
-    assetCategoriesRes,
-    fundingSourcesRes,
-    consumableCategoriesRes,
-    consumableUnitsRes,
-    academicClassesRes,
-    officeKitItemsRes,
-    officeKitLoansRes,
-  ] = await Promise.all([
     supabase
       .from("sarpras_notes")
       .select("*")
@@ -94,6 +84,22 @@ export async function GET() {
       .select("*")
       .order("created_at", { ascending: false }),
   ]);
+
+  const firstError =
+    bRes.error ||
+    rRes.error ||
+    aRes.error ||
+    bkRes.error ||
+    mRes.error ||
+    cRes.error ||
+    ctRes.error;
+
+  if (firstError) {
+    return NextResponse.json(
+      { error: "Gagal mengambil data operasional Sarpras." },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json(
     {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getVerifiedServerSession,
+  invalidateStaffSessionCache,
   verifySameOriginRequest,
 } from "@/lib/auth/session";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
@@ -143,6 +144,7 @@ export async function PATCH(
     }
 
     const account = Array.isArray(data) ? data[0] : data;
+    invalidateStaffSessionCache(targetId);
     return NextResponse.json({ account }, { status: 200 });
   } catch {
     return NextResponse.json(
@@ -220,5 +222,6 @@ export async function DELETE(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  invalidateStaffSessionCache(targetId);
   return NextResponse.json({ ok: true }, { status: 200 });
 }
