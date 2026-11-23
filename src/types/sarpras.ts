@@ -416,6 +416,7 @@ export interface MaintenanceLog {
   ticket_code: string;
   asset_id: string | null;
   room_id: string | null;
+  office_kit_item_id?: string | null;
   deleted_target_label?: string | null;
   reporter_name: string;
   reporter_role: string;

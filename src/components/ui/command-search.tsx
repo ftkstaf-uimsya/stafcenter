@@ -12,6 +12,7 @@ import {
   HardHat,
   Landmark,
   Package,
+  RotateCcw,
   School,
   Search,
   UserCog,
@@ -26,7 +27,8 @@ interface SearchHit {
   code: string;
   title: string;
   meta: string;
-  href: string;
+  href?: string;
+  onAction?: () => void;
   icon: React.ReactNode;
 }
 
@@ -47,6 +49,8 @@ export function CommandSearch() {
     officeKitItems,
     officeKitLoans,
     canManageDataMaster,
+    isLiveSupabase,
+    resetToSeedData,
     commandSearchOpen,
     setCommandSearchOpen,
   } = useSarpras();
@@ -298,18 +302,26 @@ export function CommandSearch() {
     }
 
     for (const m of maintenanceLogs) {
+      const kit = m.office_kit_item_id
+        ? officeKitItems.find((k) => k.id === m.office_kit_item_id)
+        : null;
       if (
         !q ||
         m.ticket_code.toLowerCase().includes(q) ||
         m.issue_title.toLowerCase().includes(q) ||
-        m.reporter_name.toLowerCase().includes(q)
+        m.reporter_name.toLowerCase().includes(q) ||
+        (kit &&
+          (kit.kit_code.toLowerCase().includes(q) ||
+            kit.name.toLowerCase().includes(q)))
       ) {
         hits.push({
           id: `mnt-${m.id}`,
           category: "Pemeliharaan",
           code: m.ticket_code,
           title: m.issue_title,
-          meta: `${m.priority} • ${m.status}`,
+          meta: `${m.priority} • ${m.status}${
+            kit ? ` • Alat Kantor: ${kit.kit_code}` : ""
+          }`,
           href: `/sarpras/pemeliharaan?inspect=${m.id}`,
           icon: <Wrench className="w-4 h-4 text-red-700 dark:text-red-400" />,
         });
@@ -334,6 +346,24 @@ export function CommandSearch() {
       }
     }
 
+    if (
+      !q ||
+      "sinkron ulang database refresh reset".includes(q) ||
+      "database".includes(q)
+    ) {
+      hits.push({
+        id: "util-sync-db",
+        category: "Utilitas",
+        code: isLiveSupabase ? "SYNC" : "RESET",
+        title: isLiveSupabase ? "Sinkron Ulang Database" : "Reset Data Seed",
+        meta: isLiveSupabase
+          ? "Muat ulang seluruh data operasional terbaru dari PostgreSQL Supabase"
+          : "Kembalikan simulasi data awal kampus ke kondisi default",
+        onAction: () => resetToSeedData(),
+        icon: <RotateCcw className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
+      });
+    }
+
     return hits.slice(0, 12);
   }, [
     academicClasses,
@@ -344,12 +374,14 @@ export function CommandSearch() {
     canManageDataMaster,
     consumables,
     courses,
+    isLiveSupabase,
     lecturers,
     maintenanceLogs,
     maintenanceVendors,
     officeKitItems,
     officeKitLoans,
     query,
+    resetToSeedData,
     rooms,
   ]);
 
@@ -399,7 +431,11 @@ export function CommandSearch() {
                 type="button"
                 onClick={() => {
                   setCommandSearchOpen(false);
-                  router.push(item.href);
+                  if (item.onAction) {
+                    item.onAction();
+                  } else if (item.href) {
+                    router.push(item.href);
+                  }
                 }}
                 className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800/70 focus-visible:outline-none focus-visible:bg-sky-50 dark:focus-visible:bg-slate-800"
               >

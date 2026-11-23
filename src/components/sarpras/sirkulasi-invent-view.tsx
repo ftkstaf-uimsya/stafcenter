@@ -1,16 +1,20 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   AlertCircle,
   Cable,
   CheckCircle2,
   Clock,
   Edit3,
+  KanbanSquare,
   PackageCheck,
   Plus,
   RotateCcw,
+  Table2,
   Trash2,
+  Wrench,
 } from "lucide-react";
 import {
   useSarpras,
@@ -36,6 +40,7 @@ import {
   ColumnsTogglePopover,
   FilterPopover,
 } from "@/components/ui/filter-popover";
+import { KanbanBoard, KanbanColumnDef } from "@/components/ui/kanban-board";
 import { EntityDrawerSections } from "@/components/ui/entity-drawer-sections";
 import { ErrorStateView, LoadingStateView } from "@/components/ui/data-states";
 import { AssetConditionBadge } from "@/components/sarpras/status-badges";
@@ -100,6 +105,8 @@ export function SirkulasiInventView() {
     academicClasses,
     rooms,
     courses,
+    notes,
+    attachments,
     uiSimState,
     setUiSimState,
     addOfficeKitItem,
@@ -107,10 +114,12 @@ export function SirkulasiInventView() {
     deleteOfficeKitItem,
     checkoutOfficeKitLoan,
     checkinOfficeKitLoan,
+    reopenOfficeKitLoan,
     deleteOfficeKitLoan,
   } = useSarpras();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("loans");
+  const [viewMode, setViewMode] = useState<"board" | "table">("table");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterLoanStatus, setFilterLoanStatus] = useState("ALL");
   const [filterProdi, setFilterProdi] = useState("ALL");
@@ -271,7 +280,7 @@ export function SirkulasiInventView() {
     );
   }
 
-  const openCheckoutModal = () => {
+  const openCheckoutModal = (preselectedKitId?: string) => {
     const firstCls = activeClasses[0] || null;
     setSelectedClassId(firstCls?.id || "");
     setBorrowerType("representative");
@@ -279,7 +288,7 @@ export function SirkulasiInventView() {
     setBorrowerPhone(firstCls?.dpm_phone || "");
     setRoomId(firstCls?.default_room_id || rooms[0]?.id || "");
     setCourseName("");
-    setSelectedKitIds([]);
+    setSelectedKitIds(preselectedKitId ? [preselectedKitId] : []);
     setLoanDate(TODAY_ISO);
     setBorrowTime("08:00");
     setExpectedReturnTime("10:30");
@@ -351,11 +360,16 @@ export function SirkulasiInventView() {
     setCheckoutModalOpen(false);
   };
 
-  const openReturnModal = (loan: OfficeKitLoan) => {
+  const openReturnModal = (loan: OfficeKitLoan, preDamagedIds?: string[]) => {
     setReturningLoan(loan);
     setReturnNotes("");
-    setDamagedReturnIds([]);
+    setDamagedReturnIds(preDamagedIds || []);
   };
+
+  const getActiveLoanForKit = (kitId: string) =>
+    officeKitLoans.find(
+      (l) => l.status === "Dipinjam" && l.kit_item_ids.includes(kitId)
+    ) || null;
 
   const handleReturnSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -555,9 +569,15 @@ export function SirkulasiInventView() {
               <span>Terima Kembali</span>
             </Button>
           ) : (
-            <span className="text-xs font-mono text-slate-600 dark:text-slate-400">
-              Selesai
-            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => reopenOfficeKitLoan(row.id)}
+            >
+              <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Ubah ke Dipinjam</span>
+            </Button>
           )}
           <Button
             type="button"
@@ -684,6 +704,44 @@ export function SirkulasiInventView() {
     officeKitLoans.find((l) => l.id === selectedLoanId) || null;
   const selectedKit = officeKitItems.find((i) => i.id === selectedKitId) || null;
 
+  const loanBoardColumns: KanbanColumnDef<OfficeKitLoan>[] = [
+    {
+      id: "Dipinjam",
+      title: "Sedang Dipinjam",
+      dotColorClass: "bg-amber-500",
+      items: filteredLoans.filter((l) => l.status === "Dipinjam"),
+      onQuickAdd: () => openCheckoutModal(),
+    },
+    {
+      id: "Dikembalikan",
+      title: "Dikembalikan",
+      dotColorClass: "bg-emerald-600 dark:bg-emerald-400",
+      items: filteredLoans.filter((l) => l.status === "Dikembalikan"),
+    },
+  ];
+
+  const itemBoardColumns: KanbanColumnDef<OfficeKitItem>[] = [
+    {
+      id: "Tersedia",
+      title: "Tersedia di Kantor Staf",
+      dotColorClass: "bg-emerald-600 dark:bg-emerald-400",
+      items: filteredItems.filter((i) => i.status === "Tersedia"),
+      onQuickAdd: openAddKitModal,
+    },
+    {
+      id: "Dipinjam",
+      title: "Sedang Dipinjam",
+      dotColorClass: "bg-amber-500",
+      items: filteredItems.filter((i) => i.status === "Dipinjam"),
+    },
+    {
+      id: "Perbaikan",
+      title: "Perbaikan",
+      dotColorClass: "bg-red-600",
+      items: filteredItems.filter((i) => i.status === "Perbaikan"),
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-slate-300 dark:border-slate-800">
@@ -705,7 +763,11 @@ export function SirkulasiInventView() {
             <Plus className="w-4 h-4" aria-hidden="true" />
             <span>Tambah Barang Kantor Staf</span>
           </Button>
-          <Button type="button" variant="primary" onClick={openCheckoutModal}>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => openCheckoutModal()}
+          >
             <Cable className="w-4 h-4" aria-hidden="true" />
             <span>Pinjamkan Alat ke Kelas</span>
           </Button>
@@ -929,44 +991,365 @@ export function SirkulasiInventView() {
           )}
         </div>
 
-        <ColumnsTogglePopover
-          columns={
-            activeTab === "loans"
-              ? loanColumns.map((c) => ({ key: c.key, label: c.header }))
-              : itemColumns.map((c) => ({ key: c.key, label: c.header }))
-          }
-          hiddenKeys={activeTab === "loans" ? hiddenLoanCols : hiddenItemCols}
-          onToggleKey={(key) => {
-            if (activeTab === "loans") {
-              setHiddenLoanCols((prev) =>
-                prev.includes(key)
-                  ? prev.filter((k) => k !== key)
-                  : [...prev, key]
-              );
-            } else {
-              setHiddenItemCols((prev) =>
-                prev.includes(key)
-                  ? prev.filter((k) => k !== key)
-                  : [...prev, key]
-              );
-            }
-          }}
-        />
+        <div className="flex items-center gap-2">
+          {viewMode === "table" ? (
+            <ColumnsTogglePopover
+              columns={
+                activeTab === "loans"
+                  ? loanColumns.map((c) => ({ key: c.key, label: c.header }))
+                  : itemColumns.map((c) => ({ key: c.key, label: c.header }))
+              }
+              hiddenKeys={
+                activeTab === "loans" ? hiddenLoanCols : hiddenItemCols
+              }
+              onToggleKey={(key) => {
+                if (activeTab === "loans") {
+                  setHiddenLoanCols((prev) =>
+                    prev.includes(key)
+                      ? prev.filter((k) => k !== key)
+                      : [...prev, key]
+                  );
+                } else {
+                  setHiddenItemCols((prev) =>
+                    prev.includes(key)
+                      ? prev.filter((k) => k !== key)
+                      : [...prev, key]
+                  );
+                }
+              }}
+            />
+          ) : null}
+
+          <div
+            role="group"
+            aria-label="Pilih tampilan daftar sirkulasi invent"
+            className="inline-flex rounded-md border border-slate-400 dark:border-slate-600 p-0.5 bg-slate-100 dark:bg-slate-800"
+          >
+            <button
+              type="button"
+              onClick={() => setViewMode("board")}
+              aria-pressed={viewMode === "board"}
+              className={`min-h-[40px] px-3 inline-flex items-center gap-1.5 rounded text-xs font-bold transition-colors ${
+                viewMode === "board"
+                  ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
+                  : "text-slate-700 dark:text-slate-300"
+              }`}
+            >
+              <KanbanSquare className="w-4 h-4" aria-hidden="true" />
+              <span>Board</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              aria-pressed={viewMode === "table"}
+              className={`min-h-[40px] px-3 inline-flex items-center gap-1.5 rounded text-xs font-bold transition-colors ${
+                viewMode === "table"
+                  ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
+                  : "text-slate-700 dark:text-slate-300"
+              }`}
+            >
+              <Table2 className="w-4 h-4" aria-hidden="true" />
+              <span>Tabel</span>
+            </button>
+          </div>
+        </div>
       </section>
 
-      {/* Tabel Konten Utama */}
+      {/* Konten Utama: Board Status (Drag & Drop) atau Tabel */}
       {activeTab === "loans" ? (
-        <DataTable
-          columns={loanColumns}
-          data={filteredLoans}
-          rowKey={(l) => l.id}
-          hiddenColumnKeys={hiddenLoanCols}
-          activeRowKey={selectedLoanId}
-          onRowClick={(row) => setSelectedLoanId(row.id)}
-          emptyTitle="Belum Ada Transaksi Sirkulasi Alat Kantor Staf"
-          emptyDescription="Catat peminjaman Kabel HDMI, Stop Kontak, atau Remote TV saat perwakilan kelas mengambil di kantor staf."
-          emptyActionLabel="Pinjamkan Alat ke Kelas"
-          onEmptyAction={openCheckoutModal}
+        viewMode === "board" ? (
+          <KanbanBoard
+            columns={loanBoardColumns}
+            rowKey={(l) => l.id}
+            activeItemId={selectedLoanId}
+            onCardClick={(item) => setSelectedLoanId(item.id)}
+            columnEmptyMessage="Tidak ada tiket pada status ini"
+            onCardDrop={(loan, sourceColId, targetColId) => {
+              if (sourceColId === "Dipinjam" && targetColId === "Dikembalikan") {
+                checkinOfficeKitLoan(loan.id);
+              } else if (
+                sourceColId === "Dikembalikan" &&
+                targetColId === "Dipinjam"
+              ) {
+                reopenOfficeKitLoan(loan.id);
+              }
+            }}
+            renderCard={(row) => {
+              const room = rooms.find((r) => r.id === row.room_id);
+              const noteCount = notes.filter(
+                (n) => n.entity_type === "office_loan" && n.entity_id === row.id
+              ).length;
+              const attCount = attachments.filter(
+                (a) => a.entity_type === "office_loan" && a.entity_id === row.id
+              ).length;
+
+              return {
+                code: row.loan_code,
+                title: `${row.class_code} - ${row.borrower_name}`,
+                subtitle: `${
+                  room ? `Ruang ${room.code}` : "Ruang Kelas Reguler"
+                } • Prodi ${row.prodi}`,
+                description: row.kit_items_label,
+                valueBadge: `${row.kit_item_ids.length} item`,
+                priorityBadge:
+                  row.status === "Dipinjam" ? (
+                    <Badge tone="warning">Dipinjam</Badge>
+                  ) : (
+                    <Badge tone="success">Dikembalikan</Badge>
+                  ),
+                assigneeName: `DPM: ${row.dpm_name} (${row.borrower_phone})`,
+                progressPercent: row.status === "Dipinjam" ? 50 : 100,
+                progressColorClass:
+                  row.status === "Dipinjam"
+                    ? "bg-amber-500"
+                    : "bg-emerald-600 dark:bg-emerald-400",
+                notesCount: noteCount,
+                attachmentsCount: attCount,
+                ageLabel: `${row.borrow_time}-${row.expected_return_time}`,
+                footerAction:
+                  row.status === "Dipinjam" ? (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => checkinOfficeKitLoan(row.id)}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Tandai Dikembalikan</span>
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="danger"
+                          size="sm"
+                          onClick={() => {
+                            setDeleteError("");
+                            setDeletingLoan(row);
+                          }}
+                          aria-label={`Hapus tiket ${row.loan_code}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        </Button>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={() => openReturnModal(row)}
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Terima Kembali (Cek Rusak)</span>
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => reopenOfficeKitLoan(row.id)}
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Ubah ke Dipinjam</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        onClick={() => {
+                          setDeleteError("");
+                          setDeletingLoan(row);
+                        }}
+                        aria-label={`Hapus tiket ${row.loan_code}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  ),
+              };
+            }}
+          />
+        ) : (
+          <DataTable
+            columns={loanColumns}
+            data={filteredLoans}
+            rowKey={(l) => l.id}
+            hiddenColumnKeys={hiddenLoanCols}
+            activeRowKey={selectedLoanId}
+            onRowClick={(row) => setSelectedLoanId(row.id)}
+            emptyTitle="Belum Ada Transaksi Sirkulasi Alat Kantor Staf"
+            emptyDescription="Catat peminjaman Kabel HDMI, Stop Kontak, atau Remote TV saat perwakilan kelas mengambil di kantor staf."
+            emptyActionLabel="Pinjamkan Alat ke Kelas"
+            onEmptyAction={() => openCheckoutModal()}
+          />
+        )
+      ) : viewMode === "board" ? (
+        <KanbanBoard
+          columns={itemBoardColumns}
+          rowKey={(i) => i.id}
+          activeItemId={selectedKitId}
+          onCardClick={(item) => setSelectedKitId(item.id)}
+          columnEmptyMessage="Tidak ada barang kantor staf di status ini"
+          onCardDrop={(item, sourceColId, targetColId) => {
+            if (targetColId === "Tersedia") {
+              if (sourceColId === "Perbaikan") {
+                updateOfficeKitItem(item.id, {
+                  status: "Tersedia",
+                  condition: "Baik",
+                });
+              } else if (sourceColId === "Dipinjam") {
+                const activeLoan = getActiveLoanForKit(item.id);
+                if (activeLoan) {
+                  openReturnModal(activeLoan);
+                } else {
+                  updateOfficeKitItem(item.id, { status: "Tersedia" });
+                }
+              }
+            } else if (targetColId === "Dipinjam") {
+              if (sourceColId === "Tersedia") {
+                openCheckoutModal(item.id);
+              }
+            } else if (targetColId === "Perbaikan") {
+              if (sourceColId === "Tersedia") {
+                updateOfficeKitItem(item.id, {
+                  status: "Perbaikan",
+                  condition:
+                    item.condition === "Baik" ? "Rusak Ringan" : item.condition,
+                });
+              } else if (sourceColId === "Dipinjam") {
+                const activeLoan = getActiveLoanForKit(item.id);
+                if (activeLoan) {
+                  openReturnModal(activeLoan, [item.id]);
+                } else {
+                  updateOfficeKitItem(item.id, {
+                    status: "Perbaikan",
+                    condition:
+                      item.condition === "Baik" ? "Rusak Ringan" : item.condition,
+                  });
+                }
+              }
+            }
+          }}
+          renderCard={(row) => {
+            const linkedRoom = rooms.find((r) => r.id === row.linked_room_id);
+            const activeLoan = getActiveLoanForKit(row.id);
+            const noteCount = notes.filter(
+              (n) => n.entity_type === "office_kit" && n.entity_id === row.id
+            ).length;
+            const attCount = attachments.filter(
+              (a) => a.entity_type === "office_kit" && a.entity_id === row.id
+            ).length;
+
+            return {
+              code: row.kit_code,
+              title: row.name,
+              subtitle: `${row.category}${
+                linkedRoom ? ` • Ruang ${linkedRoom.code}` : " • Universal"
+              }`,
+              description: `${row.brand_spec} • ${row.storage_tray}`,
+              priorityBadge: <AssetConditionBadge condition={row.condition} />,
+              assigneeName: activeLoan
+                ? `${activeLoan.class_code} (${activeLoan.borrower_name})`
+                : undefined,
+              notesCount: noteCount,
+              attachmentsCount: attCount,
+              footerAction: (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {row.status === "Tersedia" ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => openCheckoutModal(row.id)}
+                      >
+                        <Cable className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Pinjamkan</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          updateOfficeKitItem(row.id, {
+                            status: "Perbaikan",
+                            condition:
+                              row.condition === "Baik"
+                                ? "Rusak Ringan"
+                                : row.condition,
+                          })
+                        }
+                      >
+                        <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Perbaikan</span>
+                      </Button>
+                    </>
+                  ) : row.status === "Dipinjam" ? (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => {
+                        if (activeLoan) {
+                          openReturnModal(activeLoan);
+                        } else {
+                          updateOfficeKitItem(row.id, { status: "Tersedia" });
+                        }
+                      }}
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Terima Kembali</span>
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() =>
+                          updateOfficeKitItem(row.id, {
+                            status: "Tersedia",
+                            condition: "Baik",
+                          })
+                        }
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Siap Pakai</span>
+                      </Button>
+                      <Link
+                        href={`/sarpras/pemeliharaan?reportKit=${encodeURIComponent(
+                          row.id
+                        )}`}
+                        className="min-h-[36px] px-2.5 inline-flex items-center gap-1 rounded-md border border-amber-700/50 bg-amber-50 dark:bg-amber-950/40 text-xs font-semibold text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900"
+                      >
+                        <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Lapor</span>
+                      </Link>
+                    </>
+                  )}
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => {
+                      setDeleteError("");
+                      setDeletingKit(row);
+                    }}
+                    aria-label={`Hapus barang ${row.kit_code}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  </Button>
+                </div>
+              ),
+            };
+          }}
         />
       ) : (
         <DataTable
@@ -1026,15 +1409,36 @@ export function SirkulasiInventView() {
                 <span>Hapus</span>
               </Button>
               {selectedLoan.status === "Dipinjam" ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => openReturnModal(selectedLoan)}
+                  >
+                    <RotateCcw className="w-4 h-4" aria-hidden="true" />
+                    <span>Terima Kembali (Cek Rusak)</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => {
+                      checkinOfficeKitLoan(selectedLoan.id);
+                    }}
+                  >
+                    <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                    <span>Tandai Dikembalikan</span>
+                  </Button>
+                </div>
+              ) : (
                 <Button
                   type="button"
-                  variant="primary"
-                  onClick={() => openReturnModal(selectedLoan)}
+                  variant="outline"
+                  onClick={() => reopenOfficeKitLoan(selectedLoan.id)}
                 >
                   <RotateCcw className="w-4 h-4" aria-hidden="true" />
-                  <span>Terima Pengembalian</span>
+                  <span>Ubah ke Dipinjam</span>
                 </Button>
-              ) : null}
+              )}
             </div>
           ) : null
         }
@@ -1125,18 +1529,29 @@ export function SirkulasiInventView() {
         }
         footer={
           selectedKit ? (
-            <div className="flex items-center justify-between gap-2">
-              <Button
-                type="button"
-                variant="danger"
-                onClick={() => {
-                  setDeleteError("");
-                  setDeletingKit(selectedKit);
-                }}
-              >
-                <Trash2 className="w-4 h-4" aria-hidden="true" />
-                <span>Hapus</span>
-              </Button>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => {
+                    setDeleteError("");
+                    setDeletingKit(selectedKit);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4" aria-hidden="true" />
+                  <span>Hapus</span>
+                </Button>
+                <Link
+                  href={`/sarpras/pemeliharaan?reportKit=${encodeURIComponent(
+                    selectedKit.id
+                  )}`}
+                  className="min-h-[44px] px-3.5 py-2 inline-flex items-center gap-2 rounded-md border border-amber-700/50 bg-amber-50 dark:bg-amber-950/40 text-xs font-semibold text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+                >
+                  <Wrench className="w-4 h-4" aria-hidden="true" />
+                  <span>Laporkan Kerusakan</span>
+                </Link>
+              </div>
               <Button
                 type="button"
                 variant="primary"
@@ -1319,18 +1734,17 @@ export function SirkulasiInventView() {
                 })),
               ]}
             />
-            <Input
+            <Select
               label="Mata Kuliah / Keperluan"
-              placeholder="Contoh: Manajemen Mutu"
               value={courseName}
               onChange={(e) => setCourseName(e.target.value)}
-              list="sirkulasi-makul-list"
+              allowCustomValue
+              placeholder="Contoh: Manajemen Mutu"
+              options={courses.map((c) => ({
+                value: c.name,
+                label: `${c.code} - ${c.name} (${c.prodi})`,
+              }))}
             />
-            <datalist id="sirkulasi-makul-list">
-              {courses.map((c) => (
-                <option key={c.id} value={c.name} />
-              ))}
-            </datalist>
           </div>
 
           <div className="space-y-2">

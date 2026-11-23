@@ -357,6 +357,7 @@ interface SarprasContextValue {
       damagedItemIds?: string[];
     }
   ) => ActionResult;
+  reopenOfficeKitLoan: (id: string) => ActionResult;
   deleteOfficeKitLoan: (id: string) => Promise<ActionResult>;
 }
 
@@ -2064,6 +2065,25 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
+      if (payload.office_kit_item_id) {
+        setOfficeKitItems((prev) =>
+          prev.map((kit) => {
+            if (kit.id !== payload.office_kit_item_id) return kit;
+            const nextCondition =
+              payload.damage_severity === "Rusak Berat"
+                ? "Rusak Berat"
+                : kit.condition === "Baik"
+                ? "Rusak Ringan"
+                : kit.condition;
+            return {
+              ...kit,
+              condition: nextCondition,
+              status: kit.status === "Tersedia" ? "Perbaikan" : kit.status,
+            };
+          })
+        );
+      }
+
       if (isLiveSupabase && authUser) {
         void sendMutation(
           {
@@ -2073,6 +2093,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               ticket_code,
               asset_id: payload.asset_id || null,
               room_id: payload.room_id || null,
+              office_kit_item_id: payload.office_kit_item_id || null,
               reporter_name: payload.reporter_name,
               reporter_role: payload.reporter_role,
               issue_title: payload.issue_title,
@@ -2085,13 +2106,16 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               repair_cost: payload.repair_cost || 0,
               resolution_notes: null,
             },
+            assetId: payload.asset_id || null,
             roomId: payload.room_id || null,
+            officeKitItemId: payload.office_kit_item_id || null,
+            damageSeverity: payload.damage_severity,
             setRoomRepair,
           },
           "Membuat Tiket Kerusakan",
           "Laporan Kerusakan Tersimpan di Supabase",
           `Tiket ${ticket_code} berhasil dibuat dan disinkronkan ke database.`,
-          true
+          false
         );
         return newTicket;
       }
@@ -2101,7 +2125,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         "Laporan Kerusakan Dicatat",
         `Tiket ${newTicket.ticket_code} berhasil dibuat${
           payload.damage_severity === "Rusak Berat"
-            ? " dan status aset otomatis diperbarui menjadi Rusak Berat."
+            ? " dan kondisi item otomatis diperbarui menjadi Rusak Berat."
             : "."
         }`
       );
@@ -2130,57 +2154,123 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ) => {
       if (!requireStaffForLiveWrite()) return;
       const target = maintenanceLogs.find((m) => m.id === id);
-      const completedAt =
-        update.status === "Selesai Diperbaiki"
-          ? new Date().toISOString()
-          : target?.completed_at;
-
-      setMaintenanceLogs((prev) =>
-        prev.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                status: update.status,
-                technician_vendor:
-                  update.technician_vendor !== undefined
-                    ? update.technician_vendor
-                    : item.technician_vendor,
-                vendor_id:
-                  update.vendor_id !== undefined
-                    ? update.vendor_id
-                    : item.vendor_id,
-                repair_cost:
-                  update.repair_cost !== undefined
-                    ? update.repair_cost
-                    : item.repair_cost,
-                resolution_notes:
-                  update.resolution_notes !== undefined
-                    ? update.resolution_notes
-                    : item.resolution_notes,
-                completed_at: completedAt,
-              }
-            : item
-        )
-      );
-
       const isDone = update.status === "Selesai Diperbaiki";
-      if (isDone) {
-        if (target?.asset_id) {
-          setAssets((prev) =>
-            prev.map((a) =>
-              a.id === target.asset_id ? { ...a, condition: "Baik" } : a
-            )
-          );
-        }
-        if (target?.room_id) {
-          setRooms((prev) =>
-            prev.map((r) =>
-              r.id === target.room_id && r.status === "Perbaikan"
-                ? { ...r, status: "Tersedia" }
-                : r
-            )
-          );
-        }
+      const completedAt = isDone
+        ? target?.completed_at || new Date().toISOString()
+        : undefined;
+
+      const nextLogs = maintenanceLogs.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              status: update.status,
+              technician_vendor:
+                update.technician_vendor !== undefined
+                  ? update.technician_vendor
+                  : item.technician_vendor,
+              vendor_id:
+                update.vendor_id !== undefined
+                  ? update.vendor_id
+                  : item.vendor_id,
+              repair_cost:
+                update.repair_cost !== undefined
+                  ? update.repair_cost
+                  : item.repair_cost,
+              resolution_notes:
+                update.resolution_notes !== undefined
+                  ? update.resolution_notes
+                  : item.resolution_notes,
+              completed_at: completedAt,
+            }
+          : item
+      );
+      setMaintenanceLogs(nextLogs);
+
+      if (target?.asset_id) {
+        const openForAsset = nextLogs.filter(
+          (m) =>
+            m.asset_id === target.asset_id && m.status !== "Selesai Diperbaiki"
+        );
+        const hasHeavy = openForAsset.some(
+          (m) => m.damage_severity === "Rusak Berat"
+        );
+        const hasLight = openForAsset.some(
+          (m) => m.damage_severity === "Rusak Ringan"
+        );
+        setAssets((prev) =>
+          prev.map((a) => {
+            if (a.id !== target.asset_id) return a;
+            if (hasHeavy) return { ...a, condition: "Rusak Berat" };
+            if (hasLight) return { ...a, condition: "Rusak Ringan" };
+            if (
+              a.condition === "Rusak Berat" ||
+              a.condition === "Rusak Ringan"
+            ) {
+              return { ...a, condition: "Baik" };
+            }
+            return a;
+          })
+        );
+      }
+
+      if (target?.office_kit_item_id) {
+        const openForKit = nextLogs.filter(
+          (m) =>
+            m.office_kit_item_id === target.office_kit_item_id &&
+            m.status !== "Selesai Diperbaiki"
+        );
+        const hasHeavy = openForKit.some(
+          (m) => m.damage_severity === "Rusak Berat"
+        );
+        const hasLight = openForKit.some(
+          (m) => m.damage_severity === "Rusak Ringan"
+        );
+        setOfficeKitItems((prev) =>
+          prev.map((kit) => {
+            if (kit.id !== target.office_kit_item_id) return kit;
+            let nextCondition = kit.condition;
+            let nextStatus = kit.status;
+            if (hasHeavy) {
+              nextCondition = "Rusak Berat";
+              if (nextStatus === "Tersedia") nextStatus = "Perbaikan";
+            } else if (hasLight) {
+              if (nextCondition === "Baik" || nextCondition === "Rusak Berat") {
+                nextCondition = "Rusak Ringan";
+              }
+              if (nextStatus === "Tersedia") nextStatus = "Perbaikan";
+            } else {
+              if (
+                nextCondition === "Rusak Berat" ||
+                nextCondition === "Rusak Ringan"
+              ) {
+                nextCondition = "Baik";
+              }
+              if (nextStatus === "Perbaikan") nextStatus = "Tersedia";
+            }
+            return { ...kit, condition: nextCondition, status: nextStatus };
+          })
+        );
+      }
+
+      if (target?.room_id) {
+        const hasUrgent = nextLogs.some(
+          (m) =>
+            m.room_id === target.room_id &&
+            m.status !== "Selesai Diperbaiki" &&
+            m.priority === "Tinggi/Darurat"
+        );
+        setRooms((prev) =>
+          prev.map((r) => {
+            if (r.id !== target.room_id) return r;
+            if (hasUrgent && r.status === "Tersedia") {
+              return { ...r, status: "Perbaikan" };
+            }
+            if (!hasUrgent && r.status === "Perbaikan") {
+              return { ...r, status: "Tersedia" };
+            }
+            return r;
+          })
+        );
       }
 
       if (isLiveSupabase && authUser) {
@@ -2202,15 +2292,19 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               ...(update.resolution_notes !== undefined
                 ? { resolution_notes: update.resolution_notes }
                 : {}),
-              ...(isDone ? { completed_at: completedAt } : {}),
+              completed_at: isDone ? completedAt : null,
             },
             roomId: target?.room_id || null,
+            assetId: target?.asset_id || null,
+            officeKitItemId: target?.office_kit_item_id || null,
+            status: update.status,
+            damageSeverity: target?.damage_severity,
             setRoomAvailable: isDone,
           },
           "Memperbarui Perbaikan",
           "Status Pemeliharaan Diperbarui di Supabase",
           `Tiket ${target?.ticket_code || ""} diperbarui ke "${update.status}".`,
-          true
+          false
         );
         return;
       }
@@ -2223,6 +2317,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     },
     [
       authUser,
+      extendedMasterReady,
       isLiveSupabase,
       maintenanceLogs,
       notify,
@@ -2263,6 +2358,47 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
                 return { ...a, condition: "Baik" };
               }
               return a;
+            })
+          );
+        }
+        if (target?.office_kit_item_id) {
+          const openForKit = remaining.filter(
+            (m) =>
+              m.office_kit_item_id === target.office_kit_item_id &&
+              m.status !== "Selesai Diperbaiki"
+          );
+          const hasHeavy = openForKit.some(
+            (m) => m.damage_severity === "Rusak Berat"
+          );
+          const hasLight = openForKit.some(
+            (m) => m.damage_severity === "Rusak Ringan"
+          );
+          setOfficeKitItems((prev) =>
+            prev.map((kit) => {
+              if (kit.id !== target.office_kit_item_id) return kit;
+              let nextCondition = kit.condition;
+              let nextStatus = kit.status;
+              if (hasHeavy) {
+                nextCondition = "Rusak Berat";
+                if (nextStatus === "Tersedia") nextStatus = "Perbaikan";
+              } else if (hasLight) {
+                if (
+                  nextCondition === "Baik" ||
+                  nextCondition === "Rusak Berat"
+                ) {
+                  nextCondition = "Rusak Ringan";
+                }
+                if (nextStatus === "Tersedia") nextStatus = "Perbaikan";
+              } else {
+                if (
+                  nextCondition === "Rusak Berat" ||
+                  nextCondition === "Rusak Ringan"
+                ) {
+                  nextCondition = "Baik";
+                }
+                if (nextStatus === "Perbaikan") nextStatus = "Tersedia";
+              }
+              return { ...kit, condition: nextCondition, status: nextStatus };
             })
           );
         }
@@ -4456,6 +4592,83 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  const reopenOfficeKitLoan = useCallback(
+    (id: string): ActionResult => {
+      if (!requireStaffForLiveWrite()) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const target = officeKitLoans.find((l) => l.id === id);
+      if (!target) {
+        return { ok: false, error: "Tiket sirkulasi tidak ditemukan." };
+      }
+
+      const idSet = new Set(target.kit_item_ids);
+      const unavailable = officeKitItems.filter(
+        (item) => idSet.has(item.id) && item.status !== "Tersedia"
+      );
+      if (unavailable.length > 0) {
+        const msg = `Tidak dapat mengembalikan tiket ${target.loan_code} ke status Dipinjam karena ${unavailable
+          .map((i) => `${i.kit_code} (${i.status})`)
+          .join(", ")} sedang tidak tersedia.`;
+        notify("error", "Gagal Mengubah Status Tiket", msg);
+        return { ok: false, error: msg };
+      }
+
+      setOfficeKitLoans((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                status: "Dipinjam",
+                returned_at: null,
+                received_by_staff: undefined,
+              }
+            : item
+        )
+      );
+      setOfficeKitItems((prev) =>
+        prev.map((item) =>
+          idSet.has(item.id) ? { ...item, status: "Dipinjam" } : item
+        )
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "reopen_office_kit_loan",
+            id,
+            itemIds: target.kit_item_ids,
+            data: {
+              status: "Dipinjam",
+              returned_at: null,
+              received_by_staff: null,
+            },
+          },
+          "Mengubah Status Sirkulasi",
+          "Tiket Kembali ke Status Dipinjam",
+          `${target.loan_code} (${target.class_code}) diaktifkan kembali menjadi Sedang Dipinjam.`
+        );
+        return { ok: true };
+      }
+
+      notify(
+        "success",
+        "Status Tiket Diubah",
+        `${target.loan_code} (${target.class_code}) diaktifkan kembali menjadi Sedang Dipinjam.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      officeKitItems,
+      officeKitLoans,
+      requireStaffForLiveWrite,
+      sendMutation,
+    ]
+  );
+
   const deleteOfficeKitLoan = useCallback(
     async (id: string): Promise<ActionResult> => {
       if (!requireStaffForLiveWrite()) {
@@ -4610,6 +4823,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       deleteOfficeKitItem,
       checkoutOfficeKitLoan,
       checkinOfficeKitLoan,
+      reopenOfficeKitLoan,
       deleteOfficeKitLoan,
     }),
     [
@@ -4711,6 +4925,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       deleteOfficeKitItem,
       checkoutOfficeKitLoan,
       checkinOfficeKitLoan,
+      reopenOfficeKitLoan,
       deleteOfficeKitLoan,
     ]
   );

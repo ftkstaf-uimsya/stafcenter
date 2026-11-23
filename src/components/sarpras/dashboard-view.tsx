@@ -85,6 +85,12 @@ export function DashboardView() {
   const severeAssetsCount = assets.filter(
     (a) => a.condition === "Rusak Berat"
   ).length;
+  const repairOfficeKitsCount = officeKitItems.filter(
+    (k) =>
+      k.status === "Perbaikan" ||
+      k.condition === "Rusak Ringan" ||
+      k.condition === "Rusak Berat"
+  ).length;
   const todayActiveBookings = bookings.filter(
     (b) =>
       b.booking_date === TODAY_ISO &&
@@ -174,7 +180,11 @@ export function DashboardView() {
               </span>
               <span className="text-xs font-medium text-amber-900 dark:text-amber-200">
                 unit ({severeAssetsCount} rusak berat,{" "}
-                {damagedAssets.length - severeAssetsCount} rusak ringan)
+                {damagedAssets.length - severeAssetsCount} rusak ringan
+                {repairOfficeKitsCount > 0
+                  ? `, +${repairOfficeKitsCount} alat kantor`
+                  : ""}
+                )
               </span>
             </div>
 
@@ -481,6 +491,9 @@ export function DashboardView() {
           <div className="p-5 space-y-3 flex-1">
             {maintenanceLogs.map((ticket) => {
               const asset = assets.find((a) => a.id === ticket.asset_id);
+              const officeKit = ticket.office_kit_item_id
+                ? officeKitItems.find((k) => k.id === ticket.office_kit_item_id)
+                : null;
               const room = rooms.find((r) => r.id === ticket.room_id);
               return (
                 <article
@@ -512,11 +525,11 @@ export function DashboardView() {
                     <span>
                       Lokasi:{" "}
                       <strong className="font-mono text-slate-900 dark:text-slate-100">
-                        {room?.code || "-"}
+                        {room?.code || (officeKit ? "Kantor Staf" : "-")}
                       </strong>{" "}
-                      • Aset:{" "}
+                      • {officeKit ? "Alat Kantor" : "Aset"}:{" "}
                       <strong className="font-mono text-slate-900 dark:text-slate-100">
-                        {asset?.inventory_code || "-"}
+                        {officeKit?.kit_code || asset?.inventory_code || "-"}
                       </strong>
                     </span>
                     <span>Pelapor: {ticket.reporter_name}</span>

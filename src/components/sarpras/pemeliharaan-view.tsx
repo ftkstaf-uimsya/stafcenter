@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { KanbanSquare, Plus, Table2, Trash2, Wrench } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 import {
@@ -69,6 +69,7 @@ export function PemeliharaanView() {
   const {
     rooms,
     assets,
+    officeKitItems,
     maintenanceLogs,
     maintenanceVendors,
     campusOfficials,
@@ -94,8 +95,13 @@ export function PemeliharaanView() {
 
   // Modal Lapor Kerusakan Baru
   const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [targetKind, setTargetKind] = useState<
+    "asset" | "office_kit" | "room"
+  >("asset");
   const [assetId, setAssetId] = useState("");
+  const [officeKitItemId, setOfficeKitItemId] = useState("");
   const [roomId, setRoomId] = useState("");
+  const handledReportKitRef = useRef<string | null>(null);
   const [reporterQuickPick, setReporterQuickPick] = useState("");
   const [reporterName, setReporterName] = useState("");
   const [reporterRole, setReporterRole] = useState("PIC Ruangan / Dosen");
@@ -128,11 +134,33 @@ export function PemeliharaanView() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const inspect = new URLSearchParams(window.location.search).get("inspect");
+    const params = new URLSearchParams(window.location.search);
+    const inspect = params.get("inspect");
     if (inspect && maintenanceLogs.some((m) => m.id === inspect)) {
       setSelectedTicketId(inspect);
     }
-  }, [maintenanceLogs]);
+    const reportKit = params.get("reportKit");
+    if (reportKit && handledReportKitRef.current !== reportKit) {
+      const matchedKit = officeKitItems.find((k) => k.id === reportKit);
+      if (matchedKit) {
+        handledReportKitRef.current = reportKit;
+        setTargetKind("office_kit");
+        setOfficeKitItemId(matchedKit.id);
+        setAssetId("");
+        setRoomId(matchedKit.linked_room_id || "");
+        setReporterQuickPick("");
+        setReporterName("");
+        setReporterRole("PIC Ruangan / Staf");
+        setIssueTitle("");
+        setIssueDescription("");
+        setDamageSeverity("Rusak Ringan");
+        setPriority("Sedang");
+        setSelectedFile(null);
+        setFormError("");
+        setReportModalOpen(true);
+      }
+    }
+  }, [maintenanceLogs, officeKitItems]);
 
   const selectedTicket = useMemo(
     () => maintenanceLogs.find((m) => m.id === selectedTicketId) || null,
@@ -142,18 +170,37 @@ export function PemeliharaanView() {
   const filteredLogs = useMemo(() => {
     return maintenanceLogs.filter((m) => {
       const q = searchQuery.trim().toLowerCase();
+      const kit = m.office_kit_item_id
+        ? officeKitItems.find((k) => k.id === m.office_kit_item_id)
+        : null;
+      const asset = m.asset_id
+        ? assets.find((a) => a.id === m.asset_id)
+        : null;
       const matchSearch =
         !q ||
         m.ticket_code.toLowerCase().includes(q) ||
         m.issue_title.toLowerCase().includes(q) ||
         m.reporter_name.toLowerCase().includes(q) ||
-        (m.technician_vendor || "").toLowerCase().includes(q);
+        (m.technician_vendor || "").toLowerCase().includes(q) ||
+        (kit &&
+          (kit.kit_code.toLowerCase().includes(q) ||
+            kit.name.toLowerCase().includes(q))) ||
+        (asset &&
+          (asset.inventory_code.toLowerCase().includes(q) ||
+            asset.name.toLowerCase().includes(q)));
       const matchPriority =
         filterPriority === "ALL" || m.priority === filterPriority;
       const matchStatus = filterStatus === "ALL" || m.status === filterStatus;
       return matchSearch && matchPriority && matchStatus;
     });
-  }, [maintenanceLogs, searchQuery, filterPriority, filterStatus]);
+  }, [
+    assets,
+    filterPriority,
+    filterStatus,
+    maintenanceLogs,
+    officeKitItems,
+    searchQuery,
+  ]);
 
   const activeFilterCount =
     (filterPriority !== "ALL" ? 1 : 0) + (filterStatus !== "ALL" ? 1 : 0);
@@ -176,8 +223,22 @@ export function PemeliharaanView() {
 
   const openReportModal = () => {
     const firstAsset = assets[0];
-    setAssetId(firstAsset?.id || "");
-    setRoomId(firstAsset?.room_id || rooms[0]?.id || "");
+    const firstKit = officeKitItems[0];
+    const defaultKind: "asset" | "office_kit" | "room" = firstAsset
+      ? "asset"
+      : firstKit
+      ? "office_kit"
+      : "room";
+    setTargetKind(defaultKind);
+    setAssetId(defaultKind === "asset" ? firstAsset?.id || "" : "");
+    setOfficeKitItemId(defaultKind === "office_kit" ? firstKit?.id || "" : "");
+    setRoomId(
+      defaultKind === "asset"
+        ? firstAsset?.room_id || rooms[0]?.id || ""
+        : defaultKind === "office_kit"
+        ? firstKit?.linked_room_id || ""
+        : rooms[0]?.id || ""
+    );
     setReporterQuickPick("");
     setReporterName("");
     setReporterRole("PIC Ruangan / Staf");
@@ -190,6 +251,27 @@ export function PemeliharaanView() {
     setReportModalOpen(true);
   };
 
+  const handleTargetKindChange = (nextKind: "asset" | "office_kit" | "room") => {
+    setTargetKind(nextKind);
+    if (nextKind === "asset") {
+      const nextAsset = assets.find((a) => a.id === assetId) || assets[0];
+      setAssetId(nextAsset?.id || "");
+      setOfficeKitItemId("");
+      setRoomId(nextAsset?.room_id || rooms[0]?.id || "");
+    } else if (nextKind === "office_kit") {
+      const nextKit =
+        officeKitItems.find((k) => k.id === officeKitItemId) ||
+        officeKitItems[0];
+      setOfficeKitItemId(nextKit?.id || "");
+      setAssetId("");
+      setRoomId(nextKit?.linked_room_id || "");
+    } else {
+      setAssetId("");
+      setOfficeKitItemId("");
+      setRoomId((prev) => prev || rooms[0]?.id || "");
+    }
+  };
+
   const handleAssetSelectionChange = (newAssetId: string) => {
     setAssetId(newAssetId);
     const found = assets.find((a) => a.id === newAssetId);
@@ -198,8 +280,26 @@ export function PemeliharaanView() {
     }
   };
 
+  const handleOfficeKitSelectionChange = (newKitId: string) => {
+    setOfficeKitItemId(newKitId);
+    const found = officeKitItems.find((k) => k.id === newKitId);
+    setRoomId(found?.linked_room_id || "");
+  };
+
   const handleReportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (targetKind === "asset" && !assetId) {
+      setFormError("Pilih aset inventaris yang bermasalah terlebih dahulu.");
+      return;
+    }
+    if (targetKind === "office_kit" && !officeKitItemId) {
+      setFormError("Pilih alat kantor staf yang bermasalah terlebih dahulu.");
+      return;
+    }
+    if (targetKind === "room" && !roomId) {
+      setFormError("Pilih lokasi ruangan fasilitas yang bermasalah.");
+      return;
+    }
     if (
       !reporterName.trim() ||
       !issueTitle.trim() ||
@@ -214,7 +314,9 @@ export function PemeliharaanView() {
     setSubmittingReport(true);
     try {
       const created = addMaintenanceLog({
-        asset_id: assetId || null,
+        asset_id: targetKind === "asset" ? assetId || null : null,
+        office_kit_item_id:
+          targetKind === "office_kit" ? officeKitItemId || null : null,
         room_id: roomId || null,
         reporter_name: reporterName.trim(),
         reporter_role: reporterRole.trim() || "Staf Kampus",
@@ -341,9 +443,12 @@ export function PemeliharaanView() {
     },
     {
       key: "target",
-      header: "Aset & Lokasi Ruang",
+      header: "Objek & Lokasi Ruang",
       render: (row) => {
         const asset = assets.find((a) => a.id === row.asset_id);
+        const officeKit = row.office_kit_item_id
+          ? officeKitItems.find((k) => k.id === row.office_kit_item_id)
+          : null;
         const room = rooms.find((r) => r.id === row.room_id);
         return (
           <div className="text-xs space-y-1">
@@ -354,6 +459,15 @@ export function PemeliharaanView() {
                   {asset.inventory_code}
                 </strong>{" "}
                 ({asset.name})
+              </p>
+            ) : null}
+            {officeKit ? (
+              <p>
+                Alat Kantor:{" "}
+                <strong className="font-mono text-slate-900 dark:text-slate-100">
+                  {officeKit.kit_code}
+                </strong>{" "}
+                ({officeKit.name})
               </p>
             ) : null}
             {room ? (
@@ -426,6 +540,9 @@ export function PemeliharaanView() {
   const selectedAsset = selectedTicket
     ? assets.find((a) => a.id === selectedTicket.asset_id)
     : null;
+  const selectedOfficeKit = selectedTicket?.office_kit_item_id
+    ? officeKitItems.find((k) => k.id === selectedTicket.office_kit_item_id)
+    : null;
   const selectedRoom = selectedTicket
     ? rooms.find((r) => r.id === selectedTicket.room_id)
     : null;
@@ -441,9 +558,9 @@ export function PemeliharaanView() {
             Pemeliharaan & Laporan Kerusakan
           </h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Otomatisasi kondisi aset terhubung langsung dengan Inventaris. Klik
-            kartu tiket untuk mengunggah foto dokumentasi dan mencatat progres
-            teknisi.
+            Otomatisasi kondisi aset inventaris & alat kantor staf terhubung
+            langsung. Klik kartu tiket untuk dokumentasi dan progres teknisi,
+            atau seret kartu antar kolom status.
           </p>
         </div>
 
@@ -551,9 +668,17 @@ export function PemeliharaanView() {
           rowKey={(m) => m.id}
           activeItemId={selectedTicketId}
           onCardClick={(item) => setSelectedTicketId(item.id)}
+          onCardDrop={(item, _sourceColId, targetColId) => {
+            updateMaintenanceStatus(item.id, {
+              status: targetColId as MaintenanceStatus,
+            });
+          }}
           renderCard={(row) => {
             const room = rooms.find((r) => r.id === row.room_id);
             const asset = assets.find((a) => a.id === row.asset_id);
+            const officeKit = row.office_kit_item_id
+              ? officeKitItems.find((k) => k.id === row.office_kit_item_id)
+              : null;
             const prog = getMaintenanceProgress(row.status);
             const noteCount = notes.filter(
               (n) => n.entity_type === "maintenance" && n.entity_id === row.id
@@ -568,12 +693,21 @@ export function PemeliharaanView() {
               ? row.photo_url
               : firstImageAtt?.file_url || null;
 
+            const locLabel = room
+              ? `Ruang ${room.code}`
+              : officeKit
+              ? "Kantor Staf"
+              : "Fasilitas";
+            const itemLabel = asset
+              ? asset.inventory_code
+              : officeKit
+              ? officeKit.kit_code
+              : row.damage_severity;
+
             return {
               code: row.ticket_code,
               title: row.issue_title,
-              subtitle: `${room ? `Ruang ${room.code}` : "Fasilitas"} • ${
-                asset ? asset.inventory_code : row.damage_severity
-              }`,
+              subtitle: `${locLabel} • ${itemLabel}`,
               description: row.issue_description,
               valueBadge:
                 row.repair_cost > 0
@@ -734,12 +868,15 @@ export function PemeliharaanView() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
                 <div>
                   <span className="text-slate-600 dark:text-slate-400 block">
-                    Aset Terkait
+                    Objek Terkait
                   </span>
                   <strong className="font-mono text-slate-900 dark:text-slate-100">
                     {selectedAsset
                       ? `${selectedAsset.inventory_code} - ${selectedAsset.name}`
-                      : selectedTicket.deleted_target_label || "Fasilitas Fisik Ruangan"}
+                      : selectedOfficeKit
+                      ? `${selectedOfficeKit.kit_code} - ${selectedOfficeKit.name} (Alat Kantor Staf)`
+                      : selectedTicket.deleted_target_label ||
+                        "Fasilitas Fisik Ruangan"}
                   </strong>
                 </div>
                 <div>
@@ -749,6 +886,8 @@ export function PemeliharaanView() {
                   <strong className="font-mono text-slate-900 dark:text-slate-100">
                     {selectedRoom
                       ? `${selectedRoom.code} (${selectedRoom.name})`
+                      : selectedOfficeKit
+                      ? selectedOfficeKit.storage_tray || "Kantor Staf"
                       : "-"}
                   </strong>
                 </div>
@@ -778,8 +917,8 @@ export function PemeliharaanView() {
       <Modal
         isOpen={reportModalOpen}
         onClose={() => setReportModalOpen(false)}
-        title="Form Pelaporan Kerusakan Aset / Ruangan"
-        description="Jika tingkat kerusakan dipilih Rusak Berat, kondisi aset di Inventaris otomatis berubah menjadi Rusak Berat."
+        title="Form Pelaporan Kerusakan Aset / Alat Kantor / Ruangan"
+        description="Kondisi Aset Inventaris atau status Alat Kantor Staf otomatis disinkronkan saat tiket dibuat maupun selesai diperbaiki."
         maxWidthClass="max-w-2xl"
       >
         <form onSubmit={handleReportSubmit} className="space-y-4">
@@ -792,29 +931,121 @@ export function PemeliharaanView() {
             </div>
           ) : null}
 
+          <div className="space-y-1.5">
+            <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
+              Jenis Objek yang Dilaporkan *
+            </span>
+            <div
+              role="group"
+              aria-label="Jenis objek laporan kerusakan"
+              className="grid grid-cols-1 sm:grid-cols-3 gap-2"
+            >
+              {(
+                [
+                  { id: "asset", label: "Aset Inventaris" },
+                  { id: "office_kit", label: "Alat Kantor Staf" },
+                  { id: "room", label: "Fasilitas Fisik Ruangan" },
+                ] as const
+              ).map((opt) => {
+                const active = targetKind === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => handleTargetKindChange(opt.id)}
+                    aria-pressed={active}
+                    className={`min-h-[44px] px-3 py-2 rounded-md border text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400 ${
+                      active
+                        ? "border-[#1E3A5F] bg-[#1E3A5F] text-white dark:border-sky-400 dark:bg-sky-500 dark:text-slate-950"
+                        : "border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {targetKind === "asset" ? (
+              <Select
+                label="Pilih Aset Inventaris Bermasalah *"
+                value={assetId}
+                onChange={(e) => handleAssetSelectionChange(e.target.value)}
+                options={
+                  assets.length === 0
+                    ? [{ value: "", label: "Belum ada data aset terdaftar" }]
+                    : assets.map((a) => ({
+                        value: a.id,
+                        label: `${a.inventory_code} - ${a.name}`,
+                      }))
+                }
+              />
+            ) : targetKind === "office_kit" ? (
+              <Select
+                label="Pilih Alat Kantor Staf Bermasalah *"
+                value={officeKitItemId}
+                onChange={(e) => handleOfficeKitSelectionChange(e.target.value)}
+                options={
+                  officeKitItems.length === 0
+                    ? [
+                        {
+                          value: "",
+                          label: "Belum ada barang di katalog kantor staf",
+                        },
+                      ]
+                    : officeKitItems.map((k) => ({
+                        value: k.id,
+                        label: `${k.kit_code} - ${k.name} [${k.category}] (${k.status})`,
+                      }))
+                }
+              />
+            ) : (
+              <div className="flex items-end pb-1">
+                <p className="w-full min-h-[44px] px-3.5 py-2.5 text-xs rounded-md border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-700 dark:text-slate-300">
+                  Target laporan ditujukan langsung pada prasarana fisik ruangan.
+                </p>
+              </div>
+            )}
+
             <Select
-              label="Pilih Aset yang Bermasalah *"
-              value={assetId}
-              onChange={(e) => handleAssetSelectionChange(e.target.value)}
-              options={[
-                ...assets.map((a) => ({
-                  value: a.id,
-                  label: `${a.inventory_code} - ${a.name}`,
-                })),
-                { value: "", label: "Fasilitas Fisik Ruangan (Non-Inventaris)" },
-              ]}
-            />
-            <Select
-              label="Lokasi Ruangan *"
+              label={
+                targetKind === "office_kit"
+                  ? "Lokasi Ruangan (Opsional)"
+                  : "Lokasi Ruangan *"
+              }
               value={roomId}
               onChange={(e) => setRoomId(e.target.value)}
-              options={rooms.map((r) => ({
-                value: r.id,
-                label: `${r.code} - ${r.name}`,
-              }))}
+              options={
+                targetKind === "office_kit"
+                  ? [
+                      {
+                        value: "",
+                        label: "Kantor Staf / Universal (Tanpa Ruang Khusus)",
+                      },
+                      ...rooms.map((r) => ({
+                        value: r.id,
+                        label: `${r.code} - ${r.name}`,
+                      })),
+                    ]
+                  : rooms.map((r) => ({
+                      value: r.id,
+                      label: `${r.code} - ${r.name}`,
+                    }))
+              }
             />
           </div>
+
+          {targetKind === "office_kit" &&
+          officeKitItems.find((k) => k.id === officeKitItemId)?.status ===
+            "Dipinjam" ? (
+            <div className="p-3 rounded-md border border-amber-400 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-700 text-xs text-amber-950 dark:text-amber-200">
+              Barang ini saat ini berstatus <strong>Dipinjam</strong>. Kondisi
+              rusaknya akan tercatat pada laporan kerusakan dan item akan
+              otomatis beralih ke Perbaikan setelah pengembalian diterima.
+            </div>
+          ) : null}
 
           {campusOfficials.length > 0 || lecturers.length > 0 ? (
             <Select
@@ -1058,6 +1289,11 @@ export function PemeliharaanView() {
                 ...(deletingTicket.asset_id
                   ? [
                       "Kondisi fisik aset terkait akan dievaluasi ulang otomatis berdasarkan sisa tiket aktif lainnya.",
+                    ]
+                  : []),
+                ...(deletingTicket.office_kit_item_id
+                  ? [
+                      "Kondisi dan ketersediaan alat kantor staf terkait akan dievaluasi ulang otomatis.",
                     ]
                   : []),
                 ...(deletingTicket.room_id

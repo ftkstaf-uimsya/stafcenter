@@ -54,6 +54,9 @@ type MutationPayload =
       action: "insert_maintenance";
       data: Record<string, unknown>;
       roomId?: string | null;
+      officeKitItemId?: string | null;
+      assetId?: string | null;
+      damageSeverity?: string;
       setRoomRepair?: boolean;
     }
   | {
@@ -61,6 +64,10 @@ type MutationPayload =
       id: string;
       data: Record<string, unknown>;
       roomId?: string | null;
+      officeKitItemId?: string | null;
+      assetId?: string | null;
+      status?: string;
+      damageSeverity?: string;
       setRoomAvailable?: boolean;
     }
   | { action: "delete_maintenance"; id: string }
@@ -112,6 +119,12 @@ type MutationPayload =
       data: Record<string, unknown>;
       itemIds: string[];
       damagedItemIds?: string[];
+    }
+  | {
+      action: "reopen_office_kit_loan";
+      id: string;
+      itemIds: string[];
+      data?: Record<string, unknown>;
     }
   | { action: "delete_office_kit_loan"; id: string }
   | { action: "insert_note"; data: Record<string, unknown> }
@@ -232,6 +245,7 @@ const TABLE_ALLOWED_COLUMNS: Record<string, readonly string[]> = {
     "ticket_code",
     "asset_id",
     "room_id",
+    "office_kit_item_id",
     "deleted_target_label",
     "reporter_name",
     "reporter_role",
@@ -574,32 +588,48 @@ async function reconcileMaintenanceTargets(
   supabase: SupabaseAdminClient,
   assetId: string | null,
   roomId: string | null,
+  officeKitItemId: string | null,
   nowIso: string
 ) {
-  const [remMaintRes, assetRowRes, urgentRoomRes] = await Promise.all([
-    assetId
-      ? supabase
-          .from("maintenance_logs")
-          .select("damage_severity, status")
-          .eq("asset_id", assetId)
-          .neq("status", "Selesai Diperbaiki")
-      : Promise.resolve({ data: null }),
-    assetId
-      ? supabase
-          .from("assets")
-          .select("condition")
-          .eq("id", assetId)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
-    roomId
-      ? supabase
-          .from("maintenance_logs")
-          .select("id")
-          .eq("room_id", roomId)
-          .neq("status", "Selesai Diperbaiki")
-          .eq("priority", "Tinggi/Darurat")
-      : Promise.resolve({ data: null }),
-  ]);
+  const [remMaintRes, assetRowRes, urgentRoomRes, remKitMaintRes, kitRowRes] =
+    await Promise.all([
+      assetId
+        ? supabase
+            .from("maintenance_logs")
+            .select("damage_severity, status")
+            .eq("asset_id", assetId)
+            .neq("status", "Selesai Diperbaiki")
+        : Promise.resolve({ data: null }),
+      assetId
+        ? supabase
+            .from("assets")
+            .select("condition")
+            .eq("id", assetId)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      roomId
+        ? supabase
+            .from("maintenance_logs")
+            .select("id")
+            .eq("room_id", roomId)
+            .neq("status", "Selesai Diperbaiki")
+            .eq("priority", "Tinggi/Darurat")
+        : Promise.resolve({ data: null }),
+      officeKitItemId
+        ? supabase
+            .from("maintenance_logs")
+            .select("damage_severity, status")
+            .eq("office_kit_item_id", officeKitItemId)
+            .neq("status", "Selesai Diperbaiki")
+        : Promise.resolve({ data: null }),
+      officeKitItemId
+        ? supabase
+            .from("office_kit_items")
+            .select("condition, status")
+            .eq("id", officeKitItemId)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
 
   const updates: Array<PromiseLike<unknown>> = [];
 
@@ -627,14 +657,68 @@ async function reconcileMaintenanceTargets(
     }
   }
 
-  if (roomId && (!urgentRoomRes.data || urgentRoomRes.data.length === 0)) {
-    updates.push(
-      supabase
-        .from("rooms")
-        .update({ status: "Tersedia", updated_at: nowIso })
-        .eq("id", roomId)
-        .eq("status", "Perbaikan")
+  if (officeKitItemId && kitRowRes.data) {
+    const remainingKitMaint = remKitMaintRes.data || [];
+    const hasHeavy = remainingKitMaint.some(
+      (m) => m.damage_severity === "Rusak Berat"
     );
+    const hasLight = remainingKitMaint.some(
+      (m) => m.damage_severity === "Rusak Ringan"
+    );
+    const currentCondition = String(kitRowRes.data.condition || "Baik");
+    const currentStatus = String(kitRowRes.data.status || "Tersedia");
+    let nextCondition = currentCondition;
+    let nextStatus = currentStatus;
+
+    if (hasHeavy) {
+      nextCondition = "Rusak Berat";
+      if (currentStatus === "Tersedia") nextStatus = "Perbaikan";
+    } else if (hasLight) {
+      if (currentCondition === "Baik" || currentCondition === "Rusak Berat") {
+        nextCondition = "Rusak Ringan";
+      }
+      if (currentStatus === "Tersedia") nextStatus = "Perbaikan";
+    } else {
+      if (currentCondition === "Rusak Berat" || currentCondition === "Rusak Ringan") {
+        nextCondition = "Baik";
+      }
+      if (currentStatus === "Perbaikan") {
+        nextStatus = "Tersedia";
+      }
+    }
+
+    if (nextCondition !== currentCondition || nextStatus !== currentStatus) {
+      updates.push(
+        supabase
+          .from("office_kit_items")
+          .update({
+            condition: nextCondition,
+            status: nextStatus,
+            updated_at: nowIso,
+          })
+          .eq("id", officeKitItemId)
+      );
+    }
+  }
+
+  if (roomId) {
+    if (urgentRoomRes.data && urgentRoomRes.data.length > 0) {
+      updates.push(
+        supabase
+          .from("rooms")
+          .update({ status: "Perbaikan", updated_at: nowIso })
+          .eq("id", roomId)
+          .eq("status", "Tersedia")
+      );
+    } else {
+      updates.push(
+        supabase
+          .from("rooms")
+          .update({ status: "Tersedia", updated_at: nowIso })
+          .eq("id", roomId)
+          .eq("status", "Perbaikan")
+      );
+    }
   }
 
   if (updates.length > 0) {
@@ -659,10 +743,7 @@ async function handleRoomOrAssetDelete(
       .from("bookings")
       .select("id, booking_code, status, target_type, room_id, asset_id")
       .eq(fkCol, id),
-    supabase
-      .from("maintenance_logs")
-      .select("id, ticket_code, status, room_id, asset_id")
-      .eq(fkCol, id),
+    supabase.from("maintenance_logs").select("*").eq(fkCol, id),
   ]);
 
   if (bkRes.error) {
@@ -728,10 +809,13 @@ async function handleRoomOrAssetDelete(
     }
 
     const maintIdsToClearAsset: string[] = [];
+    const maintIdsToClearRoom: string[] = [];
     const maintIdsToDelete: string[] = [];
     for (const mt of relatedMaint) {
       if (mt[otherCol] && kind === "asset") {
         maintIdsToClearAsset.push(String(mt.id));
+      } else if (mt.office_kit_item_id && kind === "room") {
+        maintIdsToClearRoom.push(String(mt.id));
       } else {
         maintIdsToDelete.push(String(mt.id));
       }
@@ -765,6 +849,14 @@ async function handleRoomOrAssetDelete(
           .from("maintenance_logs")
           .update({ asset_id: null, updated_at: nowIso })
           .in("id", maintIdsToClearAsset)
+      );
+    }
+    if (maintIdsToClearRoom.length > 0) {
+      batchJobs.push(
+        supabase
+          .from("maintenance_logs")
+          .update({ room_id: null, updated_at: nowIso })
+          .in("id", maintIdsToClearRoom)
       );
     }
     if (maintIdsToDelete.length > 0) {
@@ -1256,21 +1348,38 @@ export async function POST(request: NextRequest) {
           body.data,
           false
         );
-        const [insRes] = await Promise.all([
-          supabase.from("maintenance_logs").insert(cleanData),
-          body.roomId && body.setRoomRepair
-            ? supabase
-                .from("rooms")
-                .update({ status: "Perbaikan", updated_at: nowIso })
-                .eq("id", body.roomId)
-            : Promise.resolve(null),
-        ]);
-        if (insRes.error) {
+        if (cleanData.office_kit_item_id == null) {
+          delete cleanData.office_kit_item_id;
+        }
+        const officeKitItemId =
+          body.officeKitItemId ||
+          (cleanData.office_kit_item_id as string | undefined) ||
+          null;
+        const { error: insErr } = await supabase
+          .from("maintenance_logs")
+          .insert(cleanData);
+        if (insErr) {
+          if (insErr.message?.includes("office_kit_item_id")) {
+            return NextResponse.json(
+              {
+                error:
+                  "Kolom pelaporan Alat Kantor Staf belum terpasang. Jalankan migrasi supabase/migrations/009_maintenance_office_kit.sql di SQL Editor Supabase.",
+              },
+              { status: 400 }
+            );
+          }
           return NextResponse.json(
-            { error: formatSafeDbError(insRes.error.message) },
+            { error: formatSafeDbError(insErr.message) },
             { status: 400 }
           );
         }
+        await reconcileMaintenanceTargets(
+          supabase,
+          body.assetId || (cleanData.asset_id as string | undefined) || null,
+          body.roomId || (cleanData.room_id as string | undefined) || null,
+          officeKitItemId,
+          nowIso
+        );
         return NextResponse.json({ ok: true });
       }
       case "update_maintenance": {
@@ -1279,22 +1388,25 @@ export async function POST(request: NextRequest) {
           body.data,
           true
         );
-        const [updRes] = await Promise.all([
-          supabase
-            .from("maintenance_logs")
-            .update({ ...cleanData, updated_at: nowIso })
-            .eq("id", body.id),
-          body.roomId && body.setRoomAvailable
-            ? supabase
-                .from("rooms")
-                .update({ status: "Tersedia", updated_at: nowIso })
-                .eq("id", body.roomId)
-            : Promise.resolve(null),
-        ]);
-        if (updRes.error) {
+        const { data: updatedRow, error: updErr } = await supabase
+          .from("maintenance_logs")
+          .update({ ...cleanData, updated_at: nowIso })
+          .eq("id", body.id)
+          .select("*")
+          .maybeSingle();
+        if (updErr) {
           return NextResponse.json(
-            { error: formatSafeDbError(updRes.error.message) },
+            { error: formatSafeDbError(updErr.message) },
             { status: 400 }
+          );
+        }
+        if (updatedRow) {
+          await reconcileMaintenanceTargets(
+            supabase,
+            (updatedRow.asset_id as string | null) || null,
+            (updatedRow.room_id as string | null) || null,
+            (updatedRow.office_kit_item_id as string | null) || null,
+            nowIso
           );
         }
         return NextResponse.json({ ok: true });
@@ -1306,7 +1418,7 @@ export async function POST(request: NextRequest) {
             .from("maintenance_logs")
             .delete()
             .eq("id", body.id)
-            .select("id, asset_id, room_id")
+            .select("*")
             .maybeSingle(),
         ]);
         if (delRes.error) {
@@ -1322,6 +1434,7 @@ export async function POST(request: NextRequest) {
             supabase,
             (existing.asset_id as string | null) || null,
             (existing.room_id as string | null) || null,
+            (existing.office_kit_item_id as string | null) || null,
             nowIso
           );
         }
@@ -1931,7 +2044,7 @@ export async function POST(request: NextRequest) {
       case "delete_office_kit_item": {
         const { data: kitRow } = await supabase
           .from("office_kit_items")
-          .select("kit_code, status")
+          .select("kit_code, name, status")
           .eq("id", body.id)
           .maybeSingle();
         if (kitRow?.status === "Dipinjam") {
@@ -1941,6 +2054,14 @@ export async function POST(request: NextRequest) {
             },
             { status: 409 }
           );
+        }
+        if (kitRow) {
+          const snapshotLabel = `Alat Kantor ${kitRow.kit_code} (${kitRow.name}) [Dihapus]`;
+          await supabase
+            .from("maintenance_logs")
+            .update({ deleted_target_label: snapshotLabel, updated_at: nowIso })
+            .eq("office_kit_item_id", body.id)
+            .is("deleted_target_label", null);
         }
         const [, delRes] = await Promise.all([
           cleanupEntityArtifacts(supabase, "office_kit", body.id),
@@ -2015,6 +2136,62 @@ export async function POST(request: NextRequest) {
                   updated_at: nowIso,
                 })
                 .in("id", damagedIds)
+            : Promise.resolve(null),
+        ]);
+        if (updRes.error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(updRes.error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "reopen_office_kit_loan": {
+        const itemIds = Array.isArray(body.itemIds) ? body.itemIds : [];
+        if (itemIds.length > 0) {
+          const { data: kitRows, error: kitErr } = await supabase
+            .from("office_kit_items")
+            .select("id, kit_code, status")
+            .in("id", itemIds);
+          if (kitErr) {
+            return NextResponse.json(
+              { error: formatSafeDbError(kitErr.message) },
+              { status: 400 }
+            );
+          }
+          const unavailable = (kitRows || []).filter(
+            (k) => k.status !== "Tersedia"
+          );
+          if (unavailable.length > 0) {
+            return NextResponse.json(
+              {
+                error: `Tidak dapat mengembalikan tiket ke status Dipinjam karena ${unavailable
+                  .map((k) => `${k.kit_code} (${k.status})`)
+                  .join(", ")} sedang tidak tersedia.`,
+              },
+              { status: 409 }
+            );
+          }
+        }
+        const cleanData = sanitizeTablePayload(
+          "office_kit_loans",
+          body.data || {
+            status: "Dipinjam",
+            returned_at: null,
+            received_by_staff: null,
+          },
+          true
+        );
+        const [updRes] = await Promise.all([
+          supabase
+            .from("office_kit_loans")
+            .update({ ...cleanData, updated_at: nowIso })
+            .eq("id", body.id),
+          itemIds.length > 0
+            ? supabase
+                .from("office_kit_items")
+                .update({ status: "Dipinjam", updated_at: nowIso })
+                .in("id", itemIds)
             : Promise.resolve(null),
         ]);
         if (updRes.error) {
