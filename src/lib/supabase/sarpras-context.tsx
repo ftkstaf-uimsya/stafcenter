@@ -4606,7 +4606,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           "Alat Diserahkan ke Kelas",
           `${loan_code}: ${selectedItems.length} barang dipinjamkan ke kelas ${newLoan.class_code}.`
         );
-        return { ok: true };
+        return { ok: true, id };
       }
 
       notify(
@@ -4614,7 +4614,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         "Alat Diserahkan ke Kelas",
         `${loan_code}: ${selectedItems.length} barang dicatat dipinjam kelas ${newLoan.class_code}.`
       );
-      return { ok: true };
+      return { ok: true, id };
     },
     [
       authUser,

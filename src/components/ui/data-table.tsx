@@ -1,4 +1,6 @@
-import React from "react";
+"use client";
+
+import React, { useEffect, useRef } from "react";
 import { EmptyStateView } from "@/components/ui/data-states";
 
 export interface DataTableColumn<T> {
@@ -19,6 +21,10 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
   hiddenColumnKeys?: string[];
   activeRowKey?: string | null;
+  selectable?: boolean;
+  selectedRowKeys?: string[];
+  onToggleRowKey?: (key: string) => void;
+  onToggleAllVisible?: (visibleKeys: string[], nextChecked: boolean) => void;
 }
 
 export function DataTable<T>({
@@ -32,10 +38,31 @@ export function DataTable<T>({
   onRowClick,
   hiddenColumnKeys = [],
   activeRowKey = null,
+  selectable = false,
+  selectedRowKeys = [],
+  onToggleRowKey,
+  onToggleAllVisible,
 }: DataTableProps<T>) {
+  const selectAllRef = useRef<HTMLInputElement>(null);
   const visibleColumns = columns.filter(
     (col) => !hiddenColumnKeys.includes(col.key)
   );
+  const visibleKeys = data.map(rowKey);
+  const selectedSet = new Set(selectedRowKeys);
+  const allVisibleSelected =
+    selectable &&
+    visibleKeys.length > 0 &&
+    visibleKeys.every((k) => selectedSet.has(k));
+  const someVisibleSelected =
+    selectable &&
+    visibleKeys.some((k) => selectedSet.has(k)) &&
+    !allVisibleSelected;
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someVisibleSelected;
+    }
+  }, [someVisibleSelected]);
 
   if (data.length === 0) {
     return (
@@ -53,6 +80,20 @@ export function DataTable<T>({
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="border-b border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/90">
+            {selectable ? (
+              <th scope="col" className="w-11 px-3 py-3 text-center">
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={() =>
+                    onToggleAllVisible?.(visibleKeys, !allVisibleSelected)
+                  }
+                  aria-label="Pilih semua baris yang tampil"
+                  className="w-4 h-4 rounded accent-[#1E3A5F] cursor-pointer"
+                />
+              </th>
+            ) : null}
             {visibleColumns.map((col) => (
               <th
                 key={col.key}
@@ -68,6 +109,7 @@ export function DataTable<T>({
           {data.map((row) => {
             const key = rowKey(row);
             const isSelected = activeRowKey === key;
+            const isChecked = selectedSet.has(key);
             return (
               <tr
                 key={key}
@@ -91,6 +133,20 @@ export function DataTable<T>({
                     : "hover:bg-slate-50/70 dark:hover:bg-slate-800/40"
                 }`}
               >
+                {selectable ? (
+                  <td
+                    className="w-11 px-3 py-3.5 align-top text-center"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => onToggleRowKey?.(key)}
+                      aria-label={`Pilih baris ${key}`}
+                      className="w-4 h-4 mt-0.5 rounded accent-[#1E3A5F] cursor-pointer"
+                    />
+                  </td>
+                ) : null}
                 {visibleColumns.map((col) => (
                   <td
                     key={col.key}

@@ -1,22 +1,28 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
   BarChart3,
   Building2,
   Cable,
+  Camera,
   CheckCircle2,
   Clock,
   Download,
   Edit3,
   History,
+  ImagePlus,
   KanbanSquare,
   Layers,
   PackageCheck,
   Plus,
+  Printer,
+  QrCode,
   RotateCcw,
+  ScanLine,
+  Search,
   ShieldCheck,
   Table2,
   Trash2,
@@ -53,6 +59,13 @@ import { KanbanBoard, KanbanColumnDef } from "@/components/ui/kanban-board";
 import { EntityDrawerSections } from "@/components/ui/entity-drawer-sections";
 import { ErrorStateView, LoadingStateView } from "@/components/ui/data-states";
 import { AssetConditionBadge } from "@/components/sarpras/status-badges";
+import { BarcodeLabelModal } from "@/components/ui/barcode-label-modal";
+import {
+  BarcodeScannerModal,
+  ScanCodeOutcome,
+} from "@/components/ui/barcode-scanner-modal";
+import { PrintableBarcodeItem } from "@/lib/barcode/render-codes";
+import { compressPhotoIfNeeded } from "@/lib/media/compress-image";
 
 const OFFICE_KIT_CATEGORIES: OfficeKitCategory[] = [
   "Kabel HDMI",
@@ -174,6 +187,7 @@ export function SirkulasiInventView() {
     checkinOfficeKitLoan,
     reopenOfficeKitLoan,
     deleteOfficeKitLoan,
+    uploadEntityFile,
   } = useSarpras();
 
   const isMasterAdmin = !isLiveSupabase || authUser?.role === "master_admin";
@@ -219,6 +233,26 @@ export function SirkulasiInventView() {
   const [borrowTime, setBorrowTime] = useState("08:00");
   const [expectedReturnTime, setExpectedReturnTime] = useState("10:30");
   const [checkoutError, setCheckoutError] = useState("");
+  const [kitPickerSearch, setKitPickerSearch] = useState("");
+  const [kitPickerCategory, setKitPickerCategory] = useState("ALL");
+  const [scanFeedback, setScanFeedback] = useState<{
+    tone: "success" | "warning" | "error";
+    text: string;
+  } | null>(null);
+  const [scannerModalOpen, setScannerModalOpen] = useState(false);
+  const [checkoutPhotoFile, setCheckoutPhotoFile] = useState<File | null>(null);
+  const [checkoutPhotoPreview, setCheckoutPhotoPreview] = useState<string | null>(
+    null
+  );
+  const [submittingCheckout, setSubmittingCheckout] = useState(false);
+  const galleryPhotoInputRef = useRef<HTMLInputElement>(null);
+  const cameraPhotoInputRef = useRef<HTMLInputElement>(null);
+
+  // Seleksi & Cetak Label Barcode Barang Kantor Staf
+  const [selectedKitRowKeys, setSelectedKitRowKeys] = useState<string[]>([]);
+  const [barcodePrintItems, setBarcodePrintItems] = useState<
+    PrintableBarcodeItem[] | null
+  >(null);
 
   // Modal Check-In Pengembalian
   const [returningLoan, setReturningLoan] = useState<OfficeKitLoan | null>(
@@ -301,6 +335,31 @@ export function SirkulasiInventView() {
       ),
     [officeKitItems]
   );
+
+  const pickerFilteredKitItems = useMemo(() => {
+    const q = kitPickerSearch.trim().toLowerCase();
+    return availableKitItems.filter((item) => {
+      if (kitPickerCategory !== "ALL" && item.category !== kitPickerCategory) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        item.kit_code.toLowerCase().includes(q) ||
+        item.name.toLowerCase().includes(q) ||
+        item.category.toLowerCase().includes(q) ||
+        item.brand_spec.toLowerCase().includes(q) ||
+        item.storage_tray.toLowerCase().includes(q)
+      );
+    });
+  }, [availableKitItems, kitPickerCategory, kitPickerSearch]);
+
+  useEffect(() => {
+    return () => {
+      if (checkoutPhotoPreview) {
+        URL.revokeObjectURL(checkoutPhotoPreview);
+      }
+    };
+  }, [checkoutPhotoPreview]);
 
   const filteredLoans = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -730,7 +789,30 @@ export function SirkulasiInventView() {
     setBorrowTime("08:00");
     setExpectedReturnTime("10:30");
     setCheckoutError("");
+    setKitPickerSearch("");
+    setKitPickerCategory("ALL");
+    setScanFeedback(null);
+    setScannerModalOpen(false);
+    setCheckoutPhotoFile(null);
+    setCheckoutPhotoPreview(null);
+    setSubmittingCheckout(false);
     setCheckoutModalOpen(true);
+  };
+
+  const handlePickCheckoutPhoto = (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setCheckoutError("Pilih berkas gambar (JPG, PNG, atau WEBP) untuk foto peminjaman.");
+      return;
+    }
+    setCheckoutError("");
+    setCheckoutPhotoFile(file);
+    setCheckoutPhotoPreview(URL.createObjectURL(file));
+  };
+
+  const handleClearCheckoutPhoto = () => {
+    setCheckoutPhotoFile(null);
+    setCheckoutPhotoPreview(null);
   };
 
   const handleClassChange = (clsId: string) => {
@@ -752,8 +834,115 @@ export function SirkulasiInventView() {
     );
   };
 
-  const handleCheckoutSubmit = (e: React.FormEvent) => {
+  const handleScanOrQuickAddCode = (rawCode: string): ScanCodeOutcome => {
+    const clean = rawCode.trim();
+    const normalized = clean.toUpperCase();
+    if (!normalized) {
+      return {
+        status: "not_found",
+        message: "Kode barang masih kosong.",
+      };
+    }
+
+    const exactItem = officeKitItems.find(
+      (item) => item.kit_code.trim().toUpperCase() === normalized
+    );
+
+    if (!exactItem) {
+      return {
+        status: "not_found",
+        message: `Kode "${clean}" tidak ditemukan pada katalog barang kantor staf.`,
+      };
+    }
+
+    if (exactItem.status === "Dipinjam") {
+      const activeLoan = officeKitLoans.find(
+        (l) => l.status === "Dipinjam" && l.kit_item_ids.includes(exactItem.id)
+      );
+      return {
+        status: "unavailable",
+        message: `${exactItem.kit_code} (${exactItem.name}) sedang dipinjam${
+          activeLoan ? ` oleh kelas ${activeLoan.class_code}` : ""
+        }.`,
+      };
+    }
+
+    if (
+      !exactItem.is_active ||
+      exactItem.status !== "Tersedia" ||
+      exactItem.condition === "Hilang"
+    ) {
+      return {
+        status: "unavailable",
+        message: `${exactItem.kit_code} (${exactItem.name}) tidak tersedia (${exactItem.status} / ${exactItem.condition}).`,
+      };
+    }
+
+    if (selectedKitIds.includes(exactItem.id)) {
+      return {
+        status: "duplicate",
+        message: `${exactItem.kit_code} (${exactItem.name}) sudah dipilih.`,
+      };
+    }
+
+    setSelectedKitIds((prev) =>
+      prev.includes(exactItem.id) ? prev : [...prev, exactItem.id]
+    );
+    return {
+      status: "added",
+      message: `Ditambahkan: ${exactItem.kit_code} (${exactItem.name}).`,
+    };
+  };
+
+  const handlePickerSearchKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>
+  ) => {
+    if (e.key !== "Enter") return;
     e.preventDefault();
+    const clean = kitPickerSearch.trim();
+    if (!clean) return;
+
+    const outcome = handleScanOrQuickAddCode(clean);
+    if (outcome.status === "added") {
+      setScanFeedback({ tone: "success", text: outcome.message });
+      setKitPickerSearch("");
+      return;
+    }
+    if (outcome.status === "duplicate") {
+      setScanFeedback({ tone: "warning", text: outcome.message });
+      setKitPickerSearch("");
+      return;
+    }
+    if (outcome.status === "unavailable") {
+      setScanFeedback({ tone: "error", text: outcome.message });
+      return;
+    }
+
+    if (pickerFilteredKitItems.length === 1) {
+      const single = pickerFilteredKitItems[0];
+      const already = selectedKitIds.includes(single.id);
+      if (!already) {
+        setSelectedKitIds((prev) => [...prev, single.id]);
+        setScanFeedback({
+          tone: "success",
+          text: `Ditambahkan: ${single.kit_code} (${single.name}).`,
+        });
+      } else {
+        setScanFeedback({
+          tone: "warning",
+          text: `${single.kit_code} (${single.name}) sudah dipilih.`,
+        });
+      }
+      setKitPickerSearch("");
+      return;
+    }
+
+    setScanFeedback({ tone: "error", text: outcome.message });
+  };
+
+  const handleCheckoutSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submittingCheckout) return;
     setCheckoutError("");
 
     if (!selectedClassObj) {
@@ -794,7 +983,47 @@ export function SirkulasiInventView() {
       setCheckoutError(res.error || "Gagal mencatat peminjaman alat.");
       return;
     }
+
+    const pendingPhoto = checkoutPhotoFile;
+    if (pendingPhoto && res.id) {
+      setSubmittingCheckout(true);
+      try {
+        const compressed = await compressPhotoIfNeeded(pendingPhoto);
+        await uploadEntityFile("office_loan", res.id, compressed);
+      } finally {
+        setSubmittingCheckout(false);
+      }
+    }
+
     setCheckoutModalOpen(false);
+  };
+
+  const toKitPrintableItem = (item: OfficeKitItem): PrintableBarcodeItem => {
+    const linkedRoom = rooms.find((r) => r.id === item.linked_room_id);
+    return {
+      id: item.id,
+      code: item.kit_code,
+      title: item.name,
+      subtitle: `${item.category}${
+        item.brand_spec && item.brand_spec !== "-"
+          ? ` • ${item.brand_spec}`
+          : ""
+      }`,
+      meta: linkedRoom
+        ? `${item.storage_tray} (${linkedRoom.code})`
+        : item.storage_tray,
+      headerTag: "ALAT KANTOR STAF • STAFCENTER",
+    };
+  };
+
+  const openBulkKitBarcodePrint = () => {
+    const selectedSet = new Set(selectedKitRowKeys);
+    const chosen =
+      selectedSet.size > 0
+        ? officeKitItems.filter((item) => selectedSet.has(item.id))
+        : filteredItems;
+    if (chosen.length === 0) return;
+    setBarcodePrintItems(chosen.map(toKitPrintableItem));
   };
 
   const openReturnModal = (loan: OfficeKitLoan, preDamagedIds?: string[]) => {
@@ -1105,12 +1334,22 @@ export function SirkulasiInventView() {
     },
     {
       key: "actions",
-      header: "Aksi",
+      header: "Barcode & Aksi",
       render: (row) => (
         <div
-          className="flex items-center gap-1.5"
+          className="flex flex-wrap items-center gap-1.5"
           onClick={(e) => e.stopPropagation()}
         >
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setBarcodePrintItems([toKitPrintableItem(row)])}
+            aria-label={`Cetak barcode ${row.kit_code}`}
+          >
+            <QrCode className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Barcode</span>
+          </Button>
           <Button
             type="button"
             variant="outline"
@@ -1658,7 +1897,34 @@ export function SirkulasiInventView() {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {activeTab === "items" ? (
+            <>
+              {selectedKitRowKeys.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedKitRowKeys([])}
+                  className="min-h-[40px] px-2.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white underline"
+                >
+                  Batal Pilih ({selectedKitRowKeys.length})
+                </button>
+              ) : null}
+              <Button
+                type="button"
+                variant="outline"
+                disabled={filteredItems.length === 0 && selectedKitRowKeys.length === 0}
+                onClick={openBulkKitBarcodePrint}
+              >
+                <Printer className="w-4 h-4" aria-hidden="true" />
+                <span>
+                  {selectedKitRowKeys.length > 0
+                    ? `Cetak Barcode (${selectedKitRowKeys.length} dipilih)`
+                    : "Cetak Barcode Massal"}
+                </span>
+              </Button>
+            </>
+          ) : null}
+
           {viewMode === "table" ? (
             <ColumnsTogglePopover
               columns={
@@ -2409,6 +2675,15 @@ export function SirkulasiInventView() {
               const attCount = attachments.filter(
                 (a) => a.entity_type === "office_loan" && a.entity_id === row.id
               ).length;
+              const firstImageAtt = attachments.find(
+                (a) =>
+                  a.entity_type === "office_loan" &&
+                  a.entity_id === row.id &&
+                  a.mime_type.startsWith("image/") &&
+                  (a.file_url.startsWith("https://") ||
+                    a.file_url.startsWith("http://") ||
+                    a.file_url.startsWith("blob:"))
+              );
 
               return {
                 code: row.loan_code,
@@ -2418,6 +2693,7 @@ export function SirkulasiInventView() {
                 } • Prodi ${row.prodi}`,
                 description: row.kit_items_label,
                 valueBadge: `${row.kit_item_ids.length} item`,
+                thumbnailUrl: firstImageAtt?.file_url || null,
                 priorityBadge:
                   row.status === "Dipinjam" ? (
                     <Badge tone="warning">Dipinjam</Badge>
@@ -2663,6 +2939,17 @@ export function SirkulasiInventView() {
                   )}
                   <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setBarcodePrintItems([toKitPrintableItem(row)])
+                    }
+                    aria-label={`Cetak barcode ${row.kit_code}`}
+                  >
+                    <QrCode className="w-3.5 h-3.5" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
                     variant="danger"
                     size="sm"
                     onClick={() => {
@@ -2686,6 +2973,28 @@ export function SirkulasiInventView() {
           hiddenColumnKeys={hiddenItemCols}
           activeRowKey={selectedKitId}
           onRowClick={(row) => setSelectedKitId(row.id)}
+          selectable
+          selectedRowKeys={selectedKitRowKeys}
+          onToggleRowKey={(key) =>
+            setSelectedKitRowKeys((prev) =>
+              prev.includes(key)
+                ? prev.filter((item) => item !== key)
+                : [...prev, key]
+            )
+          }
+          onToggleAllVisible={(visibleKeys, nextChecked) => {
+            setSelectedKitRowKeys((prev) => {
+              const nextSet = new Set(prev);
+              for (const k of visibleKeys) {
+                if (nextChecked) {
+                  nextSet.add(k);
+                } else {
+                  nextSet.delete(k);
+                }
+              }
+              return Array.from(nextSet);
+            });
+          }}
           emptyTitle="Belum Ada Barang Kantor Staf"
           emptyDescription="Tambahkan unit Kabel HDMI, Stop Kontak, atau Remote TV yang dikumpulkan di kantor staf."
           emptyActionLabel="Tambah Barang Kantor Staf"
@@ -2825,6 +3134,47 @@ export function SirkulasiInventView() {
               ) : null}
             </dl>
 
+            {(() => {
+              const loanPhotos = attachments.filter(
+                (a) =>
+                  a.entity_type === "office_loan" &&
+                  a.entity_id === selectedLoan.id &&
+                  a.mime_type.startsWith("image/") &&
+                  (a.file_url.startsWith("https://") ||
+                    a.file_url.startsWith("http://") ||
+                    a.file_url.startsWith("blob:"))
+              );
+              if (loanPhotos.length === 0) return null;
+              return (
+                <div className="space-y-2">
+                  <p className="text-xs font-mono font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                    Foto Bukti Peminjaman ({loanPhotos.length})
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {loanPhotos.map((photo) => (
+                      <a
+                        key={photo.id}
+                        href={photo.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group block rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={photo.file_url}
+                          alt={`Foto serah terima ${selectedLoan.loan_code}`}
+                          className="w-full h-40 object-cover group-hover:opacity-90 transition-opacity"
+                        />
+                        <div className="px-2.5 py-1.5 text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
+                          {photo.file_name}
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             <EntityDrawerSections
               entityType="office_loan"
               entityId={selectedLoan.id}
@@ -2879,14 +3229,26 @@ export function SirkulasiInventView() {
                   <span>Laporkan Kerusakan</span>
                 </Link>
               </div>
-              <Button
-                type="button"
-                variant="primary"
-                onClick={() => openEditKitModal(selectedKit)}
-              >
-                <Edit3 className="w-4 h-4" aria-hidden="true" />
-                <span>Edit Barang</span>
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    setBarcodePrintItems([toKitPrintableItem(selectedKit)])
+                  }
+                >
+                  <QrCode className="w-4 h-4" aria-hidden="true" />
+                  <span>Cetak Barcode</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => openEditKitModal(selectedKit)}
+                >
+                  <Edit3 className="w-4 h-4" aria-hidden="true" />
+                  <span>Edit Barang</span>
+                </Button>
+              </div>
             </div>
           ) : null
         }
@@ -3074,8 +3436,8 @@ export function SirkulasiInventView() {
             />
           </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
               <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
                 Pilih Barang Kantor Staf yang Dipinjam * (
                 {selectedKitIds.length} dipilih)
@@ -3091,14 +3453,133 @@ export function SirkulasiInventView() {
               ) : null}
             </div>
 
+            {/* Chip barang yang sudah terpilih agar selalu terlihat saat mencari */}
+            {selectedKitIds.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 p-2 rounded-md border border-sky-200 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-950/30">
+                {selectedKitIds.map((kitId) => {
+                  const kit = officeKitItems.find((k) => k.id === kitId);
+                  if (!kit) return null;
+                  return (
+                    <span
+                      key={kit.id}
+                      className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold bg-white dark:bg-slate-900 border border-[#1E3A5F]/40 dark:border-sky-500/50 text-slate-900 dark:text-slate-100"
+                    >
+                      <span className="font-mono font-bold text-[#1E3A5F] dark:text-sky-400">
+                        {kit.kit_code}
+                      </span>
+                      <span className="max-w-[140px] truncate">{kit.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleKitSelection(kit.id)}
+                        aria-label={`Hapus pilihan ${kit.kit_code}`}
+                        className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
+                      >
+                        <X className="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {/* Toolbar Pencarian, Filter Kategori & Scan Barcode Kamera */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+              <div className="sm:col-span-6 relative">
+                <Search
+                  className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                  aria-hidden="true"
+                />
+                <input
+                  type="text"
+                  value={kitPickerSearch}
+                  onChange={(e) => {
+                    setKitPickerSearch(e.target.value);
+                    if (scanFeedback) setScanFeedback(null);
+                  }}
+                  onKeyDown={handlePickerSearchKeyDown}
+                  placeholder="Cari kode/nama atau scan barcode + Enter..."
+                  aria-label="Cari atau scan kode barang kantor staf"
+                  className="min-h-[40px] w-full pl-9 pr-3 py-1.5 text-xs rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+                />
+              </div>
+
+              <div className="sm:col-span-3">
+                <select
+                  value={kitPickerCategory}
+                  onChange={(e) => setKitPickerCategory(e.target.value)}
+                  aria-label="Filter kategori barang"
+                  className="min-h-[40px] w-full px-2.5 py-1.5 text-xs font-medium rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+                >
+                  <option value="ALL">Semua Kategori</option>
+                  {OFFICE_KIT_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sm:col-span-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full min-h-[40px]"
+                  onClick={() => setScannerModalOpen(true)}
+                >
+                  <ScanLine className="w-4 h-4" aria-hidden="true" />
+                  <span>Scan Kamera</span>
+                </Button>
+              </div>
+            </div>
+
+            {scanFeedback ? (
+              <div
+                role="status"
+                className={`p-2.5 rounded-md border text-xs font-semibold flex items-center justify-between gap-2 ${
+                  scanFeedback.tone === "success"
+                    ? "border-emerald-600 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/60 dark:border-emerald-500 dark:text-emerald-200"
+                    : scanFeedback.tone === "warning"
+                    ? "border-sky-600 bg-sky-50 text-sky-900 dark:bg-sky-950/60 dark:border-sky-500 dark:text-sky-200"
+                    : "border-amber-600 bg-amber-50 text-amber-900 dark:bg-amber-950/60 dark:border-amber-500 dark:text-amber-200"
+                }`}
+              >
+                <span>{scanFeedback.text}</span>
+                <button
+                  type="button"
+                  onClick={() => setScanFeedback(null)}
+                  aria-label="Tutup pesan scan"
+                  className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10"
+                >
+                  <X className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            ) : null}
+
             {availableKitItems.length === 0 ? (
               <p className="p-3 rounded-md border border-dashed border-amber-500 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-900 dark:text-amber-200">
                 Seluruh Kabel HDMI, Stop Kontak, dan Remote TV di kantor staf
                 sedang dipinjam atau dalam perbaikan.
               </p>
+            ) : pickerFilteredKitItems.length === 0 ? (
+              <div className="p-3 rounded-md border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-600 dark:text-slate-400 space-y-1.5">
+                <p>
+                  Tidak ada barang tersedia yang cocok dengan pencarian atau filter kategori.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setKitPickerSearch("");
+                    setKitPickerCategory("ALL");
+                  }}
+                  className="font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline"
+                >
+                  Reset pencarian barang
+                </button>
+              </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto p-1">
-                {availableKitItems.map((item) => {
+                {pickerFilteredKitItems.map((item) => {
                   const checked = selectedKitIds.includes(item.id);
                   return (
                     <label
@@ -3159,17 +3640,106 @@ export function SirkulasiInventView() {
             />
           </div>
 
+          {/* Input Foto Bukti Serah Terima (Opsional) */}
+          <div className="p-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/60 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                  Foto Bukti Peminjaman (Opsional)
+                </p>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                  Dokumentasi barang &amp; pengambil di loket (JPG/PNG/WEBP, otomatis dikompres).
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={galleryPhotoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    handlePickCheckoutPhoto(e.target.files?.[0] || null);
+                    e.target.value = "";
+                  }}
+                />
+                <input
+                  ref={cameraPhotoInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => {
+                    handlePickCheckoutPhoto(e.target.files?.[0] || null);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => galleryPhotoInputRef.current?.click()}
+                >
+                  <ImagePlus className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Pilih Foto</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => cameraPhotoInputRef.current?.click()}
+                >
+                  <Camera className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Ambil Foto</span>
+                </Button>
+              </div>
+            </div>
+
+            {checkoutPhotoPreview && checkoutPhotoFile ? (
+              <div className="flex items-center gap-3 p-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={checkoutPhotoPreview}
+                  alt="Pratinjau foto peminjaman"
+                  className="w-16 h-16 rounded object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                />
+                <div className="min-w-0 flex-1 text-xs">
+                  <p className="font-semibold text-slate-900 dark:text-slate-100 truncate">
+                    {checkoutPhotoFile.name}
+                  </p>
+                  <p className="text-[11px] font-mono text-slate-600 dark:text-slate-400">
+                    {Math.max(1, Math.round(checkoutPhotoFile.size / 1024))} KB
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={handleClearCheckoutPhoto}
+                  aria-label="Hapus foto peminjaman"
+                >
+                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Hapus</span>
+                </Button>
+              </div>
+            ) : null}
+          </div>
+
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <Button
               type="button"
               variant="outline"
+              disabled={submittingCheckout}
               onClick={() => setCheckoutModalOpen(false)}
             >
               Batal
             </Button>
-            <Button type="submit" variant="primary">
+            <Button type="submit" variant="primary" disabled={submittingCheckout}>
               <PackageCheck className="w-4 h-4" aria-hidden="true" />
-              <span>Serahkan Alat ke Kelas</span>
+              <span>
+                {submittingCheckout
+                  ? "Menyimpan & Mengunggah Foto..."
+                  : "Serahkan Alat ke Kelas"}
+              </span>
             </Button>
           </div>
         </form>
@@ -3433,6 +4003,27 @@ export function SirkulasiInventView() {
           if (selectedKitId === deletingKit.id) setSelectedKitId(null);
           setDeletingKit(null);
         }}
+      />
+
+      {/* Modal Pemindai Barcode / QR Kamera untuk Form Pinjam */}
+      <BarcodeScannerModal
+        isOpen={scannerModalOpen}
+        onClose={() => setScannerModalOpen(false)}
+        onScanCode={handleScanOrQuickAddCode}
+        selectedCount={selectedKitIds.length}
+      />
+
+      {/* Modal Cetak Stiker Barcode / QR Satuan & Massal Barang Kantor Staf */}
+      <BarcodeLabelModal
+        isOpen={Boolean(barcodePrintItems && barcodePrintItems.length > 0)}
+        onClose={() => setBarcodePrintItems(null)}
+        title={
+          barcodePrintItems && barcodePrintItems.length > 1
+            ? `Cetak Label Barcode Massal (${barcodePrintItems.length} Barang Kantor Staf)`
+            : `Label Stiker & Barcode ${barcodePrintItems?.[0]?.code || ""}`
+        }
+        items={barcodePrintItems || []}
+        defaultFormat="combo"
       />
     </div>
   );

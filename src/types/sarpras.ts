@@ -359,6 +359,7 @@ export type DeleteStrategyMode = "archive" | "cascade";
 export interface ActionResult {
   ok: boolean;
   error?: string;
+  id?: string;
 }
 
 export interface Building {

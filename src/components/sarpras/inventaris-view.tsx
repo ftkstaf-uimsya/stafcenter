@@ -41,6 +41,8 @@ import {
   MaintenanceStatusBadge,
 } from "@/components/sarpras/status-badges";
 import { AssetImportModal } from "@/components/sarpras/asset-import-modal";
+import { BarcodeLabelModal } from "@/components/ui/barcode-label-modal";
+import { PrintableBarcodeItem } from "@/lib/barcode/render-codes";
 
 const ASSET_CONDITIONS: AssetCondition[] = [
   "Baik",
@@ -48,35 +50,6 @@ const ASSET_CONDITIONS: AssetCondition[] = [
   "Rusak Berat",
   "Hilang",
 ];
-
-/**
- * Menghasilkan matriks deterministik 9x9 dari string kode inventaris untuk representasi visual QR label aset.
- */
-function buildDeterministicMatrix(code: string): boolean[][] {
-  const size = 9;
-  const grid: boolean[][] = Array.from({ length: size }, () =>
-    Array(size).fill(false)
-  );
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      const isCorner =
-        (r < 3 && c < 3) ||
-        (r < 3 && c >= size - 3) ||
-        (r >= size - 3 && c < 3);
-      if (isCorner) {
-        grid[r][c] =
-          !(r === 1 && c === 1) &&
-          !(r === 1 && c === size - 2) &&
-          !(r === size - 2 && c === 1);
-      } else {
-        const charIndex = (r * size + c) % code.length;
-        const charCode = code.charCodeAt(charIndex);
-        grid[r][c] = (charCode + r * 3 + c * 7) % 2 === 0;
-      }
-    }
-  }
-  return grid;
-}
 
 export function InventarisView() {
   const {
@@ -94,7 +67,6 @@ export function InventarisView() {
     updateAsset,
     deleteAsset,
     previewNextInventoryCode,
-    notify,
   } = useSarpras();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -126,8 +98,25 @@ export function InventarisView() {
   const [serialNumber, setSerialNumber] = useState("");
   const [notes, setNotes] = useState("");
 
-  // Modal Cetak Label / QR Code Inventaris
-  const [qrLabelAsset, setQrLabelAsset] = useState<Asset | null>(null);
+  // Seleksi & Modal Cetak Label QR / Barcode Inventaris (Satuan & Massal)
+  const [selectedAssetRowKeys, setSelectedAssetRowKeys] = useState<string[]>(
+    []
+  );
+  const [barcodePrintItems, setBarcodePrintItems] = useState<
+    PrintableBarcodeItem[] | null
+  >(null);
+
+  const toAssetPrintableItem = (asset: Asset): PrintableBarcodeItem => {
+    const room = rooms.find((r) => r.id === asset.room_id);
+    return {
+      id: asset.id,
+      code: asset.inventory_code,
+      title: asset.name,
+      subtitle: `${asset.brand_model} • ${asset.category_label}`,
+      meta: `Ruang: ${room ? room.code : "GUDANG"} • Thn ${asset.procurement_year}`,
+      headerTag: "INVENTARIS BIRO SARPRAS • STAFCENTER",
+    };
+  };
 
   // Modal Konfirmasi Hapus Aset
   const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
@@ -391,8 +380,8 @@ export function InventarisView() {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setQrLabelAsset(row)}
-            aria-label={`Buat label QR untuk ${row.inventory_code}`}
+            onClick={() => setBarcodePrintItems([toAssetPrintableItem(row)])}
+            aria-label={`Buat label barcode & QR untuk ${row.inventory_code}`}
           >
             <QrCode className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Label QR</span>
@@ -449,6 +438,29 @@ export function InventarisView() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={
+              filteredAssets.length === 0 && selectedAssetRowKeys.length === 0
+            }
+            onClick={() => {
+              const selectedSet = new Set(selectedAssetRowKeys);
+              const chosen =
+                selectedSet.size > 0
+                  ? assets.filter((a) => selectedSet.has(a.id))
+                  : filteredAssets;
+              if (chosen.length === 0) return;
+              setBarcodePrintItems(chosen.map(toAssetPrintableItem));
+            }}
+          >
+            <Printer className="w-4 h-4" aria-hidden="true" />
+            <span>
+              {selectedAssetRowKeys.length > 0
+                ? `Cetak Barcode (${selectedAssetRowKeys.length} dipilih)`
+                : "Cetak Barcode Massal"}
+            </span>
+          </Button>
           <Button
             type="button"
             variant="outline"
@@ -543,11 +555,22 @@ export function InventarisView() {
           />
         </div>
 
-        <ColumnsTogglePopover
-          columns={columns.map((c) => ({ key: c.key, label: c.header }))}
-          hiddenKeys={hiddenColumnKeys}
-          onToggleKey={toggleColumnKey}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          {selectedAssetRowKeys.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setSelectedAssetRowKeys([])}
+              className="min-h-[40px] px-2.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white underline"
+            >
+              Batal Pilih ({selectedAssetRowKeys.length})
+            </button>
+          ) : null}
+          <ColumnsTogglePopover
+            columns={columns.map((c) => ({ key: c.key, label: c.header }))}
+            hiddenKeys={hiddenColumnKeys}
+            onToggleKey={toggleColumnKey}
+          />
+        </div>
       </section>
 
       {/* Tabel Data Inventaris */}
@@ -558,6 +581,28 @@ export function InventarisView() {
         hiddenColumnKeys={hiddenColumnKeys}
         activeRowKey={selectedAssetId}
         onRowClick={(row) => setSelectedAssetId(row.id)}
+        selectable
+        selectedRowKeys={selectedAssetRowKeys}
+        onToggleRowKey={(key) =>
+          setSelectedAssetRowKeys((prev) =>
+            prev.includes(key)
+              ? prev.filter((item) => item !== key)
+              : [...prev, key]
+          )
+        }
+        onToggleAllVisible={(visibleKeys, nextChecked) => {
+          setSelectedAssetRowKeys((prev) => {
+            const nextSet = new Set(prev);
+            for (const k of visibleKeys) {
+              if (nextChecked) {
+                nextSet.add(k);
+              } else {
+                nextSet.delete(k);
+              }
+            }
+            return Array.from(nextSet);
+          });
+        }}
         emptyTitle="Tidak Ada Aset yang Ditemukan"
         emptyDescription="Belum ada barang inventaris yang sesuai dengan filter yang dipilih."
         emptyActionLabel="Registrasi Aset Baru"
@@ -591,7 +636,9 @@ export function InventarisView() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setQrLabelAsset(selectedAsset)}
+                  onClick={() =>
+                    setBarcodePrintItems([toAssetPrintableItem(selectedAsset)])
+                  }
                 >
                   <QrCode className="w-4 h-4" aria-hidden="true" />
                   <span>Label QR</span>
@@ -907,96 +954,19 @@ export function InventarisView() {
         </form>
       </Modal>
 
-      {/* Modal Generate Label Inventaris / QR Code Siap Cetak */}
-      <Modal
-        isOpen={Boolean(qrLabelAsset)}
-        onClose={() => setQrLabelAsset(null)}
-        title="Label Stiker Inventaris & QR Code Aset"
-        description="Stiker standar inventaris barang milik kampus untuk ditempel pada unit fisik."
-      >
-        {qrLabelAsset ? (
-          <div className="space-y-4">
-            <div className="p-5 rounded-lg border-2 border-slate-900 dark:border-slate-200 bg-white text-slate-950 flex flex-col sm:flex-row items-center gap-5">
-              <div className="p-2 border border-slate-900 rounded bg-white shrink-0">
-                <svg
-                  width="108"
-                  height="108"
-                  viewBox="0 0 9 9"
-                  aria-label={`QR Code untuk ${qrLabelAsset.inventory_code}`}
-                  role="img"
-                >
-                  {buildDeterministicMatrix(qrLabelAsset.inventory_code).map(
-                    (row, rIdx) =>
-                      row.map((cell, cIdx) =>
-                        cell ? (
-                          <rect
-                            key={`${rIdx}-${cIdx}`}
-                            x={cIdx}
-                            y={rIdx}
-                            width={1}
-                            height={1}
-                            fill="#0F172A"
-                          />
-                        ) : null
-                      )
-                  )}
-                </svg>
-              </div>
-
-              <div className="space-y-1 text-left flex-1">
-                <p className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-700">
-                  INVENTARIS BIRO SARPRAS • STAFCENTER
-                </p>
-                <p className="text-lg font-mono font-extrabold text-slate-950">
-                  {qrLabelAsset.inventory_code}
-                </p>
-                <p className="text-sm font-bold text-slate-900">
-                  {qrLabelAsset.name}
-                </p>
-                <p className="text-xs text-slate-700">
-                  Merk/Tipe: {qrLabelAsset.brand_model}
-                </p>
-                <p className="text-xs font-mono text-slate-800">
-                  Ruang:{" "}
-                  {rooms.find((r) => r.id === qrLabelAsset.room_id)?.code ||
-                    "GUDANG"}{" "}
-                  • Tahun: {qrLabelAsset.procurement_year}
-                </p>
-                <p className="text-[11px] text-slate-600">
-                  Sumber: {qrLabelAsset.funding_source}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setQrLabelAsset(null)}
-              >
-                Tutup
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                onClick={() => {
-                  notify(
-                    "info",
-                    "Siap Dicetak",
-                    `Membuka dialog cetak untuk label ${qrLabelAsset.inventory_code}.`
-                  );
-                  if (typeof window !== "undefined") {
-                    window.print();
-                  }
-                }}
-              >
-                <Printer className="w-4 h-4" aria-hidden="true" />
-                <span>Cetak Label QR</span>
-              </Button>
-            </div>
-          </div>
-        ) : null}
-      </Modal>
+      {/* Modal Generate Label Stiker Inventaris / QR & Barcode 1D Standar */}
+      <BarcodeLabelModal
+        isOpen={Boolean(barcodePrintItems && barcodePrintItems.length > 0)}
+        onClose={() => setBarcodePrintItems(null)}
+        title={
+          barcodePrintItems && barcodePrintItems.length > 1
+            ? `Cetak Label Barcode Massal (${barcodePrintItems.length} Aset Inventaris)`
+            : `Label Stiker & QR Inventaris ${barcodePrintItems?.[0]?.code || ""}`
+        }
+        description="Stiker standar inventaris kampus dengan QR Code dan Barcode Code 128 asli siap scan melalui lembar cetak terisolasi."
+        items={barcodePrintItems || []}
+        defaultFormat="combo"
+      />
 
       <ConfirmDeleteModal
         isOpen={Boolean(deletingAsset)}
