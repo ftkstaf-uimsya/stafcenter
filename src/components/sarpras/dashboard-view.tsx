@@ -12,8 +12,10 @@ import {
   DoorOpen,
   Package,
   Plus,
+  ScrollText,
   Wrench,
 } from "lucide-react";
+import { getThesisHref } from "@/lib/auth/permissions";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 import { TODAY_ISO } from "@/lib/supabase/seed-data";
 import { formatCurrencyIDR } from "@/lib/supabase/client";
@@ -39,6 +41,7 @@ export function DashboardView() {
     consumables,
     officeKitItems,
     officeKitLoans,
+    thesisWorkflows,
     canAccessPage,
     uiSimState,
     setUiSimState,
@@ -65,7 +68,8 @@ export function DashboardView() {
     rooms.length === 0 &&
     assets.length === 0 &&
     bookings.length === 0 &&
-    maintenanceLogs.length === 0
+    maintenanceLogs.length === 0 &&
+    thesisWorkflows.length === 0
   ) {
     return (
       <EmptyStateView
@@ -771,6 +775,87 @@ export function DashboardView() {
           </ul>
         </div>
       </section>
+
+      {(() => {
+        const allowedTaBoards = (
+          [
+            {
+              key: "ta-skripsi-proposal",
+              track: "skripsi",
+              stage: "proposal",
+              label: "Skripsi: Proposal",
+            },
+            {
+              key: "ta-skripsi-sidang",
+              track: "skripsi",
+              stage: "sidang",
+              label: "Skripsi: Sidang",
+            },
+            {
+              key: "ta-artikel-proposal",
+              track: "artikel_jurnal",
+              stage: "proposal",
+              label: "Artikel Jurnal: Proposal",
+            },
+            {
+              key: "ta-artikel-sidang",
+              track: "artikel_jurnal",
+              stage: "sidang",
+              label: "Artikel Jurnal: Sidang",
+            },
+          ] as const
+        ).filter((item) => canAccessPage(item.key));
+
+        if (allowedTaBoards.length === 0) return null;
+
+        return (
+          <section aria-label="Ringkasan Antrean Tugas Akhir">
+            <div className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                <div className="flex items-center gap-2.5">
+                  <ScrollText
+                    className="w-5 h-5 text-[#1E3A5F] dark:text-sky-400"
+                    aria-hidden="true"
+                  />
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                      Antrean Tugas Akhir
+                    </h2>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      Jumlah berkas aktif (belum diarsipkan) pada papan kerja Skripsi &amp; Artikel Jurnal.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {allowedTaBoards.map((board) => {
+                  const activeCount = thesisWorkflows.filter(
+                    (w) =>
+                      w.track === board.track &&
+                      w.stage === board.stage &&
+                      w.board_column !== "selesai_arsip"
+                  ).length;
+                  return (
+                    <Link
+                      key={board.key}
+                      href={getThesisHref(board.track, board.stage)}
+                      className="p-3.5 rounded-md border border-slate-200 dark:border-slate-800 hover:border-[#1E3A5F] dark:hover:border-sky-400 bg-slate-50/60 dark:bg-slate-800/40 flex items-center justify-between gap-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+                    >
+                      <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                        {board.label}
+                      </span>
+                      <span className="px-2 py-0.5 text-sm font-mono font-extrabold rounded bg-[#1E3A5F] text-white dark:bg-sky-400 dark:text-slate-950">
+                        {activeCount}
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        );
+      })()}
     </div>
   );
 }

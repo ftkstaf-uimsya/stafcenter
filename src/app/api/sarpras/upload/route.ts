@@ -100,6 +100,10 @@ export async function POST(request: NextRequest) {
         "class",
         "office_kit",
         "office_loan",
+        "ta_skripsi_proposal",
+        "ta_skripsi_sidang",
+        "ta_artikel_proposal",
+        "ta_artikel_sidang",
       ].includes(entityType) ||
       !entityId ||
       !ENTITY_ID_PATTERN.test(entityId)

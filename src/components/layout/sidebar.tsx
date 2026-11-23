@@ -12,13 +12,17 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  FileText,
   GraduationCap,
   HardHat,
   Landmark,
   LayoutDashboard,
   type LucideIcon,
+  Newspaper,
   Package,
+  Presentation,
   School,
+  ScrollText,
   Tags,
   UserCog,
   Users,
@@ -65,11 +69,16 @@ export function Sidebar({
     maintenanceVendors,
     academicClasses,
     officeKitLoans,
+    thesisWorkflows,
     canAccessPage,
+    defaultHomeHref,
     authUser,
     setCommandSearchOpen,
   } = useSarpras();
   const [sarprasExpanded, setSarprasExpanded] = useState(true);
+  const [tugasAkhirExpanded, setTugasAkhirExpanded] = useState(true);
+  const [skripsiExpanded, setSkripsiExpanded] = useState(true);
+  const [artikelExpanded, setArtikelExpanded] = useState(true);
   const [dataMasterExpanded, setDataMasterExpanded] = useState(true);
 
   const activeOfficeLoans = officeKitLoans.filter(
@@ -222,13 +231,88 @@ export function Sidebar({
   const saprasNavItems = allSaprasNavItems.filter((item) =>
     canAccessPage(item.pageKey)
   );
+
+  const countActiveThesis = (
+    track: "skripsi" | "artikel_jurnal",
+    stage: "proposal" | "sidang"
+  ) =>
+    thesisWorkflows.filter(
+      (w) =>
+        w.track === track &&
+        w.stage === stage &&
+        w.board_column !== "selesai_arsip"
+    ).length;
+
+  const skripsiProposalCount = countActiveThesis("skripsi", "proposal");
+  const skripsiSidangCount = countActiveThesis("skripsi", "sidang");
+  const artikelProposalCount = countActiveThesis("artikel_jurnal", "proposal");
+  const artikelSidangCount = countActiveThesis("artikel_jurnal", "sidang");
+
+  const allSkripsiSubItems: Array<NavSubItem & { fullLabel: string }> = [
+    {
+      pageKey: "ta-skripsi-proposal",
+      href: "/tugas-akhir/skripsi/proposal",
+      label: "Proposal",
+      fullLabel: "Skripsi: Proposal",
+      shortLabel: "Prop. Skripsi",
+      icon: FileText,
+      badgeCount: skripsiProposalCount > 0 ? skripsiProposalCount : undefined,
+      badgeTone: "warning",
+    },
+    {
+      pageKey: "ta-skripsi-sidang",
+      href: "/tugas-akhir/skripsi/sidang",
+      label: "Sidang",
+      fullLabel: "Skripsi: Sidang",
+      shortLabel: "Sidang Skripsi",
+      icon: Presentation,
+      badgeCount: skripsiSidangCount > 0 ? skripsiSidangCount : undefined,
+      badgeTone: "info",
+    },
+  ];
+
+  const allArtikelSubItems: Array<NavSubItem & { fullLabel: string }> = [
+    {
+      pageKey: "ta-artikel-proposal",
+      href: "/tugas-akhir/artikel-jurnal/proposal",
+      label: "Proposal",
+      fullLabel: "Artikel Jurnal: Proposal",
+      shortLabel: "Prop. Artikel",
+      icon: FileText,
+      badgeCount: artikelProposalCount > 0 ? artikelProposalCount : undefined,
+      badgeTone: "warning",
+    },
+    {
+      pageKey: "ta-artikel-sidang",
+      href: "/tugas-akhir/artikel-jurnal/sidang",
+      label: "Sidang",
+      fullLabel: "Artikel Jurnal: Sidang",
+      shortLabel: "Sidang Artikel",
+      icon: Presentation,
+      badgeCount: artikelSidangCount > 0 ? artikelSidangCount : undefined,
+      badgeTone: "info",
+    },
+  ];
+
+  const skripsiSubItems = allSkripsiSubItems.filter((item) =>
+    canAccessPage(item.pageKey)
+  );
+  const artikelSubItems = allArtikelSubItems.filter((item) =>
+    canAccessPage(item.pageKey)
+  );
+  const taCollapsedItems: NavSubItem[] = [
+    ...skripsiSubItems.map((i) => ({ ...i, label: i.fullLabel })),
+    ...artikelSubItems.map((i) => ({ ...i, label: i.fullLabel })),
+  ];
+
   const dataMasterNavItems = allDataMasterNavItems.filter((item) =>
     canAccessPage(item.pageKey)
   );
-  const mobileBottomItems =
-    saprasNavItems.length > 0
-      ? saprasNavItems.slice(0, 6)
-      : dataMasterNavItems.slice(0, 6);
+  const mobileBottomItems = [
+    ...saprasNavItems,
+    ...taCollapsedItems,
+    ...dataMasterNavItems,
+  ].slice(0, 6);
   const mobileGridColsClass =
     mobileBottomItems.length <= 1
       ? "grid-cols-1"
@@ -349,10 +433,131 @@ export function Sidebar({
         </div>
       ) : null}
 
-      {dataMasterNavItems.length > 0 ? (
+      {taCollapsedItems.length > 0 ? (
         <div
           className={
             saprasNavItems.length > 0
+              ? "pt-2.5 mt-2.5 border-t border-white/15"
+              : ""
+          }
+        >
+          {!isCollapsedView ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setTugasAkhirExpanded((prev) => !prev)}
+                aria-expanded={
+                  tugasAkhirExpanded || pathname.startsWith("/tugas-akhir")
+                }
+                className="w-full min-h-[40px] flex items-center justify-between px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-white hover:bg-white/10 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+              >
+                <span>TUGAS AKHIR</span>
+                <ChevronDown
+                  className={`w-4 h-4 transition-transform ${
+                    tugasAkhirExpanded || pathname.startsWith("/tugas-akhir")
+                      ? "rotate-0"
+                      : "-rotate-90"
+                  }`}
+                  aria-hidden="true"
+                />
+              </button>
+
+              {tugasAkhirExpanded || pathname.startsWith("/tugas-akhir") ? (
+                <div className="mt-1 space-y-1.5">
+                  {skripsiSubItems.length > 0 ? (
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setSkripsiExpanded((prev) => !prev)}
+                        aria-expanded={
+                          skripsiExpanded ||
+                          pathname.startsWith("/tugas-akhir/skripsi")
+                        }
+                        className={`w-full min-h-[38px] flex items-center justify-between px-3 py-1.5 rounded-md text-xs font-bold tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                          pathname.startsWith("/tugas-akhir/skripsi")
+                            ? "bg-white/15 text-amber-300"
+                            : "text-slate-100 hover:bg-white/10 hover:text-white"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2.5 min-w-0">
+                          <ScrollText
+                            className="w-4 h-4 shrink-0 text-slate-200"
+                            aria-hidden="true"
+                          />
+                          <span className="truncate">SKRIPSI</span>
+                        </span>
+                        <ChevronDown
+                          className={`w-4 h-4 shrink-0 transition-transform ${
+                            skripsiExpanded ||
+                            pathname.startsWith("/tugas-akhir/skripsi")
+                              ? "rotate-0"
+                              : "-rotate-90"
+                          }`}
+                          aria-hidden="true"
+                        />
+                      </button>
+                      {skripsiExpanded ||
+                      pathname.startsWith("/tugas-akhir/skripsi") ? (
+                        <div className="pl-4 border-l border-white/15 ml-4 mt-1">
+                          {renderNavItemList(skripsiSubItems, false)}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {artikelSubItems.length > 0 ? (
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setArtikelExpanded((prev) => !prev)}
+                        aria-expanded={
+                          artikelExpanded ||
+                          pathname.startsWith("/tugas-akhir/artikel-jurnal")
+                        }
+                        className={`w-full min-h-[38px] flex items-center justify-between px-3 py-1.5 rounded-md text-xs font-bold tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                          pathname.startsWith("/tugas-akhir/artikel-jurnal")
+                            ? "bg-white/15 text-amber-300"
+                            : "text-slate-100 hover:bg-white/10 hover:text-white"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2.5 min-w-0">
+                          <Newspaper
+                            className="w-4 h-4 shrink-0 text-slate-200"
+                            aria-hidden="true"
+                          />
+                          <span className="truncate">ARTIKEL JURNAL</span>
+                        </span>
+                        <ChevronDown
+                          className={`w-4 h-4 shrink-0 transition-transform ${
+                            artikelExpanded ||
+                            pathname.startsWith("/tugas-akhir/artikel-jurnal")
+                              ? "rotate-0"
+                              : "-rotate-90"
+                          }`}
+                          aria-hidden="true"
+                        />
+                      </button>
+                      {artikelExpanded ||
+                      pathname.startsWith("/tugas-akhir/artikel-jurnal") ? (
+                        <div className="pl-4 border-l border-white/15 ml-4 mt-1">
+                          {renderNavItemList(artikelSubItems, false)}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            renderNavItemList(taCollapsedItems, true)
+          )}
+        </div>
+      ) : null}
+
+      {dataMasterNavItems.length > 0 ? (
+        <div
+          className={
+            saprasNavItems.length > 0 || taCollapsedItems.length > 0
               ? "pt-2.5 mt-2.5 border-t border-white/15"
               : ""
           }
@@ -437,7 +642,7 @@ export function Sidebar({
         <div className="h-16 flex items-center justify-between px-4 border-b border-white/15">
           {!collapsed ? (
             <Link
-              href="/sarpras/dashboard"
+              href={defaultHomeHref}
               className="flex items-center gap-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded px-1 py-0.5"
             >
               <span className="px-2 py-1 text-xs font-mono font-bold tracking-wider bg-amber-400 text-slate-950 rounded">
@@ -454,7 +659,7 @@ export function Sidebar({
             </Link>
           ) : (
             <Link
-              href="/sarpras/dashboard"
+              href={defaultHomeHref}
               aria-label="Beranda StafCenter"
               className="mx-auto px-2 py-1 text-xs font-mono font-bold bg-amber-400 text-slate-950 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
             >

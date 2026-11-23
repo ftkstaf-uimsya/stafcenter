@@ -71,7 +71,10 @@ export function proxy(request: NextRequest) {
     }
   }
 
-  if (pathname.startsWith("/sarpras") && isLiveSupabaseConfigured()) {
+  if (
+    (pathname.startsWith("/sarpras") || pathname.startsWith("/tugas-akhir")) &&
+    isLiveSupabaseConfigured()
+  ) {
     const rawCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
     if (!hasValidUnexpiredCookieShape(rawCookie)) {
       const loginUrl = new URL("/login", request.url);
@@ -83,5 +86,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/:path*", "/sarpras/:path*"],
+  matcher: ["/api/:path*", "/sarpras/:path*", "/tugas-akhir/:path*"],
 };

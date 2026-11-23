@@ -8,6 +8,8 @@ import {
   canAccessPage,
   ENTITY_TYPE_TO_PAGE_KEY,
   getPageMeta,
+  getThesisEntityType,
+  getThesisPageKey,
 } from "@/lib/auth/permissions";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import {
@@ -22,7 +24,12 @@ import {
   NormalizedImportAssetPayload,
   normalizeSerialKey,
 } from "@/lib/sarpras/asset-import-shared";
-import { DeleteStrategyMode, SarprasEntityType } from "@/types/sarpras";
+import {
+  DeleteStrategyMode,
+  SarprasEntityType,
+  ThesisStage,
+  ThesisTrack,
+} from "@/types/sarpras";
 
 type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseServerClient>>;
 
@@ -133,6 +140,9 @@ type MutationPayload =
       data?: Record<string, unknown>;
     }
   | { action: "delete_office_kit_loan"; id: string }
+  | { action: "insert_thesis_workflow"; data: Record<string, unknown> }
+  | { action: "update_thesis_workflow"; id: string; data: Record<string, unknown> }
+  | { action: "delete_thesis_workflow"; id: string }
   | { action: "insert_note"; data: Record<string, unknown> }
   | { action: "delete_attachment"; id: string; filePath?: string };
 
@@ -377,6 +387,40 @@ const TABLE_ALLOWED_COLUMNS: Record<string, readonly string[]> = {
     "received_by_staff",
     "return_condition_notes",
   ],
+  thesis_workflows: [
+    "id",
+    "ticket_code",
+    "track",
+    "stage",
+    "board_column",
+    "student_name",
+    "student_nim",
+    "student_phone",
+    "prodi",
+    "class_id",
+    "class_code",
+    "title",
+    "journal_name",
+    "journal_url",
+    "supervisor_1_id",
+    "supervisor_2_id",
+    "examiner_1_id",
+    "examiner_2_id",
+    "registered_at",
+    "document_notes",
+    "schedule_date",
+    "schedule_start_time",
+    "schedule_end_time",
+    "room_id",
+    "letter_number",
+    "letter_date",
+    "letter_signer_official_id",
+    "letter_status",
+    "archived_at",
+    "archive_notes",
+    "source_workflow_id",
+    "created_by_staff",
+  ],
   sarpras_notes: ["id", "entity_type", "entity_id", "note_text"],
 };
 
@@ -407,6 +451,17 @@ function sanitizeTablePayload(
 
 function formatSafeDbError(message: string): string {
   const lower = (message || "").toLowerCase();
+  if (lower.includes("thesis_workflows")) {
+    if (lower.includes("does not exist") || lower.includes("schema cache")) {
+      return "Tabel Tugas Akhir belum dibuat. Jalankan migrasi supabase/migrations/011_tugas_akhir_workflow.sql di SQL Editor Supabase.";
+    }
+  }
+  if (
+    lower.includes("uq_thesis_source") ||
+    (lower.includes("23505") && lower.includes("source_workflow_id"))
+  ) {
+    return "Data ini sudah disalin ke antrean Sidang.";
+  }
   if (
     lower.includes("academic_classes") ||
     lower.includes("office_kit_items") ||
@@ -2188,6 +2243,234 @@ export async function POST(request: NextRequest) {
             .update({ status: "Tersedia", updated_at: nowIso })
             .in("id", existingLoan.kit_item_ids as string[])
             .eq("status", "Dipinjam");
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "insert_thesis_workflow": {
+        const rawTrack = String(body.data?.track || "");
+        const rawStage = String(body.data?.stage || "");
+        if (
+          (rawTrack !== "skripsi" && rawTrack !== "artikel_jurnal") ||
+          (rawStage !== "proposal" && rawStage !== "sidang")
+        ) {
+          return NextResponse.json(
+            { error: "Jalur atau tahap Tugas Akhir tidak valid." },
+            { status: 400 }
+          );
+        }
+        const track = rawTrack as ThesisTrack;
+        const stage = rawStage as ThesisStage;
+        const thesisPageKey = getThesisPageKey(track, stage);
+        if (!canAccessPage(session, thesisPageKey)) {
+          const pageLabel = getPageMeta(thesisPageKey)?.label || thesisPageKey;
+          return NextResponse.json(
+            {
+              error: `Akun Anda tidak memiliki otoritas untuk mengelola halaman ${pageLabel}.`,
+            },
+            { status: 403 }
+          );
+        }
+
+        const cleanData = sanitizeTablePayload(
+          "thesis_workflows",
+          body.data,
+          false
+        );
+
+        if (cleanData.source_workflow_id) {
+          const { data: sourceRow, error: sourceErr } = await supabase
+            .from("thesis_workflows")
+            .select("id, track, stage")
+            .eq("id", String(cleanData.source_workflow_id))
+            .maybeSingle();
+
+          if (sourceErr && isMissingRelationError(sourceErr)) {
+            return NextResponse.json(
+              {
+                error:
+                  "Tabel Tugas Akhir belum dibuat. Jalankan migrasi supabase/migrations/011_tugas_akhir_workflow.sql di SQL Editor Supabase.",
+              },
+              { status: 400 }
+            );
+          }
+
+          if (!sourceRow) {
+            return NextResponse.json(
+              { error: "Data Proposal sumber tidak ditemukan." },
+              { status: 400 }
+            );
+          }
+
+          const sourcePageKey = getThesisPageKey(
+            sourceRow.track as ThesisTrack,
+            sourceRow.stage as ThesisStage
+          );
+          if (!canAccessPage(session, sourcePageKey)) {
+            return NextResponse.json(
+              {
+                error:
+                  "Anda tidak memiliki otoritas untuk menyalin data dari halaman Proposal sumber.",
+              },
+              { status: 403 }
+            );
+          }
+        }
+
+        const { error } = await supabase.from("thesis_workflows").insert({
+          ...cleanData,
+          track,
+          stage,
+          created_by_staff:
+            cleanData.created_by_staff || session.fullName || session.username,
+        });
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "update_thesis_workflow": {
+        const { data: existingRow, error: readErr } = await supabase
+          .from("thesis_workflows")
+          .select("id, track, stage, schedule_date")
+          .eq("id", body.id)
+          .maybeSingle();
+
+        if (readErr) {
+          if (isMissingRelationError(readErr)) {
+            return NextResponse.json(
+              {
+                error:
+                  "Tabel Tugas Akhir belum dibuat. Jalankan migrasi supabase/migrations/011_tugas_akhir_workflow.sql di SQL Editor Supabase.",
+              },
+              { status: 400 }
+            );
+          }
+          return NextResponse.json(
+            { error: formatSafeDbError(readErr.message) },
+            { status: 400 }
+          );
+        }
+        if (!existingRow) {
+          return NextResponse.json(
+            { error: "Data Tugas Akhir tidak ditemukan." },
+            { status: 404 }
+          );
+        }
+
+        const thesisPageKey = getThesisPageKey(
+          existingRow.track as ThesisTrack,
+          existingRow.stage as ThesisStage
+        );
+        if (!canAccessPage(session, thesisPageKey)) {
+          const pageLabel = getPageMeta(thesisPageKey)?.label || thesisPageKey;
+          return NextResponse.json(
+            {
+              error: `Akun Anda tidak memiliki otoritas untuk mengelola halaman ${pageLabel}.`,
+            },
+            { status: 403 }
+          );
+        }
+
+        const cleanData = sanitizeTablePayload(
+          "thesis_workflows",
+          body.data,
+          true
+        );
+        delete cleanData.track;
+        delete cleanData.stage;
+        delete cleanData.ticket_code;
+        delete cleanData.source_workflow_id;
+
+        if (
+          cleanData.board_column === "bikin_surat" ||
+          cleanData.board_column === "selesai_arsip"
+        ) {
+          const effectiveSchedule =
+            cleanData.schedule_date !== undefined
+              ? cleanData.schedule_date
+              : existingRow.schedule_date;
+          if (!effectiveSchedule) {
+            return NextResponse.json(
+              {
+                error:
+                  "Lengkapi tanggal jadwal terlebih dahulu sebelum masuk tahap Bikin Surat.",
+              },
+              { status: 400 }
+            );
+          }
+        }
+
+        const { error } = await supabase
+          .from("thesis_workflows")
+          .update({ ...cleanData, updated_at: nowIso })
+          .eq("id", body.id);
+        if (error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "delete_thesis_workflow": {
+        const { data: existingRow, error: readErr } = await supabase
+          .from("thesis_workflows")
+          .select("id, track, stage")
+          .eq("id", body.id)
+          .maybeSingle();
+
+        if (readErr) {
+          if (isMissingRelationError(readErr)) {
+            return NextResponse.json(
+              {
+                error:
+                  "Tabel Tugas Akhir belum dibuat. Jalankan migrasi supabase/migrations/011_tugas_akhir_workflow.sql di SQL Editor Supabase.",
+              },
+              { status: 400 }
+            );
+          }
+          return NextResponse.json(
+            { error: formatSafeDbError(readErr.message) },
+            { status: 400 }
+          );
+        }
+        if (!existingRow) {
+          return NextResponse.json(
+            { error: "Data Tugas Akhir tidak ditemukan." },
+            { status: 404 }
+          );
+        }
+
+        const thesisPageKey = getThesisPageKey(
+          existingRow.track as ThesisTrack,
+          existingRow.stage as ThesisStage
+        );
+        if (!canAccessPage(session, thesisPageKey)) {
+          const pageLabel = getPageMeta(thesisPageKey)?.label || thesisPageKey;
+          return NextResponse.json(
+            {
+              error: `Akun Anda tidak memiliki otoritas untuk mengelola halaman ${pageLabel}.`,
+            },
+            { status: 403 }
+          );
+        }
+
+        const entityType = getThesisEntityType(
+          existingRow.track as ThesisTrack,
+          existingRow.stage as ThesisStage
+        );
+        const [, delRes] = await Promise.all([
+          cleanupEntityArtifacts(supabase, entityType, body.id),
+          supabase.from("thesis_workflows").delete().eq("id", body.id),
+        ]);
+        if (delRes.error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(delRes.error.message) },
+            { status: 400 }
+          );
         }
         return NextResponse.json({ ok: true });
       }

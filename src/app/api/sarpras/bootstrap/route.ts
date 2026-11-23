@@ -43,6 +43,7 @@ export async function GET() {
     academicClassesRes,
     officeKitItemsRes,
     officeKitLoansRes,
+    thesisWorkflowsRes,
   ] = await Promise.all([
     supabase.from("buildings").select("*").order("code"),
     supabase.from("rooms").select("*").order("code"),
@@ -81,6 +82,10 @@ export async function GET() {
     supabase.from("office_kit_items").select("*").order("kit_code"),
     supabase
       .from("office_kit_loans")
+      .select("*")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("thesis_workflows")
       .select("*")
       .order("created_at", { ascending: false }),
   ]);
@@ -138,6 +143,9 @@ export async function GET() {
       officeKitLoans: officeKitLoansRes.error
         ? null
         : officeKitLoansRes.data || [],
+      thesisWorkflows: thesisWorkflowsRes.error
+        ? null
+        : thesisWorkflowsRes.data || [],
     },
     { status: 200 }
   );

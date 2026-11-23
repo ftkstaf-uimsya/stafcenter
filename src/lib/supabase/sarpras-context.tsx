@@ -40,6 +40,10 @@ import {
   SarprasNote,
   SarprasPageKey,
   StaffRole,
+  ThesisBoardColumn,
+  ThesisStage,
+  ThesisTrack,
+  ThesisWorkflow,
   UISimulationState,
 } from "@/types/sarpras";
 import {
@@ -48,6 +52,8 @@ import {
   ENTITY_TYPE_TO_PAGE_KEY,
   getFirstAllowedHref,
   getPageMeta,
+  getThesisEntityType,
+  getThesisPageKey,
 } from "@/lib/auth/permissions";
 import {
   findBookingConflict,
@@ -81,6 +87,8 @@ import {
   INITIAL_OFFICE_KIT_ITEMS,
   INITIAL_OFFICE_KIT_LOANS,
   INITIAL_ROOMS,
+  INITIAL_THESIS_WORKFLOWS,
+  TODAY_ISO,
 } from "@/lib/supabase/seed-data";
 
 const STORAGE_KEY = "stafcenter_sarpras_v2";
@@ -141,6 +149,8 @@ interface SarprasContextValue {
   academicClasses: AcademicClass[];
   officeKitItems: OfficeKitItem[];
   officeKitLoans: OfficeKitLoan[];
+  thesisWorkflows: ThesisWorkflow[];
+  thesisWorkflowsAvailable: boolean;
   extendedMasterReady: boolean;
   canManageDataMaster: boolean;
   canAccessPage: (pageKey: SarprasPageKey | "akun") => boolean;
@@ -370,6 +380,26 @@ interface SarprasContextValue {
   ) => ActionResult;
   reopenOfficeKitLoan: (id: string) => ActionResult;
   deleteOfficeKitLoan: (id: string) => Promise<ActionResult>;
+
+  // Tugas Akhir (Skripsi & Artikel Jurnal - Proposal & Sidang)
+  addThesisWorkflow: (
+    payload: Omit<ThesisWorkflow, "id" | "ticket_code" | "created_at">
+  ) => ActionResult;
+  updateThesisWorkflow: (
+    id: string,
+    patch: Partial<
+      Omit<
+        ThesisWorkflow,
+        "id" | "ticket_code" | "track" | "stage" | "source_workflow_id" | "created_at"
+      >
+    >
+  ) => ActionResult;
+  moveThesisWorkflow: (
+    id: string,
+    targetColumn: ThesisBoardColumn
+  ) => ActionResult;
+  deleteThesisWorkflow: (id: string) => Promise<ActionResult>;
+  copyThesisToSidang: (id: string) => ActionResult;
 }
 
 const SarprasContext = createContext<SarprasContextValue | null>(null);
@@ -392,6 +422,20 @@ function getCurrentYearMonth(): string {
   const m = String(now.getMonth() + 1).padStart(2, "0");
   return `${y}${m}`;
 }
+
+function getThesisTicketPrefix(track: ThesisTrack, stage: ThesisStage): string {
+  if (track === "skripsi") {
+    return stage === "proposal" ? "SKP-PRP" : "SKP-SDG";
+  }
+  return stage === "proposal" ? "ART-PRP" : "ART-SDG";
+}
+
+const THESIS_COLUMN_LABELS: Record<ThesisBoardColumn, string> = {
+  berkas_daftar: "Berkas Daftar",
+  bikin_jadwal: "Bikin Jadwal",
+  bikin_surat: "Bikin Surat",
+  selesai_arsip: "Selesai / Arsip",
+};
 
 export function SarprasProvider({ children }: { children: React.ReactNode }) {
   const isLiveSupabase = isSupabaseConfigured();
@@ -455,6 +499,11 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
   const [officeKitLoans, setOfficeKitLoans] = useState<OfficeKitLoan[]>(() =>
     isLiveSupabase ? [] : INITIAL_OFFICE_KIT_LOANS
   );
+  const [thesisWorkflows, setThesisWorkflows] = useState<ThesisWorkflow[]>(() =>
+    isLiveSupabase ? [] : INITIAL_THESIS_WORKFLOWS
+  );
+  const [thesisWorkflowsAvailable, setThesisWorkflowsAvailable] =
+    useState<boolean>(!isLiveSupabase);
   const [extendedMasterReady, setExtendedMasterReady] = useState<boolean>(
     !isLiveSupabase
   );
@@ -492,6 +541,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     setAcademicClasses([]);
     setOfficeKitItems([]);
     setOfficeKitLoans([]);
+    setThesisWorkflows([]);
   }, []);
 
   const notify = useCallback(
@@ -749,6 +799,26 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       } else {
         setOfficeKitLoans(INITIAL_OFFICE_KIT_LOANS);
       }
+
+      if (Array.isArray(data.thesisWorkflows)) {
+        setThesisWorkflowsAvailable(true);
+        setThesisWorkflows(
+          (data.thesisWorkflows as ThesisWorkflow[]).map((item) => ({
+            ...item,
+            student_phone: item.student_phone || "-",
+            schedule_start_time: item.schedule_start_time
+              ? normalizeTimeHHMM(item.schedule_start_time)
+              : null,
+            schedule_end_time: item.schedule_end_time
+              ? normalizeTimeHHMM(item.schedule_end_time)
+              : null,
+            letter_status: item.letter_status || "Belum Dibuat",
+          }))
+        );
+      } else {
+        setThesisWorkflowsAvailable(false);
+        setThesisWorkflows([]);
+      }
     } catch {
       // Tetap gunakan state sebelumnya bila koneksi terputus
     } finally {
@@ -791,6 +861,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           if (parsed.academicClasses) setAcademicClasses(parsed.academicClasses);
           if (parsed.officeKitItems) setOfficeKitItems(parsed.officeKitItems);
           if (parsed.officeKitLoans) setOfficeKitLoans(parsed.officeKitLoans);
+          if (parsed.thesisWorkflows)
+            setThesisWorkflows(parsed.thesisWorkflows);
         }
         setAuthLoading(false);
         setHydrated(true);
@@ -859,6 +931,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           academicClasses,
           officeKitItems,
           officeKitLoans,
+          thesisWorkflows,
         })
       );
     } catch {
@@ -886,6 +959,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     academicClasses,
     officeKitItems,
     officeKitLoans,
+    thesisWorkflows,
   ]);
 
   const signInWithUsername = useCallback(
@@ -991,6 +1065,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     setAcademicClasses(INITIAL_ACADEMIC_CLASSES);
     setOfficeKitItems(INITIAL_OFFICE_KIT_ITEMS);
     setOfficeKitLoans(INITIAL_OFFICE_KIT_LOANS);
+    setThesisWorkflows(INITIAL_THESIS_WORKFLOWS);
     setUiSimState("normal");
     try {
       localStorage.removeItem(STORAGE_KEY);
@@ -4769,6 +4844,517 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  const addThesisWorkflow = useCallback(
+    (
+      payload: Omit<ThesisWorkflow, "id" | "ticket_code" | "created_at">
+    ): ActionResult => {
+      const pageKey = getThesisPageKey(payload.track, payload.stage);
+      if (!requireStaffForLiveWrite(pageKey)) {
+        return { ok: false, error: "Otoritas halaman tidak mencukupi." };
+      }
+      if (
+        !payload.student_name.trim() ||
+        !payload.student_nim.trim() ||
+        !payload.title.trim()
+      ) {
+        return {
+          ok: false,
+          error: "Nama mahasiswa, NIM, dan judul wajib diisi.",
+        };
+      }
+
+      const prefix = getThesisTicketPrefix(payload.track, payload.stage);
+      const samePrefixCodes = thesisWorkflows
+        .filter((w) => w.ticket_code.startsWith(`${prefix}-`))
+        .map((w) => w.ticket_code);
+      const seq = String(extractMaxSequence(samePrefixCodes) + 1).padStart(
+        3,
+        "0"
+      );
+      const id = generateUuid();
+      const ticket_code = `${prefix}-${getCurrentYearMonth()}-${seq}`;
+      const staffName =
+        authUser?.fullName || authUser?.username || "Staf Piket Kantor";
+      const nowIso = new Date().toISOString();
+
+      const newRow: ThesisWorkflow = {
+        ...payload,
+        id,
+        ticket_code,
+        board_column: payload.board_column || "berkas_daftar",
+        student_name: payload.student_name.trim(),
+        student_nim: payload.student_nim.trim(),
+        student_phone: payload.student_phone?.trim() || "-",
+        title: payload.title.trim(),
+        journal_name: payload.journal_name?.trim() || null,
+        journal_url: payload.journal_url?.trim() || null,
+        document_notes: payload.document_notes?.trim() || null,
+        letter_status: payload.letter_status || "Belum Dibuat",
+        created_by_staff: staffName,
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+
+      setThesisWorkflows((prev) => [newRow, ...prev]);
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_thesis_workflow",
+            data: {
+              id: newRow.id,
+              ticket_code: newRow.ticket_code,
+              track: newRow.track,
+              stage: newRow.stage,
+              board_column: newRow.board_column,
+              student_name: newRow.student_name,
+              student_nim: newRow.student_nim,
+              student_phone: newRow.student_phone,
+              prodi: newRow.prodi,
+              class_id: newRow.class_id || null,
+              class_code: newRow.class_code || null,
+              title: newRow.title,
+              journal_name: newRow.journal_name,
+              journal_url: newRow.journal_url,
+              supervisor_1_id: newRow.supervisor_1_id || null,
+              supervisor_2_id: newRow.supervisor_2_id || null,
+              examiner_1_id: newRow.examiner_1_id || null,
+              examiner_2_id: newRow.examiner_2_id || null,
+              registered_at: newRow.registered_at,
+              document_notes: newRow.document_notes,
+              schedule_date: newRow.schedule_date || null,
+              schedule_start_time: newRow.schedule_start_time || null,
+              schedule_end_time: newRow.schedule_end_time || null,
+              room_id: newRow.room_id || null,
+              letter_number: newRow.letter_number || null,
+              letter_date: newRow.letter_date || null,
+              letter_signer_official_id:
+                newRow.letter_signer_official_id || null,
+              letter_status: newRow.letter_status,
+              archived_at: newRow.archived_at || null,
+              archive_notes: newRow.archive_notes || null,
+              source_workflow_id: newRow.source_workflow_id || null,
+              created_by_staff: staffName,
+            },
+          },
+          "Menambahkan Berkas Tugas Akhir",
+          "Berkas Mahasiswa Terdaftar",
+          `${ticket_code}: ${newRow.student_name} masuk ke kolom Berkas Daftar.`
+        );
+        return { ok: true };
+      }
+
+      notify(
+        "success",
+        "Berkas Mahasiswa Terdaftar",
+        `${ticket_code}: ${newRow.student_name} berhasil ditambahkan.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireStaffForLiveWrite,
+      sendMutation,
+      thesisWorkflows,
+    ]
+  );
+
+  const updateThesisWorkflow = useCallback(
+    (
+      id: string,
+      patch: Partial<
+        Omit<
+          ThesisWorkflow,
+          "id" | "ticket_code" | "track" | "stage" | "source_workflow_id" | "created_at"
+        >
+      >
+    ): ActionResult => {
+      const targetRow = thesisWorkflows.find((w) => w.id === id);
+      if (!targetRow) {
+        return { ok: false, error: "Data Tugas Akhir tidak ditemukan." };
+      }
+      const pageKey = getThesisPageKey(targetRow.track, targetRow.stage);
+      if (!requireStaffForLiveWrite(pageKey)) {
+        return { ok: false, error: "Otoritas halaman tidak mencukupi." };
+      }
+
+      if (patch.student_name !== undefined && !patch.student_name.trim()) {
+        return { ok: false, error: "Nama mahasiswa wajib diisi." };
+      }
+      if (patch.student_nim !== undefined && !patch.student_nim.trim()) {
+        return { ok: false, error: "NIM mahasiswa wajib diisi." };
+      }
+      if (patch.title !== undefined && !patch.title.trim()) {
+        return { ok: false, error: "Judul wajib diisi." };
+      }
+
+      const nextCol = patch.board_column || targetRow.board_column;
+      const effectiveScheduleDate =
+        patch.schedule_date !== undefined
+          ? patch.schedule_date
+          : targetRow.schedule_date;
+      if (
+        (nextCol === "bikin_surat" || nextCol === "selesai_arsip") &&
+        !effectiveScheduleDate
+      ) {
+        notify(
+          "error",
+          "Jadwal Belum Lengkap",
+          "Lengkapi tanggal jadwal terlebih dahulu sebelum masuk tahap Bikin Surat."
+        );
+        return {
+          ok: false,
+          error:
+            "Lengkapi tanggal jadwal terlebih dahulu sebelum masuk tahap Bikin Surat.",
+        };
+      }
+
+      const nowIso = new Date().toISOString();
+      const nextPatch: Record<string, unknown> = { ...patch };
+      if (patch.board_column === "selesai_arsip") {
+        if (!targetRow.archived_at && patch.archived_at === undefined) {
+          nextPatch.archived_at = nowIso;
+        }
+        if (
+          patch.letter_status === undefined &&
+          targetRow.letter_status !== "Terbit"
+        ) {
+          nextPatch.letter_status = "Terbit";
+        }
+      } else if (patch.board_column) {
+        nextPatch.archived_at = null;
+      }
+
+      setThesisWorkflows((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                ...(nextPatch as Partial<ThesisWorkflow>),
+                updated_at: nowIso,
+              }
+            : item
+        )
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_thesis_workflow", id, data: nextPatch },
+          "Memperbarui Data Tugas Akhir",
+          "Data Tugas Akhir Diperbarui",
+          `Perubahan pada ${targetRow.ticket_code} (${targetRow.student_name}) tersimpan.`
+        );
+        return { ok: true };
+      }
+
+      notify(
+        "success",
+        "Data Tugas Akhir Diperbarui",
+        `Perubahan pada ${targetRow.ticket_code} (${targetRow.student_name}) tersimpan.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireStaffForLiveWrite,
+      sendMutation,
+      thesisWorkflows,
+    ]
+  );
+
+  const moveThesisWorkflow = useCallback(
+    (id: string, targetColumn: ThesisBoardColumn): ActionResult => {
+      const targetRow = thesisWorkflows.find((w) => w.id === id);
+      if (!targetRow) {
+        return { ok: false, error: "Data Tugas Akhir tidak ditemukan." };
+      }
+      const pageKey = getThesisPageKey(targetRow.track, targetRow.stage);
+      if (!requireStaffForLiveWrite(pageKey)) {
+        return { ok: false, error: "Otoritas halaman tidak mencukupi." };
+      }
+      if (targetRow.board_column === targetColumn) {
+        return { ok: true };
+      }
+
+      if (
+        (targetColumn === "bikin_surat" || targetColumn === "selesai_arsip") &&
+        !targetRow.schedule_date
+      ) {
+        notify(
+          "error",
+          "Jadwal Belum Lengkap",
+          "Lengkapi tanggal jadwal terlebih dahulu sebelum masuk tahap Bikin Surat."
+        );
+        return {
+          ok: false,
+          error:
+            "Lengkapi tanggal jadwal terlebih dahulu sebelum masuk tahap Bikin Surat.",
+        };
+      }
+
+      const nowIso = new Date().toISOString();
+      const patch: Record<string, unknown> = {
+        board_column: targetColumn,
+      };
+      if (targetColumn === "selesai_arsip") {
+        patch.archived_at = nowIso;
+        if (targetRow.letter_status !== "Terbit") {
+          patch.letter_status = "Terbit";
+        }
+      } else if (
+        targetRow.board_column === "selesai_arsip" ||
+        targetRow.archived_at
+      ) {
+        patch.archived_at = null;
+      }
+
+      setThesisWorkflows((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                ...(patch as Partial<ThesisWorkflow>),
+                updated_at: nowIso,
+              }
+            : item
+        )
+      );
+
+      const label = THESIS_COLUMN_LABELS[targetColumn];
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          { action: "update_thesis_workflow", id, data: patch },
+          "Memindahkan Tahap Tugas Akhir",
+          "Tahap Papan Diperbarui",
+          `${targetRow.ticket_code} dipindahkan ke kolom ${label}.`
+        );
+        return { ok: true };
+      }
+
+      notify(
+        "success",
+        "Tahap Papan Diperbarui",
+        `${targetRow.ticket_code} dipindahkan ke kolom ${label}.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireStaffForLiveWrite,
+      sendMutation,
+      thesisWorkflows,
+    ]
+  );
+
+  const deleteThesisWorkflow = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      const targetRow = thesisWorkflows.find((w) => w.id === id);
+      if (!targetRow) {
+        return { ok: false, error: "Data Tugas Akhir tidak ditemukan." };
+      }
+      const pageKey = getThesisPageKey(targetRow.track, targetRow.stage);
+      if (!requireStaffForLiveWrite(pageKey)) {
+        return { ok: false, error: "Otoritas halaman tidak mencukupi." };
+      }
+
+      const entityType = getThesisEntityType(targetRow.track, targetRow.stage);
+      const applyLocalDelete = () => {
+        setThesisWorkflows((prev) =>
+          prev
+            .filter((item) => item.id !== id)
+            .map((item) =>
+              item.source_workflow_id === id
+                ? { ...item, source_workflow_id: null }
+                : item
+            )
+        );
+        removeEntityArtifactsLocal(entityType, id);
+      };
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "delete_thesis_workflow", id },
+          "Menghapus Berkas Tugas Akhir",
+          "Berkas Tugas Akhir Dihapus",
+          `Tiket ${targetRow.ticket_code} (${targetRow.student_name}) telah dihapus.`,
+          applyLocalDelete
+        );
+      }
+
+      applyLocalDelete();
+      notify(
+        "info",
+        "Berkas Tugas Akhir Dihapus",
+        `Tiket ${targetRow.ticket_code} (${targetRow.student_name}) telah dihapus.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      removeEntityArtifactsLocal,
+      requireStaffForLiveWrite,
+      sendConfirmedMutation,
+      thesisWorkflows,
+    ]
+  );
+
+  const copyThesisToSidang = useCallback(
+    (id: string): ActionResult => {
+      const sourceRow = thesisWorkflows.find((w) => w.id === id);
+      if (!sourceRow) {
+        return { ok: false, error: "Data Proposal tidak ditemukan." };
+      }
+      if (sourceRow.stage !== "proposal") {
+        return { ok: false, error: "Hanya tahap Proposal yang dapat disalin." };
+      }
+      if (
+        sourceRow.board_column !== "bikin_surat" &&
+        sourceRow.board_column !== "selesai_arsip"
+      ) {
+        return {
+          ok: false,
+          error:
+            "Proposal minimal harus berada di tahap Bikin Surat sebelum disalin ke Sidang.",
+        };
+      }
+      if (thesisWorkflows.some((w) => w.source_workflow_id === id)) {
+        notify(
+          "error",
+          "Sudah Disalin",
+          "Data ini sudah disalin ke antrean Sidang."
+        );
+        return {
+          ok: false,
+          error: "Data ini sudah disalin ke antrean Sidang.",
+        };
+      }
+
+      const sidangPageKey = getThesisPageKey(sourceRow.track, "sidang");
+      if (!requireStaffForLiveWrite(sidangPageKey)) {
+        return {
+          ok: false,
+          error: "Anda tidak memiliki otoritas pada halaman Sidang tujuan.",
+        };
+      }
+
+      const prefix = getThesisTicketPrefix(sourceRow.track, "sidang");
+      const samePrefixCodes = thesisWorkflows
+        .filter((w) => w.ticket_code.startsWith(`${prefix}-`))
+        .map((w) => w.ticket_code);
+      const seq = String(extractMaxSequence(samePrefixCodes) + 1).padStart(
+        3,
+        "0"
+      );
+      const newId = generateUuid();
+      const ticket_code = `${prefix}-${getCurrentYearMonth()}-${seq}`;
+      const registeredAt = isLiveSupabase
+        ? new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })
+        : TODAY_ISO;
+      const staffName =
+        authUser?.fullName || authUser?.username || "Staf Piket Kantor";
+      const nowIso = new Date().toISOString();
+
+      const newSidangRow: ThesisWorkflow = {
+        id: newId,
+        ticket_code,
+        track: sourceRow.track,
+        stage: "sidang",
+        board_column: "berkas_daftar",
+        student_name: sourceRow.student_name,
+        student_nim: sourceRow.student_nim,
+        student_phone: sourceRow.student_phone,
+        prodi: sourceRow.prodi,
+        class_id: sourceRow.class_id || null,
+        class_code: sourceRow.class_code || null,
+        title: sourceRow.title,
+        journal_name: sourceRow.journal_name || null,
+        journal_url: sourceRow.journal_url || null,
+        supervisor_1_id: sourceRow.supervisor_1_id || null,
+        supervisor_2_id: sourceRow.supervisor_2_id || null,
+        examiner_1_id: null,
+        examiner_2_id: null,
+        registered_at: registeredAt,
+        document_notes: sourceRow.document_notes || null,
+        schedule_date: null,
+        schedule_start_time: null,
+        schedule_end_time: null,
+        room_id: null,
+        letter_number: null,
+        letter_date: null,
+        letter_signer_official_id: null,
+        letter_status: "Belum Dibuat",
+        archived_at: null,
+        archive_notes: null,
+        source_workflow_id: sourceRow.id,
+        created_by_staff: staffName,
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+
+      setThesisWorkflows((prev) => [newSidangRow, ...prev]);
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "insert_thesis_workflow",
+            data: {
+              id: newSidangRow.id,
+              ticket_code: newSidangRow.ticket_code,
+              track: newSidangRow.track,
+              stage: newSidangRow.stage,
+              board_column: newSidangRow.board_column,
+              student_name: newSidangRow.student_name,
+              student_nim: newSidangRow.student_nim,
+              student_phone: newSidangRow.student_phone,
+              prodi: newSidangRow.prodi,
+              class_id: newSidangRow.class_id,
+              class_code: newSidangRow.class_code,
+              title: newSidangRow.title,
+              journal_name: newSidangRow.journal_name,
+              journal_url: newSidangRow.journal_url,
+              supervisor_1_id: newSidangRow.supervisor_1_id,
+              supervisor_2_id: newSidangRow.supervisor_2_id,
+              examiner_1_id: null,
+              examiner_2_id: null,
+              registered_at: newSidangRow.registered_at,
+              document_notes: newSidangRow.document_notes,
+              letter_status: "Belum Dibuat",
+              source_workflow_id: newSidangRow.source_workflow_id,
+              created_by_staff: staffName,
+            },
+          },
+          "Menyalin ke Antrean Sidang",
+          "Disalin ke Antrean Sidang",
+          `${sourceRow.student_name} berhasil masuk antrean Sidang (${ticket_code}).`
+        );
+        return { ok: true };
+      }
+
+      notify(
+        "success",
+        "Disalin ke Antrean Sidang",
+        `${sourceRow.student_name} berhasil masuk antrean Sidang (${ticket_code}).`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      requireStaffForLiveWrite,
+      sendMutation,
+      thesisWorkflows,
+    ]
+  );
+
   const value = useMemo<SarprasContextValue>(
     () => ({
       buildings: uiSimState === "empty" ? [] : buildings,
@@ -4794,6 +5380,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       academicClasses: uiSimState === "empty" ? [] : academicClasses,
       officeKitItems: uiSimState === "empty" ? [] : officeKitItems,
       officeKitLoans: uiSimState === "empty" ? [] : officeKitLoans,
+      thesisWorkflows: uiSimState === "empty" ? [] : thesisWorkflows,
+      thesisWorkflowsAvailable,
       extendedMasterReady,
       canManageDataMaster,
       canAccessPage,
@@ -4877,6 +5465,11 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       checkinOfficeKitLoan,
       reopenOfficeKitLoan,
       deleteOfficeKitLoan,
+      addThesisWorkflow,
+      updateThesisWorkflow,
+      moveThesisWorkflow,
+      deleteThesisWorkflow,
+      copyThesisToSidang,
     }),
     [
       uiSimState,
@@ -4901,6 +5494,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       academicClasses,
       officeKitItems,
       officeKitLoans,
+      thesisWorkflows,
+      thesisWorkflowsAvailable,
       extendedMasterReady,
       canManageDataMaster,
       canAccessPage,
@@ -4981,6 +5576,11 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       checkinOfficeKitLoan,
       reopenOfficeKitLoan,
       deleteOfficeKitLoan,
+      addThesisWorkflow,
+      updateThesisWorkflow,
+      moveThesisWorkflow,
+      deleteThesisWorkflow,
+      copyThesisToSidang,
     ]
   );
 

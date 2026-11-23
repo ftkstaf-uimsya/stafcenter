@@ -188,7 +188,9 @@ export function AkunView() {
     );
   };
 
-  const toggleGroupPermissions = (group: "sapras" | "data_master") => {
+  const toggleGroupPermissions = (
+    group: "sapras" | "tugas_akhir" | "data_master"
+  ) => {
     const groupKeys = SARPRAS_PAGES.filter((p) => p.group === group).map(
       (p) => p.key
     );
@@ -693,8 +695,9 @@ export function AkunView() {
             {formRole === "master_admin" ? (
               <div className="p-3.5 rounded-md border border-sky-300 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-950/30 text-xs text-sky-950 dark:text-sky-200">
                 Akun berperan <strong>Master Admin</strong> otomatis memiliki
-                akses penuh ke seluruh 14 modul SAPRAS &amp; Data Master,
-                Manajemen Akun Staf, serta Riwayat &amp; Rekap Peminjaman.
+                akses penuh ke seluruh {SARPRAS_PAGES.length} modul SAPRAS,
+                Tugas Akhir &amp; Data Master, Manajemen Akun Staf, serta
+                Riwayat &amp; Rekap Peminjaman.
               </div>
             ) : (
               <>
@@ -718,10 +721,14 @@ export function AkunView() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {(
                     [
                       { group: "sapras", title: "Menu SAPRAS (6 Halaman)" },
+                      {
+                        group: "tugas_akhir",
+                        title: "Menu TUGAS AKHIR (4 Halaman)",
+                      },
                       {
                         group: "data_master",
                         title: "Menu DATA MASTER (8 Halaman)",

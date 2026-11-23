@@ -14,11 +14,13 @@ import {
   Package,
   RotateCcw,
   School,
+  ScrollText,
   Search,
   UserCog,
   Wrench,
   X,
 } from "lucide-react";
+import { getThesisHref, getThesisPageKey } from "@/lib/auth/permissions";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 
 interface SearchHit {
@@ -48,6 +50,7 @@ export function CommandSearch() {
     academicClasses,
     officeKitItems,
     officeKitLoans,
+    thesisWorkflows,
     canAccessPage,
     isLiveSupabase,
     resetToSeedData,
@@ -369,6 +372,31 @@ export function CommandSearch() {
       }
     }
 
+    for (const w of thesisWorkflows) {
+      const taPageKey = getThesisPageKey(w.track, w.stage);
+      if (!canAccessPage(taPageKey)) continue;
+      if (
+        !q ||
+        w.ticket_code.toLowerCase().includes(q) ||
+        w.student_name.toLowerCase().includes(q) ||
+        w.student_nim.toLowerCase().includes(q) ||
+        w.title.toLowerCase().includes(q) ||
+        (w.journal_name || "").toLowerCase().includes(q)
+      ) {
+        hits.push({
+          id: `ta-${w.id}`,
+          category: "Tugas Akhir",
+          code: w.ticket_code,
+          title: w.student_name,
+          meta: `NIM ${w.student_nim} • ${w.title}`,
+          href: `${getThesisHref(w.track, w.stage)}?inspect=${w.id}`,
+          icon: (
+            <ScrollText className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />
+          ),
+        });
+      }
+    }
+
     if (
       !q ||
       "sinkron ulang database refresh reset".includes(q) ||
@@ -406,6 +434,7 @@ export function CommandSearch() {
     query,
     resetToSeedData,
     rooms,
+    thesisWorkflows,
   ]);
 
   if (!commandSearchOpen) return null;

@@ -49,6 +49,10 @@ export type SarprasPageKey =
   | "peminjaman"
   | "pemeliharaan"
   | "bhp"
+  | "ta-skripsi-proposal"
+  | "ta-skripsi-sidang"
+  | "ta-artikel-proposal"
+  | "ta-artikel-sidang"
   | "ruangan"
   | "kelas"
   | "dosen"
@@ -83,7 +87,11 @@ export type SarprasEntityType =
   | "vendor"
   | "class"
   | "office_kit"
-  | "office_loan";
+  | "office_loan"
+  | "ta_skripsi_proposal"
+  | "ta_skripsi_sidang"
+  | "ta_artikel_proposal"
+  | "ta_artikel_sidang";
 
 export type ProdiCode =
   | "MPI"
@@ -473,4 +481,57 @@ export interface ConsumableTransaction {
   unit_id?: string | null;
   purpose_notes: string;
   transaction_date: string;
+}
+
+export type ThesisTrack = "skripsi" | "artikel_jurnal";
+
+export type ThesisStage = "proposal" | "sidang";
+
+export type ThesisBoardColumn =
+  | "berkas_daftar"
+  | "bikin_jadwal"
+  | "bikin_surat"
+  | "selesai_arsip";
+
+export type ThesisLetterStatus =
+  | "Belum Dibuat"
+  | "Draft"
+  | "Siap TTD"
+  | "Terbit";
+
+export interface ThesisWorkflow {
+  id: string;
+  ticket_code: string;
+  track: ThesisTrack;
+  stage: ThesisStage;
+  board_column: ThesisBoardColumn;
+  student_name: string;
+  student_nim: string;
+  student_phone: string;
+  prodi: ProdiCode;
+  class_id?: string | null;
+  class_code?: string | null;
+  title: string;
+  journal_name?: string | null;
+  journal_url?: string | null;
+  supervisor_1_id?: string | null;
+  supervisor_2_id?: string | null;
+  examiner_1_id?: string | null;
+  examiner_2_id?: string | null;
+  registered_at: string;
+  document_notes?: string | null;
+  schedule_date?: string | null;
+  schedule_start_time?: string | null;
+  schedule_end_time?: string | null;
+  room_id?: string | null;
+  letter_number?: string | null;
+  letter_date?: string | null;
+  letter_signer_official_id?: string | null;
+  letter_status: ThesisLetterStatus;
+  archived_at?: string | null;
+  archive_notes?: string | null;
+  source_workflow_id?: string | null;
+  created_by_staff?: string | null;
+  created_at: string;
+  updated_at?: string;
 }

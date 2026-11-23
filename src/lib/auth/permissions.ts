@@ -2,6 +2,8 @@ import {
   SarprasEntityType,
   SarprasPageKey,
   StaffRole,
+  ThesisStage,
+  ThesisTrack,
 } from "@/types/sarpras";
 
 export interface SarprasPageMeta {
@@ -9,7 +11,7 @@ export interface SarprasPageMeta {
   href: string;
   label: string;
   shortLabel: string;
-  group: "sapras" | "data_master";
+  group: "sapras" | "tugas_akhir" | "data_master";
 }
 
 export const SARPRAS_PAGES: SarprasPageMeta[] = [
@@ -54,6 +56,34 @@ export const SARPRAS_PAGES: SarprasPageMeta[] = [
     label: "Barang Habis Pakai / ATK",
     shortLabel: "Stok BHP",
     group: "sapras",
+  },
+  {
+    key: "ta-skripsi-proposal",
+    href: "/tugas-akhir/skripsi/proposal",
+    label: "Skripsi: Proposal",
+    shortLabel: "Prop. Skripsi",
+    group: "tugas_akhir",
+  },
+  {
+    key: "ta-skripsi-sidang",
+    href: "/tugas-akhir/skripsi/sidang",
+    label: "Skripsi: Sidang",
+    shortLabel: "Sidang Skripsi",
+    group: "tugas_akhir",
+  },
+  {
+    key: "ta-artikel-proposal",
+    href: "/tugas-akhir/artikel-jurnal/proposal",
+    label: "Artikel Jurnal: Proposal",
+    shortLabel: "Prop. Artikel",
+    group: "tugas_akhir",
+  },
+  {
+    key: "ta-artikel-sidang",
+    href: "/tugas-akhir/artikel-jurnal/sidang",
+    label: "Artikel Jurnal: Sidang",
+    shortLabel: "Sidang Artikel",
+    group: "tugas_akhir",
   },
   {
     key: "ruangan",
@@ -121,9 +151,39 @@ export const DEFAULT_STAFF_PAGES: SarprasPageKey[] = SARPRAS_PAGES.filter(
   (p) => p.group === "sapras"
 ).map((p) => p.key);
 
+export const TUGAS_AKHIR_PAGE_KEYS: SarprasPageKey[] = SARPRAS_PAGES.filter(
+  (p) => p.group === "tugas_akhir"
+).map((p) => p.key);
+
 export const DATA_MASTER_PAGE_KEYS: SarprasPageKey[] = SARPRAS_PAGES.filter(
   (p) => p.group === "data_master"
 ).map((p) => p.key);
+
+export function getThesisPageKey(
+  track: ThesisTrack,
+  stage: ThesisStage
+): SarprasPageKey {
+  if (track === "skripsi") {
+    return stage === "proposal" ? "ta-skripsi-proposal" : "ta-skripsi-sidang";
+  }
+  return stage === "proposal" ? "ta-artikel-proposal" : "ta-artikel-sidang";
+}
+
+export function getThesisEntityType(
+  track: ThesisTrack,
+  stage: ThesisStage
+): SarprasEntityType {
+  if (track === "skripsi") {
+    return stage === "proposal" ? "ta_skripsi_proposal" : "ta_skripsi_sidang";
+  }
+  return stage === "proposal" ? "ta_artikel_proposal" : "ta_artikel_sidang";
+}
+
+export function getThesisHref(track: ThesisTrack, stage: ThesisStage): string {
+  return track === "skripsi"
+    ? `/tugas-akhir/skripsi/${stage}`
+    : `/tugas-akhir/artikel-jurnal/${stage}`;
+}
 
 const VALID_PAGE_KEY_SET = new Set<string>(ALL_MANAGEABLE_PAGES);
 const PAGE_META_BY_KEY = new Map<SarprasPageKey, SarprasPageMeta>(
@@ -146,8 +206,13 @@ export const PERMISSION_PRESETS: Array<{
     pages: ["sirkulasi-invent", "pemeliharaan"],
   },
   {
+    id: "staf_tugas_akhir",
+    label: "Staf Tugas Akhir (4)",
+    pages: [...TUGAS_AKHIR_PAGE_KEYS],
+  },
+  {
     id: "all_pages",
-    label: "Pilih Semua (14)",
+    label: `Pilih Semua (${ALL_MANAGEABLE_PAGES.length})`,
     pages: [...ALL_MANAGEABLE_PAGES],
   },
 ];
@@ -310,4 +375,8 @@ export const ENTITY_TYPE_TO_PAGE_KEY: Record<
   class: "kelas",
   office_kit: "sirkulasi-invent",
   office_loan: "sirkulasi-invent",
+  ta_skripsi_proposal: "ta-skripsi-proposal",
+  ta_skripsi_sidang: "ta-skripsi-sidang",
+  ta_artikel_proposal: "ta-artikel-proposal",
+  ta_artikel_sidang: "ta-artikel-sidang",
 };
