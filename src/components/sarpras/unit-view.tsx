@@ -50,7 +50,8 @@ export function UnitView() {
     campusOfficials,
     bookings,
     consumableTransactions,
-    canManageDataMaster,
+    canAccessPage,
+    defaultHomeHref,
     uiSimState,
     setUiSimState,
     addCampusUnit,
@@ -115,8 +116,13 @@ export function UnitView() {
   const activeFilterCount =
     (filterType !== "ALL" ? 1 : 0) + (filterActive !== "ALL" ? 1 : 0);
 
-  if (!canManageDataMaster) {
-    return <MasterAdminGuard sectionLabel="Data Master Unit, Prodi & Ormawa" />;
+  if (!canAccessPage("unit")) {
+    return (
+      <MasterAdminGuard
+        sectionLabel="Data Master Unit, Prodi & Ormawa"
+        backHref={defaultHomeHref}
+      />
+    );
   }
 
   if (uiSimState === "loading") {

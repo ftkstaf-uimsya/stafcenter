@@ -42,6 +42,7 @@ export async function GET() {
         fullName: session.fullName,
         email: session.email,
         role: session.role,
+        allowedPages: session.allowedPages,
       },
       serverConfigured: true,
     },

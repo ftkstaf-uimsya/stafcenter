@@ -4,17 +4,26 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
+  BarChart3,
+  Building2,
   Cable,
   CheckCircle2,
   Clock,
+  Download,
   Edit3,
+  History,
   KanbanSquare,
+  Layers,
   PackageCheck,
   Plus,
   RotateCcw,
+  ShieldCheck,
   Table2,
   Trash2,
+  TrendingUp,
+  Users,
   Wrench,
+  X,
 } from "lucide-react";
 import {
   useSarpras,
@@ -71,7 +80,54 @@ const PRODI_OPTIONS: ProdiCode[] = [
   "PAI",
 ];
 
-type ActiveTab = "loans" | "items";
+type ActiveTab = "loans" | "items" | "history";
+type HistorySubTab = "log" | "recap";
+type HistoryPeriodPreset = "ALL" | "TODAY" | "7D" | "30D" | "MONTH" | "CUSTOM";
+type RecapSaprasMode = "category" | "item";
+
+function shiftIsoDate(baseIso: string, deltaDays: number): string {
+  const parts = baseIso.split("-").map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return baseIso;
+  const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + deltaDays));
+  return dt.toISOString().slice(0, 10);
+}
+
+function formatWibDateTime(iso?: string | null): string {
+  if (!iso) return "-";
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return new Intl.DateTimeFormat("id-ID", {
+    timeZone: "Asia/Jakarta",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(parsed);
+}
+
+function inferKitCategoryFromLabel(label: string): OfficeKitCategory {
+  const upper = label.toUpperCase();
+  if (upper.includes("HDMI")) return "Kabel HDMI";
+  if (upper.includes("STOP KONTAK") || upper.includes("STK")) return "Stop Kontak";
+  if (upper.includes("REMOTE") || upper.includes("RMT")) return "Remote TV";
+  if (upper.includes("KUNCI") || upper.includes("AKSES") || upper.includes("KNC")) {
+    return "Kunci & Akses";
+  }
+  if (upper.includes("ADAPTER") || upper.includes("CONVERTER") || upper.includes("ADP")) {
+    return "Adapter & Converter";
+  }
+  return "Lainnya";
+}
+
+function escapeCsvCell(value: string | number | null | undefined): string {
+  const str = String(value ?? "");
+  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
 
 function KitStatusBadge({ status }: { status: OfficeKitStatus }) {
   if (status === "Tersedia") {
@@ -109,6 +165,8 @@ export function SirkulasiInventView() {
     attachments,
     uiSimState,
     setUiSimState,
+    isLiveSupabase,
+    authUser,
     addOfficeKitItem,
     updateOfficeKitItem,
     deleteOfficeKitItem,
@@ -118,8 +176,22 @@ export function SirkulasiInventView() {
     deleteOfficeKitLoan,
   } = useSarpras();
 
+  const isMasterAdmin = !isLiveSupabase || authUser?.role === "master_admin";
+
   const [activeTab, setActiveTab] = useState<ActiveTab>("loans");
   const [viewMode, setViewMode] = useState<"board" | "table">("table");
+
+  // State khusus tab Riwayat & Rekap (eksklusif Master Admin)
+  const [historySubTab, setHistorySubTab] = useState<HistorySubTab>("log");
+  const [historyPeriod, setHistoryPeriod] = useState<HistoryPeriodPreset>("ALL");
+  const [historyStartDate, setHistoryStartDate] = useState("");
+  const [historyEndDate, setHistoryEndDate] = useState("");
+  const [historyProdi, setHistoryProdi] = useState("ALL");
+  const [historyStatus, setHistoryStatus] = useState("ALL");
+  const [historyClassFilter, setHistoryClassFilter] = useState("");
+  const [historySearch, setHistorySearch] = useState("");
+  const [recapSaprasMode, setRecapSaprasMode] =
+    useState<RecapSaprasMode>("category");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterLoanStatus, setFilterLoanStatus] = useState("ALL");
   const [filterProdi, setFilterProdi] = useState("ALL");
@@ -187,6 +259,12 @@ export function SirkulasiInventView() {
       setSelectedKitId(inspect);
     }
   }, [officeKitItems, officeKitLoans]);
+
+  useEffect(() => {
+    if (!isMasterAdmin && activeTab === "history") {
+      setActiveTab("loans");
+    }
+  }, [activeTab, isMasterAdmin]);
 
   const activeLoansCount = useMemo(
     () => officeKitLoans.filter((l) => l.status === "Dipinjam").length,
@@ -263,6 +341,365 @@ export function SirkulasiInventView() {
     (filterLoanStatus !== "ALL" ? 1 : 0) + (filterProdi !== "ALL" ? 1 : 0);
   const activeItemFilterCount =
     (filterKitCategory !== "ALL" ? 1 : 0) + (filterKitStatus !== "ALL" ? 1 : 0);
+
+  const referenceTodayIso = useMemo(() => {
+    if (!isLiveSupabase) return TODAY_ISO;
+    return new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Jakarta",
+    });
+  }, [isLiveSupabase]);
+
+  const historyFilteredLoans = useMemo(() => {
+    const q = historySearch.trim().toLowerCase();
+    const min7d = shiftIsoDate(referenceTodayIso, -6);
+    const min30d = shiftIsoDate(referenceTodayIso, -29);
+    const monthPrefix = referenceTodayIso.slice(0, 7);
+
+    return officeKitLoans
+      .filter((l) => {
+        if (historyPeriod === "TODAY" && l.loan_date !== referenceTodayIso) {
+          return false;
+        }
+        if (historyPeriod === "7D" && l.loan_date < min7d) {
+          return false;
+        }
+        if (historyPeriod === "30D" && l.loan_date < min30d) {
+          return false;
+        }
+        if (
+          historyPeriod === "MONTH" &&
+          !l.loan_date.startsWith(monthPrefix)
+        ) {
+          return false;
+        }
+        if (historyPeriod === "CUSTOM") {
+          if (historyStartDate && l.loan_date < historyStartDate) return false;
+          if (historyEndDate && l.loan_date > historyEndDate) return false;
+        }
+
+        if (historyProdi !== "ALL" && l.prodi !== historyProdi) return false;
+        if (historyStatus !== "ALL" && l.status !== historyStatus) return false;
+        if (
+          historyClassFilter &&
+          l.class_code.toUpperCase() !== historyClassFilter.toUpperCase()
+        ) {
+          return false;
+        }
+
+        if (!q) return true;
+        const room = rooms.find((r) => r.id === l.room_id);
+        return (
+          l.loan_code.toLowerCase().includes(q) ||
+          l.class_code.toLowerCase().includes(q) ||
+          l.prodi.toLowerCase().includes(q) ||
+          l.dpm_name.toLowerCase().includes(q) ||
+          l.borrower_name.toLowerCase().includes(q) ||
+          l.kit_items_label.toLowerCase().includes(q) ||
+          (l.course_name || "").toLowerCase().includes(q) ||
+          (l.handed_by_staff || "").toLowerCase().includes(q) ||
+          (l.received_by_staff || "").toLowerCase().includes(q) ||
+          (room
+            ? `${room.code} ${room.name}`.toLowerCase().includes(q)
+            : false)
+        );
+      })
+      .sort((a, b) => {
+        const byDate = b.loan_date.localeCompare(a.loan_date);
+        if (byDate !== 0) return byDate;
+        const byTime = b.borrow_time.localeCompare(a.borrow_time);
+        if (byTime !== 0) return byTime;
+        return b.created_at.localeCompare(a.created_at);
+      });
+  }, [
+    historyClassFilter,
+    historyEndDate,
+    historyPeriod,
+    historyProdi,
+    historySearch,
+    historyStartDate,
+    historyStatus,
+    officeKitLoans,
+    referenceTodayIso,
+    rooms,
+  ]);
+
+  const recapSummary = useMemo(() => {
+    const kitMap = new Map<string, OfficeKitItem>();
+    for (const item of officeKitItems) {
+      kitMap.set(item.id, item);
+    }
+
+    const totalLoans = historyFilteredLoans.length;
+    const returnedLoans = historyFilteredLoans.filter(
+      (l) => l.status === "Dikembalikan"
+    ).length;
+    const activeLoans = totalLoans - returnedLoans;
+    const totalUnitsBorrowed = historyFilteredLoans.reduce(
+      (acc, l) => acc + l.kit_item_ids.length,
+      0
+    );
+    const completionRatePct =
+      totalLoans > 0 ? Math.round((returnedLoans / totalLoans) * 100) : 0;
+
+    type ClassAgg = {
+      classCode: string;
+      prodi: ProdiCode;
+      dpmName: string;
+      loanCount: number;
+      activeCount: number;
+      totalItemsBorrowed: number;
+      lastLoanDate: string;
+      catCounts: Map<OfficeKitCategory, number>;
+    };
+
+    const classMap = new Map<string, ClassAgg>();
+
+    type CatAgg = {
+      category: OfficeKitCategory;
+      borrowCount: number;
+      loanIds: Set<string>;
+      classCounts: Map<string, number>;
+    };
+    const catMap = new Map<OfficeKitCategory, CatAgg>();
+    for (const cat of OFFICE_KIT_CATEGORIES) {
+      catMap.set(cat, {
+        category: cat,
+        borrowCount: 0,
+        loanIds: new Set<string>(),
+        classCounts: new Map<string, number>(),
+      });
+    }
+
+    type ItemAgg = {
+      kitId: string;
+      kitCode: string;
+      name: string;
+      category: OfficeKitCategory;
+      status: OfficeKitStatus | "Arsip";
+      condition: AssetCondition | null;
+      isDeleted: boolean;
+      borrowCount: number;
+      lastLoanDate: string;
+      classCounts: Map<string, number>;
+    };
+    const itemMap = new Map<string, ItemAgg>();
+
+    type RoomAgg = {
+      roomKey: string;
+      roomLabel: string;
+      loanCount: number;
+      totalUnitsBorrowed: number;
+      lastLoanDate: string;
+      catCounts: Map<OfficeKitCategory, number>;
+    };
+    const roomAggMap = new Map<string, RoomAgg>();
+
+    for (const loan of historyFilteredLoans) {
+      const normalizedClass = loan.class_code.trim().toUpperCase();
+      const existingClass = classMap.get(normalizedClass) || {
+        classCode: normalizedClass,
+        prodi: loan.prodi,
+        dpmName: loan.dpm_name,
+        loanCount: 0,
+        activeCount: 0,
+        totalItemsBorrowed: 0,
+        lastLoanDate: loan.loan_date,
+        catCounts: new Map<OfficeKitCategory, number>(),
+      };
+      existingClass.loanCount += 1;
+      if (loan.status === "Dipinjam") existingClass.activeCount += 1;
+      existingClass.totalItemsBorrowed += loan.kit_item_ids.length;
+      if (loan.loan_date > existingClass.lastLoanDate) {
+        existingClass.lastLoanDate = loan.loan_date;
+        existingClass.dpmName = loan.dpm_name;
+      }
+
+      const roomKey = loan.room_id || "__REGULAR__";
+      const roomObj = rooms.find((r) => r.id === loan.room_id);
+      const roomLabel = roomObj
+        ? `${roomObj.code} (${roomObj.name})`
+        : "Ruang Kelas Reguler";
+      const existingRoom = roomAggMap.get(roomKey) || {
+        roomKey,
+        roomLabel,
+        loanCount: 0,
+        totalUnitsBorrowed: 0,
+        lastLoanDate: loan.loan_date,
+        catCounts: new Map<OfficeKitCategory, number>(),
+      };
+      existingRoom.loanCount += 1;
+      existingRoom.totalUnitsBorrowed += loan.kit_item_ids.length;
+      if (loan.loan_date > existingRoom.lastLoanDate) {
+        existingRoom.lastLoanDate = loan.loan_date;
+      }
+
+      for (const kitId of loan.kit_item_ids) {
+        const kit = kitMap.get(kitId);
+        const category = kit
+          ? kit.category
+          : inferKitCategoryFromLabel(loan.kit_items_label);
+
+        existingClass.catCounts.set(
+          category,
+          (existingClass.catCounts.get(category) || 0) + 1
+        );
+        existingRoom.catCounts.set(
+          category,
+          (existingRoom.catCounts.get(category) || 0) + 1
+        );
+
+        const catAgg = catMap.get(category)!;
+        catAgg.borrowCount += 1;
+        catAgg.loanIds.add(loan.id);
+        catAgg.classCounts.set(
+          normalizedClass,
+          (catAgg.classCounts.get(normalizedClass) || 0) + 1
+        );
+
+        const existingItem = itemMap.get(kitId) || {
+          kitId,
+          kitCode: kit ? kit.kit_code : `UNIT-${kitId.slice(0, 6).toUpperCase()}`,
+          name: kit ? kit.name : `Unit Arsip (${loan.loan_code})`,
+          category,
+          status: kit ? kit.status : "Arsip",
+          condition: kit ? kit.condition : null,
+          isDeleted: !kit,
+          borrowCount: 0,
+          lastLoanDate: loan.loan_date,
+          classCounts: new Map<string, number>(),
+        };
+        existingItem.borrowCount += 1;
+        if (loan.loan_date > existingItem.lastLoanDate) {
+          existingItem.lastLoanDate = loan.loan_date;
+        }
+        existingItem.classCounts.set(
+          normalizedClass,
+          (existingItem.classCounts.get(normalizedClass) || 0) + 1
+        );
+        itemMap.set(kitId, existingItem);
+      }
+
+      classMap.set(normalizedClass, existingClass);
+      roomAggMap.set(roomKey, existingRoom);
+    }
+
+    const classRankings = Array.from(classMap.values())
+      .map((entry) => {
+        const topCategories = Array.from(entry.catCounts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([cat, count]) => `${cat} (${count}x)`)
+          .join(", ");
+        return {
+          classCode: entry.classCode,
+          prodi: entry.prodi,
+          dpmName: entry.dpmName,
+          loanCount: entry.loanCount,
+          activeCount: entry.activeCount,
+          totalItemsBorrowed: entry.totalItemsBorrowed,
+          lastLoanDate: entry.lastLoanDate,
+          topCategories: topCategories || "-",
+        };
+      })
+      .sort((a, b) => {
+        if (b.loanCount !== a.loanCount) return b.loanCount - a.loanCount;
+        if (b.totalItemsBorrowed !== a.totalItemsBorrowed) {
+          return b.totalItemsBorrowed - a.totalItemsBorrowed;
+        }
+        return b.lastLoanDate.localeCompare(a.lastLoanDate);
+      });
+
+    const categoryRankings = Array.from(catMap.values())
+      .map((entry) => {
+        const itemsInCat = officeKitItems.filter(
+          (i) => i.category === entry.category && i.is_active
+        );
+        const availableUnits = itemsInCat.filter(
+          (i) => i.status === "Tersedia"
+        ).length;
+        const topClassEntry = Array.from(entry.classCounts.entries()).sort(
+          (a, b) => b[1] - a[1]
+        )[0];
+        const sharePct =
+          totalUnitsBorrowed > 0
+            ? Math.round((entry.borrowCount / totalUnitsBorrowed) * 100)
+            : 0;
+        return {
+          category: entry.category,
+          borrowCount: entry.borrowCount,
+          ticketCount: entry.loanIds.size,
+          sharePct,
+          totalUnits: itemsInCat.length,
+          availableUnits,
+          topClassCode: topClassEntry ? topClassEntry[0] : "-",
+          topClassCount: topClassEntry ? topClassEntry[1] : 0,
+        };
+      })
+      .filter((c) => c.borrowCount > 0 || c.totalUnits > 0)
+      .sort((a, b) => {
+        if (b.borrowCount !== a.borrowCount) return b.borrowCount - a.borrowCount;
+        return b.totalUnits - a.totalUnits;
+      });
+
+    const itemRankings = Array.from(itemMap.values())
+      .map((entry) => {
+        const topClassEntry = Array.from(entry.classCounts.entries()).sort(
+          (a, b) => b[1] - a[1]
+        )[0];
+        return {
+          kitId: entry.kitId,
+          kitCode: entry.kitCode,
+          name: entry.name,
+          category: entry.category,
+          status: entry.status,
+          condition: entry.condition,
+          isDeleted: entry.isDeleted,
+          borrowCount: entry.borrowCount,
+          lastLoanDate: entry.lastLoanDate,
+          topClassLabel: topClassEntry
+            ? `${topClassEntry[0]} (${topClassEntry[1]}x)`
+            : "-",
+        };
+      })
+      .sort((a, b) => {
+        if (b.borrowCount !== a.borrowCount) return b.borrowCount - a.borrowCount;
+        return b.lastLoanDate.localeCompare(a.lastLoanDate);
+      });
+
+    const roomRankings = Array.from(roomAggMap.values())
+      .map((entry) => {
+        const topCats = Array.from(entry.catCounts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 2)
+          .map(([cat, count]) => `${cat} (${count}x)`)
+          .join(", ");
+        return {
+          roomKey: entry.roomKey,
+          roomLabel: entry.roomLabel,
+          loanCount: entry.loanCount,
+          totalUnitsBorrowed: entry.totalUnitsBorrowed,
+          lastLoanDate: entry.lastLoanDate,
+          topCategoryLabel: topCats || "-",
+        };
+      })
+      .sort((a, b) => {
+        if (b.loanCount !== a.loanCount) return b.loanCount - a.loanCount;
+        return b.totalUnitsBorrowed - a.totalUnitsBorrowed;
+      });
+
+    return {
+      totalLoans,
+      returnedLoans,
+      activeLoans,
+      totalUnitsBorrowed,
+      completionRatePct,
+      uniqueClassesCount: classRankings.length,
+      classRankings,
+      categoryRankings,
+      itemRankings,
+      roomRankings,
+    };
+  }, [historyFilteredLoans, officeKitItems, rooms]);
 
   if (uiSimState === "loading") {
     return (
@@ -700,6 +1137,209 @@ export function SirkulasiInventView() {
     },
   ];
 
+  const handleExportHistoryCsv = () => {
+    const filenameDate = referenceTodayIso;
+    if (historySubTab === "log") {
+      const headers = [
+        "Kode Tiket",
+        "Tanggal Pinjam",
+        "Jam Ambil",
+        "Estimasi Kembali",
+        "Waktu Kembali Aktual",
+        "Kode Kelas",
+        "Prodi",
+        "DPM / Ketua Kelas",
+        "Pengambil",
+        "No WhatsApp",
+        "Ruangan",
+        "Mata Kuliah",
+        "Jumlah Unit",
+        "Barang Dipinjam",
+        "Status",
+        "Petugas Penyerah",
+        "Petugas Penerima",
+        "Catatan Kondisi Kembali",
+      ];
+      const rows = historyFilteredLoans.map((loan) => {
+        const room = rooms.find((r) => r.id === loan.room_id);
+        return [
+          loan.loan_code,
+          loan.loan_date,
+          loan.borrow_time,
+          loan.expected_return_time,
+          loan.returned_at ? formatWibDateTime(loan.returned_at) : "-",
+          loan.class_code,
+          loan.prodi,
+          loan.dpm_name,
+          loan.borrower_name,
+          loan.borrower_phone,
+          room ? `${room.code} (${room.name})` : "Ruang Kelas Reguler",
+          loan.course_name || "-",
+          loan.kit_item_ids.length,
+          loan.kit_items_label,
+          loan.status,
+          loan.handed_by_staff || "Staf Loket",
+          loan.received_by_staff || "-",
+          loan.return_condition_notes || "-",
+        ]
+          .map(escapeCsvCell)
+          .join(",");
+      });
+      const csvContent = "\uFEFF" + [headers.map(escapeCsvCell).join(","), ...rows].join("\r\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `riwayat-sirkulasi-invent-${filenameDate}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const headers = [
+      "Peringkat",
+      "Kode Kelas",
+      "Prodi",
+      "DPM / Ketua Kelas",
+      "Frekuensi Peminjaman",
+      "Total Unit Dipinjam",
+      "Sedang Dipinjam",
+      "Sapras Terbanyak Kelas Ini",
+      "Peminjaman Terakhir",
+    ];
+    const rows = recapSummary.classRankings.map((cls, idx) =>
+      [
+        idx + 1,
+        cls.classCode,
+        cls.prodi,
+        cls.dpmName,
+        cls.loanCount,
+        cls.totalItemsBorrowed,
+        cls.activeCount,
+        cls.topCategories,
+        cls.lastLoanDate,
+      ]
+        .map(escapeCsvCell)
+        .join(",")
+    );
+    const csvContent = "\uFEFF" + [headers.map(escapeCsvCell).join(","), ...rows].join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rekap-kelas-sapras-${filenameDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const historyLogColumns: DataTableColumn<OfficeKitLoan>[] = [
+    {
+      key: "ticket_time",
+      header: "Tiket & Jadwal Pinjam",
+      render: (row) => (
+        <div className="space-y-1 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="px-2 py-0.5 font-mono font-bold rounded bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+              {row.loan_code}
+            </span>
+            <span className="font-mono text-slate-600 dark:text-slate-400">
+              {row.kit_item_ids.length} unit
+            </span>
+          </div>
+          <p className="font-mono font-semibold text-slate-900 dark:text-slate-100">
+            {row.loan_date}
+          </p>
+          <p className="font-mono text-slate-600 dark:text-slate-400">
+            {row.borrow_time} - {row.expected_return_time} WIB
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: "class_borrower",
+      header: "Kelas, DPM & Pengambil",
+      render: (row) => (
+        <div className="space-y-1 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="px-2 py-0.5 font-mono font-bold rounded bg-[#1E3A5F] text-white dark:bg-sky-400 dark:text-slate-950">
+              {row.class_code}
+            </span>
+            <span className="font-semibold text-slate-700 dark:text-slate-300">
+              Prodi {row.prodi}
+            </span>
+          </div>
+          <p className="font-bold text-slate-900 dark:text-slate-100">
+            {row.borrower_name}
+          </p>
+          <p className="text-slate-600 dark:text-slate-400">
+            DPM: {row.dpm_name} • <span className="font-mono">{row.borrower_phone}</span>
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: "items_room",
+      header: "Barang & Ruang Kuliah",
+      render: (row) => {
+        const room = rooms.find((r) => r.id === row.room_id);
+        return (
+          <div className="space-y-1 text-xs max-w-md">
+            <p className="font-semibold text-slate-900 dark:text-slate-100 leading-relaxed">
+              {row.kit_items_label}
+            </p>
+            <p className="text-slate-600 dark:text-slate-400">
+              <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                {room ? `${room.code} (${room.name})` : "Ruang Kelas Reguler"}
+              </span>
+              {row.course_name ? ` • ${row.course_name}` : ""}
+            </p>
+          </div>
+        );
+      },
+    },
+    {
+      key: "staff_audit",
+      header: "Audit Loket & Pengembalian",
+      render: (row) => (
+        <div className="space-y-1 text-xs">
+          <p className="text-slate-700 dark:text-slate-300">
+            Serah: <strong>{row.handed_by_staff || "Staf Loket"}</strong>
+          </p>
+          <p className="text-slate-700 dark:text-slate-300">
+            Terima: <strong>{row.received_by_staff || "-"}</strong>
+          </p>
+          <p className="font-mono text-slate-600 dark:text-slate-400">
+            Kembali:{" "}
+            {row.returned_at
+              ? formatWibDateTime(row.returned_at)
+              : "Belum dikembalikan"}
+          </p>
+          {row.return_condition_notes ? (
+            <p className="text-emerald-800 dark:text-emerald-300 font-medium">
+              Catatan: {row.return_condition_notes}
+            </p>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (row) =>
+        row.status === "Dipinjam" ? (
+          <Badge tone="warning">
+            <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Sedang Dipinjam</span>
+          </Badge>
+        ) : (
+          <Badge tone="success">
+            <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Dikembalikan</span>
+          </Badge>
+        ),
+    },
+  ];
+
   const selectedLoan =
     officeKitLoans.find((l) => l.id === selectedLoanId) || null;
   const selectedKit = officeKitItems.find((i) => i.id === selectedKitId) || null;
@@ -899,13 +1539,40 @@ export function SirkulasiInventView() {
             {officeKitItems.length}
           </span>
         </button>
+
+        {isMasterAdmin ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "history"}
+            onClick={() => setActiveTab("history")}
+            className={`min-h-[44px] px-4 py-2 rounded-md text-xs font-bold inline-flex items-center gap-2 border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400 ${
+              activeTab === "history"
+                ? "bg-[#1E3A5F] text-white border-[#1E3A5F] dark:bg-sky-500 dark:text-slate-950 dark:border-sky-500"
+                : "bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+            }`}
+          >
+            <BarChart3 className="w-4 h-4" aria-hidden="true" />
+            <span>Riwayat & Rekap</span>
+            <span
+              className={`px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase rounded border ${
+                activeTab === "history"
+                  ? "bg-white/20 text-white border-white/30 dark:bg-slate-950/20 dark:text-slate-950 dark:border-slate-950/30"
+                  : "bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 border-amber-300 dark:border-amber-700"
+              }`}
+            >
+              Master Admin
+            </span>
+          </button>
+        ) : null}
       </div>
 
-      {/* Toolbar Filter & Pencarian */}
-      <section
-        aria-label="Filter dan Pencarian Sirkulasi Invent"
-        className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900"
-      >
+      {/* Toolbar Filter & Pencarian (Meja Sirkulasi & Katalog) */}
+      {activeTab !== "history" ? (
+        <section
+          aria-label="Filter dan Pencarian Sirkulasi Invent"
+          className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900"
+        >
         <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[240px]">
           <input
             type="search"
@@ -1053,10 +1720,670 @@ export function SirkulasiInventView() {
             </button>
           </div>
         </div>
-      </section>
+        </section>
+      ) : null}
 
-      {/* Konten Utama: Board Status (Drag & Drop) atau Tabel */}
-      {activeTab === "loans" ? (
+      {/* Konten Utama: Riwayat & Rekap (Master Admin), Board Status, atau Tabel */}
+      {activeTab === "history" && isMasterAdmin ? (
+        <section
+          aria-label="Riwayat dan Rekap Sirkulasi Invent Master Admin"
+          className="space-y-5"
+        >
+          {/* Header Sub-Switch Eksklusif Master Admin */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Akses Khusus Master Admin</span>
+              </div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                Riwayat Peminjaman & Rekap Intensitas Kelas dan Sapras
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Pantau seluruh riwayat transaksi loket beserta peringkat kelas dan peralatan kantor staf yang paling sering dipinjam.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <div
+                role="tablist"
+                aria-label="Pilih mode Riwayat atau Rekap"
+                className="inline-flex flex-wrap rounded-md border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-1 gap-1"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={historySubTab === "log"}
+                  onClick={() => setHistorySubTab("log")}
+                  className={`min-h-[40px] px-3.5 py-1.5 rounded text-xs font-bold inline-flex items-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400 ${
+                    historySubTab === "log"
+                      ? "bg-[#1E3A5F] text-white dark:bg-sky-500 dark:text-slate-950 shadow-sm"
+                      : "text-slate-800 dark:text-slate-200 hover:bg-white/70 dark:hover:bg-slate-700"
+                  }`}
+                >
+                  <History className="w-4 h-4" aria-hidden="true" />
+                  <span>Riwayat Peminjaman</span>
+                  <span
+                    className={`px-1.5 py-0.5 text-[11px] font-mono rounded ${
+                      historySubTab === "log"
+                        ? "bg-white/20 text-white dark:bg-slate-950/20 dark:text-slate-950"
+                        : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
+                    }`}
+                  >
+                    {historyFilteredLoans.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={historySubTab === "recap"}
+                  onClick={() => setHistorySubTab("recap")}
+                  className={`min-h-[40px] px-3.5 py-1.5 rounded text-xs font-bold inline-flex items-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400 ${
+                    historySubTab === "recap"
+                      ? "bg-[#1E3A5F] text-white dark:bg-sky-500 dark:text-slate-950 shadow-sm"
+                      : "text-slate-800 dark:text-slate-200 hover:bg-white/70 dark:hover:bg-slate-700"
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4" aria-hidden="true" />
+                  <span>Rekap Kelas & Sapras</span>
+                  <span
+                    className={`px-1.5 py-0.5 text-[11px] font-mono rounded ${
+                      historySubTab === "recap"
+                        ? "bg-white/20 text-white dark:bg-slate-950/20 dark:text-slate-950"
+                        : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
+                    }`}
+                  >
+                    {recapSummary.uniqueClassesCount} kelas
+                  </span>
+                </button>
+              </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleExportHistoryCsv}
+              >
+                <Download className="w-4 h-4" aria-hidden="true" />
+                <span>Ekspor CSV</span>
+              </Button>
+            </div>
+          </div>
+
+          {/* Filter Periode, Prodi, Status & Pencarian Riwayat */}
+          <div className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
+              <div className="lg:col-span-4">
+                <Input
+                  label="Cari Riwayat Sirkulasi"
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  placeholder="Tiket, kelas, DPM, pengambil, ruangan, atau barang..."
+                />
+              </div>
+
+              <div className="lg:col-span-3">
+                <Select
+                  label="Periode Data"
+                  value={historyPeriod}
+                  onChange={(e) =>
+                    setHistoryPeriod(e.target.value as HistoryPeriodPreset)
+                  }
+                  options={[
+                    { value: "ALL", label: "Semua Waktu" },
+                    { value: "TODAY", label: `Hari Ini (${referenceTodayIso})` },
+                    { value: "7D", label: "7 Hari Terakhir" },
+                    { value: "30D", label: "30 Hari Terakhir" },
+                    { value: "MONTH", label: "Bulan Berjalan" },
+                    { value: "CUSTOM", label: "Rentang Tanggal Kustom" },
+                  ]}
+                />
+              </div>
+
+              <div className="lg:col-span-2">
+                <Select
+                  label="Program Studi"
+                  value={historyProdi}
+                  onChange={(e) => setHistoryProdi(e.target.value)}
+                  options={[
+                    { value: "ALL", label: "Semua Prodi" },
+                    ...PRODI_OPTIONS.map((p) => ({
+                      value: p,
+                      label: `Prodi ${p}`,
+                    })),
+                  ]}
+                />
+              </div>
+
+              <div className="lg:col-span-3">
+                <Select
+                  label="Status Pengembalian"
+                  value={historyStatus}
+                  onChange={(e) => setHistoryStatus(e.target.value)}
+                  options={[
+                    { value: "ALL", label: "Semua Status" },
+                    { value: "Dipinjam", label: "Sedang Dipinjam" },
+                    { value: "Dikembalikan", label: "Sudah Dikembalikan" },
+                  ]}
+                />
+              </div>
+            </div>
+
+            {historyPeriod === "CUSTOM" ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <Input
+                  label="Dari Tanggal"
+                  type="date"
+                  value={historyStartDate}
+                  onChange={(e) => setHistoryStartDate(e.target.value)}
+                />
+                <Input
+                  label="Sampai Tanggal"
+                  type="date"
+                  value={historyEndDate}
+                  onChange={(e) => setHistoryEndDate(e.target.value)}
+                />
+              </div>
+            ) : null}
+
+            {(historyClassFilter ||
+              historyPeriod !== "ALL" ||
+              historyProdi !== "ALL" ||
+              historyStatus !== "ALL" ||
+              historySearch.trim()) ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-slate-600 dark:text-slate-400">
+                    Menampilkan <strong>{historyFilteredLoans.length}</strong> transaksi
+                    {historyClassFilter ? " untuk kelas terfilter:" : ":"}
+                  </span>
+                  {historyClassFilter ? (
+                    <button
+                      type="button"
+                      onClick={() => setHistoryClassFilter("")}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-[#1E3A5F] text-white dark:bg-sky-500 dark:text-slate-950 hover:opacity-90"
+                    >
+                      <span>Kelas: {historyClassFilter}</span>
+                      <X className="w-3.5 h-3.5" aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </div>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setHistoryPeriod("ALL");
+                    setHistoryStartDate("");
+                    setHistoryEndDate("");
+                    setHistoryProdi("ALL");
+                    setHistoryStatus("ALL");
+                    setHistoryClassFilter("");
+                    setHistorySearch("");
+                  }}
+                >
+                  <X className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Reset Filter</span>
+                </Button>
+              </div>
+            ) : null}
+          </div>
+
+          {historySubTab === "log" ? (
+            <DataTable
+              columns={historyLogColumns}
+              data={historyFilteredLoans}
+              rowKey={(l) => l.id}
+              activeRowKey={selectedLoanId}
+              onRowClick={(row) => setSelectedLoanId(row.id)}
+              emptyTitle="Tidak Ada Riwayat Peminjaman yang Cocok"
+              emptyDescription="Ubah filter periode, prodi, status, atau kata kunci pencarian untuk melihat transaksi sirkulasi lainnya."
+            />
+          ) : (
+            <div className="space-y-5">
+              {/* 4 KPI Cards Data Riil */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-mono font-semibold uppercase text-slate-600 dark:text-slate-400">
+                      Total Peminjaman
+                    </p>
+                    <TrendingUp
+                      className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <p className="mt-2 text-2xl font-extrabold font-mono text-slate-900 dark:text-white">
+                    {recapSummary.totalLoans}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                    {recapSummary.totalUnitsBorrowed} total unit alat keluar dari loket
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-mono font-semibold uppercase text-slate-600 dark:text-slate-400">
+                      Kelas Paling Sering Pinjam
+                    </p>
+                    <Users
+                      className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <p className="mt-2 text-2xl font-extrabold font-mono text-[#1E3A5F] dark:text-sky-400">
+                    {recapSummary.classRankings[0]?.classCode || "-"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                    {recapSummary.classRankings[0]
+                      ? `${recapSummary.classRankings[0].loanCount}x transaksi (${recapSummary.classRankings[0].totalItemsBorrowed} unit • Prodi ${recapSummary.classRankings[0].prodi})`
+                      : "Belum ada transaksi kelas pada filter ini"}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-mono font-semibold uppercase text-slate-600 dark:text-slate-400">
+                      Sapras Paling Sering Dipinjam
+                    </p>
+                    <Layers
+                      className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <p className="mt-2 text-xl font-extrabold text-slate-900 dark:text-white truncate">
+                    {recapSummary.categoryRankings[0]?.borrowCount
+                      ? recapSummary.categoryRankings[0].category
+                      : "-"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                    {recapSummary.categoryRankings[0]?.borrowCount
+                      ? `${recapSummary.categoryRankings[0].borrowCount}x dipinjam (${recapSummary.categoryRankings[0].sharePct}% pangsa pemakaian)`
+                      : "Belum ada pemakaian sapras tercatat"}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-mono font-semibold uppercase text-slate-600 dark:text-slate-400">
+                      Rasio Pengembalian
+                    </p>
+                    <CheckCircle2
+                      className="w-4 h-4 text-emerald-700 dark:text-emerald-400"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <p className="mt-2 text-2xl font-extrabold font-mono text-emerald-800 dark:text-emerald-300">
+                    {recapSummary.completionRatePct}%
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                    {recapSummary.returnedLoans} kembali, {recapSummary.activeLoans} aktif,{" "}
+                    {recapSummary.uniqueClassesCount} kelas
+                  </p>
+                </div>
+              </div>
+
+              {/* 2 Panel Peringkat Utama: Kelas vs Sapras */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                {/* Panel Kiri: Peringkat Kelas Paling Sering Meminjam */}
+                <div className="lg:col-span-7 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden flex flex-col">
+                  <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                        Peringkat Kelas Paling Sering Meminjam
+                      </h3>
+                      <p className="text-xs text-slate-600 dark:text-slate-400">
+                        Klik tombol Lihat Log pada baris kelas untuk menelusuri riwayat transaksinya.
+                      </p>
+                    </div>
+                    <span className="text-xs font-mono font-semibold text-slate-600 dark:text-slate-400">
+                      {recapSummary.classRankings.length} kelas
+                    </span>
+                  </div>
+
+                  {recapSummary.classRankings.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-600 dark:text-slate-400">
+                      Belum ada transaksi peminjaman kelas pada rentang filter saat ini.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 dark:bg-slate-800/70 border-b border-slate-200 dark:border-slate-800 text-[11px] font-mono uppercase text-slate-600 dark:text-slate-400">
+                            <th className="px-3 py-2.5 w-12">#</th>
+                            <th className="px-3 py-2.5">Kelas & DPM</th>
+                            <th className="px-3 py-2.5">Frekuensi Pinjam</th>
+                            <th className="px-3 py-2.5">Sapras Terbanyak</th>
+                            <th className="px-3 py-2.5 text-right">Aksi</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
+                          {recapSummary.classRankings.map((cls, idx) => {
+                            const maxLoans =
+                              recapSummary.classRankings[0]?.loanCount || 1;
+                            const pct = Math.max(
+                              8,
+                              Math.round((cls.loanCount / maxLoans) * 100)
+                            );
+                            return (
+                              <tr
+                                key={cls.classCode}
+                                className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                              >
+                                <td className="px-3 py-3 font-mono font-bold text-slate-700 dark:text-slate-300 align-top">
+                                  #{idx + 1}
+                                </td>
+                                <td className="px-3 py-3 align-top space-y-1">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="px-2 py-0.5 rounded font-mono font-bold bg-[#1E3A5F] text-white dark:bg-sky-400 dark:text-slate-950">
+                                      {cls.classCode}
+                                    </span>
+                                    <span className="font-semibold text-slate-700 dark:text-slate-300">
+                                      {cls.prodi}
+                                    </span>
+                                  </div>
+                                  <p className="text-slate-600 dark:text-slate-400">
+                                    DPM: <strong className="text-slate-800 dark:text-slate-200">{cls.dpmName}</strong>
+                                  </p>
+                                  <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                                    Terakhir: {cls.lastLoanDate}
+                                  </p>
+                                </td>
+                                <td className="px-3 py-3 align-top min-w-[140px] space-y-1.5">
+                                  <div className="flex items-baseline justify-between gap-2">
+                                    <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
+                                      {cls.loanCount}x pinjam
+                                    </span>
+                                    <span className="font-mono text-[11px] text-slate-600 dark:text-slate-400">
+                                      {cls.totalItemsBorrowed} unit
+                                    </span>
+                                  </div>
+                                  <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                                    <div
+                                      className="h-full rounded-full bg-[#1E3A5F] dark:bg-sky-400"
+                                      style={{ width: `${pct}%` }}
+                                    />
+                                  </div>
+                                  {cls.activeCount > 0 ? (
+                                    <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                                      {cls.activeCount} tiket masih aktif dipinjam
+                                    </p>
+                                  ) : null}
+                                </td>
+                                <td className="px-3 py-3 align-top text-slate-700 dark:text-slate-300">
+                                  {cls.topCategories}
+                                </td>
+                                <td className="px-3 py-3 align-top text-right">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setHistoryClassFilter(cls.classCode);
+                                      setHistorySubTab("log");
+                                    }}
+                                  >
+                                    <span>Lihat Log</span>
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Panel Kanan: Peringkat Sapras Paling Sering Dipinjam */}
+                <div className="lg:col-span-5 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden flex flex-col">
+                  <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                        Sapras Paling Sering Dipinjam
+                      </h3>
+                      <p className="text-xs text-slate-600 dark:text-slate-400">
+                        Pantau intensitas pemakaian per kategori maupun per unit alat.
+                      </p>
+                    </div>
+                    <div
+                      role="group"
+                      aria-label="Mode rincian rekap sapras"
+                      className="inline-flex rounded-md border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setRecapSaprasMode("category")}
+                        aria-pressed={recapSaprasMode === "category"}
+                        className={`min-h-[34px] px-2.5 rounded text-[11px] font-bold transition-colors ${
+                          recapSaprasMode === "category"
+                            ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
+                            : "text-slate-700 dark:text-slate-300"
+                        }`}
+                      >
+                        Per Kategori
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRecapSaprasMode("item")}
+                        aria-pressed={recapSaprasMode === "item"}
+                        className={`min-h-[34px] px-2.5 rounded text-[11px] font-bold transition-colors ${
+                          recapSaprasMode === "item"
+                            ? "bg-white dark:bg-slate-900 text-[#1E3A5F] dark:text-sky-400 shadow-sm"
+                            : "text-slate-700 dark:text-slate-300"
+                        }`}
+                      >
+                        Per Unit Barang
+                      </button>
+                    </div>
+                  </div>
+
+                  {recapSaprasMode === "category" ? (
+                    recapSummary.categoryRankings.length === 0 ? (
+                      <div className="p-6 text-center text-xs text-slate-600 dark:text-slate-400">
+                        Belum ada kategori sapras yang tercatat.
+                      </div>
+                    ) : (
+                      <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+                        {recapSummary.categoryRankings.map((cat, idx) => {
+                          const maxCat =
+                            recapSummary.categoryRankings[0]?.borrowCount || 1;
+                          const pct =
+                            cat.borrowCount > 0
+                              ? Math.max(
+                                  8,
+                                  Math.round((cat.borrowCount / maxCat) * 100)
+                                )
+                              : 0;
+                          return (
+                            <li key={cat.category} className="p-4 space-y-2">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-mono font-bold text-slate-500 dark:text-slate-400">
+                                      #{idx + 1}
+                                    </span>
+                                    <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                                      {cat.category}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                                    Katalog aktif: {cat.availableUnits}/{cat.totalUnits} siap di loket
+                                  </p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="text-xs font-mono font-bold text-[#1E3A5F] dark:text-sky-400">
+                                    {cat.borrowCount}x unit keluar
+                                  </span>
+                                  <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                                    {cat.sharePct}% pangsa
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                                <div
+                                  className="h-full rounded-full bg-[#1E3A5F] dark:bg-sky-400"
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+
+                              {cat.topClassCount > 0 ? (
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-400">
+                                  <span>
+                                    Kelas tersering:{" "}
+                                    <strong className="font-mono text-slate-800 dark:text-slate-200">
+                                      {cat.topClassCode} ({cat.topClassCount}x)
+                                    </strong>
+                                  </span>
+                                  <span className="font-mono">
+                                    {cat.ticketCount} tiket
+                                  </span>
+                                </div>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )
+                  ) : recapSummary.itemRankings.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-600 dark:text-slate-400">
+                      Belum ada unit barang yang dipinjam pada rentang filter saat ini.
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {recapSummary.itemRankings.map((item, idx) => (
+                        <li
+                          key={item.kitId}
+                          className="p-4 flex items-start justify-between gap-3"
+                        >
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-xs font-mono font-bold text-slate-500 dark:text-slate-400">
+                                #{idx + 1}
+                              </span>
+                              <span className="px-2 py-0.5 text-[11px] font-mono font-bold rounded bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+                                {item.kitCode}
+                              </span>
+                              <span className="text-[11px] text-slate-600 dark:text-slate-400">
+                                {item.category}
+                              </span>
+                            </div>
+                            <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                              {item.name}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600 dark:text-slate-400">
+                              <span>
+                                Tersering:{" "}
+                                <strong className="font-mono text-slate-800 dark:text-slate-200">
+                                  {item.topClassLabel}
+                                </strong>
+                              </span>
+                              <span>• Terakhir: {item.lastLoanDate}</span>
+                            </div>
+                          </div>
+
+                          <div className="text-right space-y-1 shrink-0">
+                            <p className="text-xs font-mono font-bold text-[#1E3A5F] dark:text-sky-400">
+                              {item.borrowCount}x dipinjam
+                            </p>
+                            {item.isDeleted ? (
+                              <Badge tone="neutral">Unit Terhapus</Badge>
+                            ) : (
+                              <div className="flex justify-end">
+                                <KitStatusBadge
+                                  status={item.status as OfficeKitStatus}
+                                />
+                              </div>
+                            )}
+                            {item.condition ? (
+                              <div className="flex justify-end">
+                                <AssetConditionBadge condition={item.condition} />
+                              </div>
+                            ) : null}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+
+              {/* Panel Bawah: Peringkat Ruang Perkuliahan Paling Sering Memakai Alat */}
+              <div className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Building2
+                      className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400"
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                        Peringkat Ruang Perkuliahan Pemakai Alat Kantor Staf
+                      </h3>
+                      <p className="text-xs text-slate-600 dark:text-slate-400">
+                        Membantu identifikasi ruang kelas yang paling sering membutuhkan peralatan tambahan dari kantor staf.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono font-semibold text-slate-600 dark:text-slate-400">
+                    {recapSummary.roomRankings.length} ruangan
+                  </span>
+                </div>
+
+                {recapSummary.roomRankings.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-600 dark:text-slate-400">
+                    Belum ada riwayat penggunaan ruangan pada filter saat ini.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 dark:bg-slate-800/70 border-b border-slate-200 dark:border-slate-800 text-[11px] font-mono uppercase text-slate-600 dark:text-slate-400">
+                          <th className="px-4 py-2.5 w-12">#</th>
+                          <th className="px-4 py-2.5">Ruang Perkuliahan</th>
+                          <th className="px-4 py-2.5">Frekuensi</th>
+                          <th className="px-4 py-2.5">Total Unit</th>
+                          <th className="px-4 py-2.5">Kebutuhan Alat Utama</th>
+                          <th className="px-4 py-2.5 text-right">Terakhir Dipakai</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
+                        {recapSummary.roomRankings.map((rm, idx) => (
+                          <tr
+                            key={rm.roomKey}
+                            className="hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                          >
+                            <td className="px-4 py-2.5 font-mono font-bold text-slate-600 dark:text-slate-400">
+                              #{idx + 1}
+                            </td>
+                            <td className="px-4 py-2.5 font-semibold text-slate-900 dark:text-slate-100">
+                              {rm.roomLabel}
+                            </td>
+                            <td className="px-4 py-2.5 font-mono font-bold text-[#1E3A5F] dark:text-sky-400">
+                              {rm.loanCount}x transaksi
+                            </td>
+                            <td className="px-4 py-2.5 font-mono text-slate-700 dark:text-slate-300">
+                              {rm.totalUnitsBorrowed} unit
+                            </td>
+                            <td className="px-4 py-2.5 text-slate-700 dark:text-slate-300">
+                              {rm.topCategoryLabel}
+                            </td>
+                            <td className="px-4 py-2.5 font-mono text-right text-slate-600 dark:text-slate-400">
+                              {rm.lastLoanDate}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+      ) : activeTab === "loans" ? (
         viewMode === "board" ? (
           <KanbanBoard
             columns={loanBoardColumns}

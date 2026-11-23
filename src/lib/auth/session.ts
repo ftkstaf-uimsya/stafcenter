@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
-import { StaffRole } from "@/types/sarpras";
+import { normalizeAllowedPages } from "@/lib/auth/permissions";
+import { SarprasPageKey, StaffRole } from "@/types/sarpras";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 export const SESSION_COOKIE_NAME = "stafcenter_session";
@@ -13,6 +14,7 @@ export interface SessionStaffPayload {
   fullName: string;
   email: string;
   role: StaffRole;
+  allowedPages: SarprasPageKey[];
   exp: number;
 }
 
@@ -164,7 +166,7 @@ export async function getVerifiedServerSession(): Promise<SessionStaffPayload | 
   // Verifikasi akun masih aktif di tabel staff_accounts
   const { data, error } = await supabase
     .from("staff_accounts")
-    .select("id, username, full_name, email, role, is_active")
+    .select("*")
     .eq("id", parsed.id)
     .maybeSingle();
 
@@ -173,12 +175,17 @@ export async function getVerifiedServerSession(): Promise<SessionStaffPayload | 
     return null;
   }
 
+  const role = data.role as StaffRole;
   const staffData: Omit<SessionStaffPayload, "exp"> = {
     id: data.id,
     username: data.username,
     fullName: data.full_name,
     email: data.email || "",
-    role: data.role as StaffRole,
+    role,
+    allowedPages: normalizeAllowedPages(
+      role,
+      (data as { allowed_pages?: unknown }).allowed_pages
+    ),
   };
 
   verifiedSessionCache.set(parsed.id, {

@@ -38,9 +38,17 @@ import {
   SarprasAttachment,
   SarprasEntityType,
   SarprasNote,
+  SarprasPageKey,
   StaffRole,
   UISimulationState,
 } from "@/types/sarpras";
+import {
+  canAccessPage as canAccessPageHelper,
+  DATA_MASTER_PAGE_KEYS,
+  ENTITY_TYPE_TO_PAGE_KEY,
+  getFirstAllowedHref,
+  getPageMeta,
+} from "@/lib/auth/permissions";
 import {
   findBookingConflict,
   generateInventoryCode,
@@ -101,6 +109,7 @@ export interface AuthStaffUser {
   fullName: string;
   email: string;
   role: StaffRole;
+  allowedPages?: SarprasPageKey[];
 }
 
 export interface ToastNotice {
@@ -134,6 +143,8 @@ interface SarprasContextValue {
   officeKitLoans: OfficeKitLoan[];
   extendedMasterReady: boolean;
   canManageDataMaster: boolean;
+  canAccessPage: (pageKey: SarprasPageKey | "akun") => boolean;
+  defaultHomeHref: string;
   isLiveSupabase: boolean;
   serverConfigured: boolean;
   authUser: AuthStaffUser | null;
@@ -155,7 +166,7 @@ interface SarprasContextValue {
   signInWithUsername: (
     username: string,
     password: string
-  ) => Promise<{ ok: boolean; error?: string }>;
+  ) => Promise<{ ok: boolean; error?: string; defaultHref?: string }>;
   signOut: () => Promise<void>;
 
   // Gedung & Ruangan CRUD
@@ -881,7 +892,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     async (
       username: string,
       password: string
-    ): Promise<{ ok: boolean; error?: string }> => {
+    ): Promise<{ ok: boolean; error?: string; defaultHref?: string }> => {
       try {
         const res = await fetch("/api/auth/login", {
           method: "POST",
@@ -908,7 +919,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
             user.role === "master_admin" ? "Master Admin" : "Staf"
           }).`
         );
-        return { ok: true };
+        return { ok: true, defaultHref: getFirstAllowedHref(user) };
       } catch {
         return {
           ok: false,
@@ -993,32 +1004,64 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     );
   }, [isLiveSupabase, notify, refreshFromSupabase]);
 
-  const canManageDataMaster = !isLiveSupabase || authUser?.role === "master_admin";
+  const canAccessPage = useCallback(
+    (pageKey: SarprasPageKey | "akun"): boolean => {
+      if (!isLiveSupabase) return true;
+      return canAccessPageHelper(authUser, pageKey);
+    },
+    [authUser, isLiveSupabase]
+  );
 
-  const requireStaffForLiveWrite = useCallback((): boolean => {
-    if (isLiveSupabase && !authUser) {
-      notify(
-        "error",
-        "Autentikasi Staf Diperlukan",
-        "Silakan masuk terlebih dahulu sebelum mengubah data operasional."
-      );
-      return false;
-    }
-    return true;
-  }, [authUser, isLiveSupabase, notify]);
+  const defaultHomeHref = useMemo(
+    () =>
+      !isLiveSupabase ? "/sarpras/dashboard" : getFirstAllowedHref(authUser),
+    [authUser, isLiveSupabase]
+  );
 
-  const requireMasterAdminForDataMaster = useCallback((): boolean => {
-    if (!requireStaffForLiveWrite()) return false;
-    if (isLiveSupabase && authUser?.role !== "master_admin") {
-      notify(
-        "error",
-        "Akses Master Admin Diperlukan",
-        "Hanya akun Master Admin yang berhak mengubah Data Master."
-      );
-      return false;
-    }
-    return true;
-  }, [authUser, isLiveSupabase, notify, requireStaffForLiveWrite]);
+  const canManageDataMaster =
+    !isLiveSupabase ||
+    authUser?.role === "master_admin" ||
+    DATA_MASTER_PAGE_KEYS.some((key) => canAccessPageHelper(authUser, key));
+
+  const requireStaffForLiveWrite = useCallback(
+    (pageKey?: SarprasPageKey): boolean => {
+      if (isLiveSupabase && !authUser) {
+        notify(
+          "error",
+          "Autentikasi Staf Diperlukan",
+          "Silakan masuk terlebih dahulu sebelum mengubah data operasional."
+        );
+        return false;
+      }
+      if (isLiveSupabase && pageKey && !canAccessPageHelper(authUser, pageKey)) {
+        const label = getPageMeta(pageKey)?.label || pageKey;
+        notify(
+          "error",
+          "Otoritas Halaman Ditolak",
+          `Akun Anda tidak memiliki izin untuk mengubah data pada halaman ${label}.`
+        );
+        return false;
+      }
+      return true;
+    },
+    [authUser, isLiveSupabase, notify]
+  );
+
+  const requireMasterAdminForDataMaster = useCallback(
+    (pageKey?: SarprasPageKey): boolean => {
+      if (!requireStaffForLiveWrite(pageKey)) return false;
+      if (!pageKey && isLiveSupabase && !canManageDataMaster) {
+        notify(
+          "error",
+          "Akses Master Admin Diperlukan",
+          "Hanya akun yang diberi otoritas yang berhak mengubah Data Master."
+        );
+        return false;
+      }
+      return true;
+    },
+    [canManageDataMaster, isLiveSupabase, notify, requireStaffForLiveWrite]
+  );
 
   const sendMutation = useCallback(
     async (
@@ -1120,7 +1163,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addBuilding = useCallback(
     (payload: Omit<Building, "id" | "created_at">) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("ruangan")) return;
       const id = generateUuid();
       const createdAt = new Date().toISOString();
       const newBuilding: Building = {
@@ -1167,7 +1210,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const updateBuilding = useCallback(
     (id: string, payload: Partial<Omit<Building, "id" | "created_at">>) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("ruangan")) return;
       setBuildings((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -1199,7 +1242,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteBuilding = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("ruangan")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = buildings.find((b) => b.id === id);
@@ -1245,7 +1288,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addRoom = useCallback(
     (payload: Omit<Room, "id" | "created_at">) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("ruangan")) return;
       const id = generateUuid();
       const createdAt = new Date().toISOString();
       const newRoom: Room = {
@@ -1303,7 +1346,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const updateRoom = useCallback(
     (id: string, payload: Partial<Omit<Room, "id" | "created_at">>) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("ruangan")) return;
       setRooms((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -1343,7 +1386,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       id: string,
       options?: { mode?: DeleteStrategyMode; forceActive?: boolean }
     ): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("ruangan")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const mode = options?.mode || "archive";
@@ -1457,7 +1500,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         category_label,
         created_at: new Date().toISOString(),
       };
-      if (!requireStaffForLiveWrite()) return newAsset;
+      if (!requireStaffForLiveWrite("inventaris")) return newAsset;
       setAssets((prev) => [newAsset, ...prev]);
 
       if (isLiveSupabase && authUser) {
@@ -1511,7 +1554,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const importAssets = useCallback(
     async (items: NormalizedImportAssetPayload[]): Promise<ActionResult> => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("inventaris")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       if (items.length === 0) {
@@ -1631,7 +1674,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const updateAsset = useCallback(
     (id: string, payload: Partial<Omit<Asset, "id" | "created_at">>) => {
-      if (!requireStaffForLiveWrite()) return;
+      if (!requireStaffForLiveWrite("inventaris")) return;
       const nextLabel = payload.category
         ? resolveAssetCategoryLabel(payload.category, assetCategories)
         : undefined;
@@ -1683,7 +1726,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       id: string,
       options?: { mode?: DeleteStrategyMode; forceActive?: boolean }
     ): Promise<ActionResult> => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("inventaris")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const mode = options?.mode || "archive";
@@ -1768,7 +1811,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     (
       payload: Omit<Booking, "id" | "booking_code" | "status" | "created_at">
     ): { ok: boolean; error?: string } => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("peminjaman")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       if (payload.end_time <= payload.start_time) {
@@ -1873,7 +1916,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       approvedBy?: string,
       approvedByOfficialId?: string | null
     ) => {
-      if (!requireStaffForLiveWrite()) return;
+      if (!requireStaffForLiveWrite("peminjaman")) return;
       const target = bookings.find((b) => b.id === id);
       setBookings((prev) =>
         prev.map((item) =>
@@ -1966,7 +2009,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteBooking = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("peminjaman")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = bookings.find((b) => b.id === id);
@@ -2032,7 +2075,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         status: "Dilaporkan",
         reported_at: new Date().toISOString(),
       };
-      if (!requireStaffForLiveWrite()) return newTicket;
+      if (!requireStaffForLiveWrite("pemeliharaan")) return newTicket;
 
       setMaintenanceLogs((prev) => [newTicket, ...prev]);
 
@@ -2152,7 +2195,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         resolution_notes?: string;
       }
     ) => {
-      if (!requireStaffForLiveWrite()) return;
+      if (!requireStaffForLiveWrite("pemeliharaan")) return;
       const target = maintenanceLogs.find((m) => m.id === id);
       const isDone = update.status === "Selesai Diperbaiki";
       const completedAt = isDone
@@ -2328,7 +2371,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteMaintenanceLog = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("pemeliharaan")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = maintenanceLogs.find((m) => m.id === id);
@@ -2453,7 +2496,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addConsumable = useCallback(
     (payload: Omit<Consumable, "id" | "last_restocked_at">) => {
-      if (!requireStaffForLiveWrite()) return;
+      if (!requireStaffForLiveWrite("bhp")) return;
       const id = generateUuid();
       const nowIso = new Date().toISOString();
       const newItem: Consumable = {
@@ -2500,7 +2543,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       id: string,
       payload: Partial<Omit<Consumable, "id" | "last_restocked_at">>
     ) => {
-      if (!requireStaffForLiveWrite()) return;
+      if (!requireStaffForLiveWrite("bhp")) return;
       setConsumables((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -2526,7 +2569,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteConsumable = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("bhp")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = consumables.find((c) => c.id === id);
@@ -2571,7 +2614,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     (
       payload: Omit<ConsumableTransaction, "id" | "transaction_date">
     ): { ok: boolean; error?: string } => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("bhp")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = consumables.find((c) => c.id === payload.consumable_id);
@@ -2663,7 +2706,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       entityId: string,
       noteText: string
     ): Promise<{ ok: boolean; error?: string }> => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite(ENTITY_TYPE_TO_PAGE_KEY[entityType])) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const cleanText = noteText.trim();
@@ -2727,7 +2770,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       attachment?: SarprasAttachment;
       error?: string;
     }> => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite(ENTITY_TYPE_TO_PAGE_KEY[entityType])) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
 
@@ -2794,7 +2837,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteEntityAttachment = useCallback(
     async (id: string, filePath?: string) => {
-      if (!requireStaffForLiveWrite()) return;
+      const targetAtt = attachments.find((a) => a.id === id);
+      if (
+        !requireStaffForLiveWrite(
+          targetAtt ? ENTITY_TYPE_TO_PAGE_KEY[targetAtt.entity_type] : undefined
+        )
+      ) {
+        return;
+      }
       setAttachments((prev) => prev.filter((a) => a.id !== id));
       if (isLiveSupabase && authUser) {
         await sendMutation(
@@ -2807,12 +2857,12 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         );
       }
     },
-    [authUser, isLiveSupabase, requireStaffForLiveWrite, sendMutation]
+    [attachments, authUser, isLiveSupabase, requireStaffForLiveWrite, sendMutation]
   );
 
   const addLecturer = useCallback(
     (payload: Omit<Lecturer, "id" | "created_at">) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("dosen")) return;
       const id = generateUuid();
       const newItem: Lecturer = {
         ...payload,
@@ -2864,7 +2914,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const updateLecturer = useCallback(
     (id: string, payload: Partial<Omit<Lecturer, "id" | "created_at">>) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("dosen")) return;
       setLecturers((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -2898,7 +2948,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteLecturer = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("dosen")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = lecturers.find((l) => l.id === id);
@@ -2941,7 +2991,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addCourse = useCallback(
     (payload: Omit<Course, "id" | "created_at">) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("makul")) return;
       const id = generateUuid();
       const newItem: Course = {
         ...payload,
@@ -2995,7 +3045,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const updateCourse = useCallback(
     (id: string, payload: Partial<Omit<Course, "id" | "created_at">>) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("makul")) return;
       setCourses((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -3029,7 +3079,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteCourse = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("makul")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = courses.find((c) => c.id === id);
@@ -3069,7 +3119,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addCampusOfficial = useCallback(
     (payload: Omit<CampusOfficial, "id" | "created_at">) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("pengurus")) return;
       const id = generateUuid();
       const newItem: CampusOfficial = {
         ...payload,
@@ -3124,7 +3174,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       id: string,
       payload: Partial<Omit<CampusOfficial, "id" | "created_at">>
     ) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("pengurus")) return;
       setCampusOfficials((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -3158,7 +3208,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteCampusOfficial = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("pengurus")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = campusOfficials.find((o) => o.id === id);
@@ -3202,7 +3252,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addCampusUnit = useCallback(
     (payload: Omit<CampusUnit, "id" | "created_at">) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("unit")) return;
       const id = generateUuid();
       const newItem: CampusUnit = {
         ...payload,
@@ -3252,7 +3302,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const updateCampusUnit = useCallback(
     (id: string, payload: Partial<Omit<CampusUnit, "id" | "created_at">>) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("unit")) return;
       setCampusUnits((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -3284,7 +3334,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteCampusUnit = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("unit")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = campusUnits.find((u) => u.id === id);
@@ -3345,7 +3395,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addMaintenanceVendor = useCallback(
     (payload: Omit<MaintenanceVendor, "id" | "created_at">) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("vendor")) return;
       const id = generateUuid();
       const newItem: MaintenanceVendor = {
         ...payload,
@@ -3399,7 +3449,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       id: string,
       payload: Partial<Omit<MaintenanceVendor, "id" | "created_at">>
     ) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("vendor")) return;
       setMaintenanceVendors((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -3431,7 +3481,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteMaintenanceVendor = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("vendor")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = maintenanceVendors.find((v) => v.id === id);
@@ -3474,7 +3524,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addAssetCategory = useCallback(
     (payload: Omit<AssetCategory, "id" | "created_at">) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("referensi")) return;
       const id = generateUuid();
       const newItem: AssetCategory = {
         ...payload,
@@ -3521,7 +3571,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const updateAssetCategory = useCallback(
     (id: string, payload: Partial<Omit<AssetCategory, "id" | "created_at">>) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("referensi")) return;
       setAssetCategories((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -3553,7 +3603,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteAssetCategory = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("referensi")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = assetCategories.find((c) => c.id === id);
@@ -3601,7 +3651,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addFundingSource = useCallback(
     (payload: Omit<FundingSource, "id" | "created_at">) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("referensi")) return;
       const id = generateUuid();
       const newItem: FundingSource = {
         ...payload,
@@ -3648,7 +3698,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const updateFundingSource = useCallback(
     (id: string, payload: Partial<Omit<FundingSource, "id" | "created_at">>) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("referensi")) return;
       setFundingSources((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -3680,7 +3730,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteFundingSource = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("referensi")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = fundingSources.find((f) => f.id === id);
@@ -3723,7 +3773,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addConsumableCategory = useCallback(
     (payload: Omit<ConsumableCategoryMaster, "id" | "created_at">) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("referensi")) return;
       const id = generateUuid();
       const newItem: ConsumableCategoryMaster = {
         ...payload,
@@ -3772,7 +3822,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       id: string,
       payload: Partial<Omit<ConsumableCategoryMaster, "id" | "created_at">>
     ) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("referensi")) return;
       setConsumableCategories((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -3804,7 +3854,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteConsumableCategory = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("referensi")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = consumableCategories.find((c) => c.id === id);
@@ -3852,7 +3902,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addConsumableUnit = useCallback(
     (payload: Omit<ConsumableUnitMaster, "id" | "created_at">) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("referensi")) return;
       const id = generateUuid();
       const newItem: ConsumableUnitMaster = {
         ...payload,
@@ -3901,7 +3951,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       id: string,
       payload: Partial<Omit<ConsumableUnitMaster, "id" | "created_at">>
     ) => {
-      if (!requireMasterAdminForDataMaster()) return;
+      if (!requireMasterAdminForDataMaster("referensi")) return;
       setConsumableUnits((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -3933,7 +3983,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteConsumableUnit = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("referensi")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = consumableUnits.find((u) => u.id === id);
@@ -3987,7 +4037,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     (
       payload: Omit<AcademicClass, "id" | "class_code" | "created_at">
     ): ActionResult => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("kelas")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const normYear = normalizeAngkatanYear(payload.angkatan_year);
@@ -4077,7 +4127,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       id: string,
       payload: Partial<Omit<AcademicClass, "id" | "class_code" | "created_at">>
     ): ActionResult => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("kelas")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const existing = academicClasses.find((c) => c.id === id);
@@ -4167,7 +4217,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteAcademicClass = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireMasterAdminForDataMaster()) {
+      if (!requireMasterAdminForDataMaster("kelas")) {
         return { ok: false, error: "Akses Master Admin diperlukan." };
       }
       const target = academicClasses.find((c) => c.id === id);
@@ -4217,7 +4267,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addOfficeKitItem = useCallback(
     (payload: Omit<OfficeKitItem, "id" | "created_at">): ActionResult => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("sirkulasi-invent")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const cleanCode = payload.kit_code.trim().toUpperCase();
@@ -4294,7 +4344,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       id: string,
       payload: Partial<Omit<OfficeKitItem, "id" | "created_at">>
     ) => {
-      if (!requireStaffForLiveWrite()) return;
+      if (!requireStaffForLiveWrite("sirkulasi-invent")) return;
       setOfficeKitItems((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...payload } : item))
       );
@@ -4320,7 +4370,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteOfficeKitItem = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("sirkulasi-invent")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = officeKitItems.find((item) => item.id === id);
@@ -4380,7 +4430,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       borrow_time: string;
       expected_return_time: string;
     }): ActionResult => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("sirkulasi-invent")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       if (!payload.kit_item_ids || payload.kit_item_ids.length === 0) {
@@ -4510,7 +4560,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         damagedItemIds?: string[];
       }
     ): ActionResult => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("sirkulasi-invent")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = officeKitLoans.find((l) => l.id === id);
@@ -4594,7 +4644,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const reopenOfficeKitLoan = useCallback(
     (id: string): ActionResult => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("sirkulasi-invent")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = officeKitLoans.find((l) => l.id === id);
@@ -4671,7 +4721,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const deleteOfficeKitLoan = useCallback(
     async (id: string): Promise<ActionResult> => {
-      if (!requireStaffForLiveWrite()) {
+      if (!requireStaffForLiveWrite("sirkulasi-invent")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
       const target = officeKitLoans.find((l) => l.id === id);
@@ -4746,6 +4796,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       officeKitLoans: uiSimState === "empty" ? [] : officeKitLoans,
       extendedMasterReady,
       canManageDataMaster,
+      canAccessPage,
+      defaultHomeHref,
       isLiveSupabase,
       serverConfigured,
       authUser,
@@ -4851,6 +4903,8 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       officeKitLoans,
       extendedMasterReady,
       canManageDataMaster,
+      canAccessPage,
+      defaultHomeHref,
       isLiveSupabase,
       serverConfigured,
       authUser,

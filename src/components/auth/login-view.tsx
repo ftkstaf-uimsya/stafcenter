@@ -22,6 +22,7 @@ export function LoginView() {
     serverConfigured,
     authUser,
     authLoading,
+    defaultHomeHref,
     signInWithUsername,
     signOut,
   } = useSarpras();
@@ -55,7 +56,7 @@ export function LoginView() {
         setErrorMsg(res.error || "Gagal masuk ke sistem.");
         return;
       }
-      router.push("/sarpras/dashboard");
+      router.push(res.defaultHref || "/sarpras/dashboard");
     } finally {
       setSubmitting(false);
     }
@@ -111,10 +112,10 @@ export function LoginView() {
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
             <div className="flex flex-wrap items-center gap-2">
               <Link
-                href="/sarpras/dashboard"
+                href={defaultHomeHref}
                 className="min-h-[44px] px-4 py-2 inline-flex items-center justify-center rounded-md bg-[#1E3A5F] hover:bg-[#162C49] dark:bg-sky-400 dark:hover:bg-sky-300 text-sm font-bold text-white dark:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
               >
-                Buka Dashboard Sarpras
+                Buka Workspace Sarpras
               </Link>
               {isMaster ? (
                 <Link

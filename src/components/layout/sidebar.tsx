@@ -26,8 +26,10 @@ import {
   X,
 } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
+import { SarprasPageKey } from "@/types/sarpras";
 
 export interface NavSubItem {
+  pageKey: SarprasPageKey;
   href: string;
   label: string;
   shortLabel: string;
@@ -63,7 +65,7 @@ export function Sidebar({
     maintenanceVendors,
     academicClasses,
     officeKitLoans,
-    canManageDataMaster,
+    canAccessPage,
     authUser,
     setCommandSearchOpen,
   } = useSarpras();
@@ -86,14 +88,16 @@ export function Sidebar({
     (a) => a.condition === "Rusak Berat" || a.condition === "Rusak Ringan"
   ).length;
 
-  const saprasNavItems: NavSubItem[] = [
+  const allSaprasNavItems: NavSubItem[] = [
     {
+      pageKey: "dashboard",
       href: "/sarpras/dashboard",
       label: "Dashboard Ringkasan",
       shortLabel: "Ringkasan",
       icon: LayoutDashboard,
     },
     {
+      pageKey: "sirkulasi-invent",
       href: "/sarpras/sirkulasi-invent",
       label: "Sirkulasi Invent",
       shortLabel: "Sirkulasi",
@@ -102,6 +106,7 @@ export function Sidebar({
       badgeTone: "warning",
     },
     {
+      pageKey: "inventaris",
       href: "/sarpras/inventaris",
       label: "Inventaris Aset & Barang",
       shortLabel: "Inventaris",
@@ -110,6 +115,7 @@ export function Sidebar({
       badgeTone: "warning",
     },
     {
+      pageKey: "peminjaman",
       href: "/sarpras/peminjaman",
       label: "Peminjaman & Reservasi",
       shortLabel: "Peminjaman",
@@ -118,6 +124,7 @@ export function Sidebar({
       badgeTone: "warning",
     },
     {
+      pageKey: "pemeliharaan",
       href: "/sarpras/pemeliharaan",
       label: "Pemeliharaan & Kerusakan",
       shortLabel: "Perbaikan",
@@ -126,6 +133,7 @@ export function Sidebar({
       badgeTone: "danger",
     },
     {
+      pageKey: "bhp",
       href: "/sarpras/bhp",
       label: "Barang Habis Pakai / ATK",
       shortLabel: "Stok BHP",
@@ -135,8 +143,9 @@ export function Sidebar({
     },
   ];
 
-  const dataMasterNavItems: NavSubItem[] = [
+  const allDataMasterNavItems: NavSubItem[] = [
     {
+      pageKey: "ruangan",
       href: "/sarpras/ruangan",
       label: "Gedung & Ruangan",
       shortLabel: "Ruangan",
@@ -145,6 +154,7 @@ export function Sidebar({
       badgeTone: "info",
     },
     {
+      pageKey: "kelas",
       href: "/sarpras/kelas",
       label: "Kelas & DPM",
       shortLabel: "Kelas",
@@ -154,6 +164,7 @@ export function Sidebar({
       badgeTone: "info",
     },
     {
+      pageKey: "dosen",
       href: "/sarpras/dosen",
       label: "Dosen",
       shortLabel: "Dosen",
@@ -162,6 +173,7 @@ export function Sidebar({
       badgeTone: "info",
     },
     {
+      pageKey: "makul",
       href: "/sarpras/makul",
       label: "Mata Kuliah (Makul)",
       shortLabel: "Makul",
@@ -170,6 +182,7 @@ export function Sidebar({
       badgeTone: "info",
     },
     {
+      pageKey: "pengurus",
       href: "/sarpras/pengurus",
       label: "Pengurus Kampus",
       shortLabel: "Pengurus",
@@ -179,6 +192,7 @@ export function Sidebar({
       badgeTone: "info",
     },
     {
+      pageKey: "unit",
       href: "/sarpras/unit",
       label: "Unit, Prodi & Ormawa",
       shortLabel: "Unit Kerja",
@@ -187,6 +201,7 @@ export function Sidebar({
       badgeTone: "info",
     },
     {
+      pageKey: "vendor",
       href: "/sarpras/vendor",
       label: "Teknisi & Vendor",
       shortLabel: "Vendor",
@@ -196,12 +211,36 @@ export function Sidebar({
       badgeTone: "info",
     },
     {
+      pageKey: "referensi",
       href: "/sarpras/referensi",
       label: "Master Referensi",
       shortLabel: "Referensi",
       icon: Tags,
     },
   ];
+
+  const saprasNavItems = allSaprasNavItems.filter((item) =>
+    canAccessPage(item.pageKey)
+  );
+  const dataMasterNavItems = allDataMasterNavItems.filter((item) =>
+    canAccessPage(item.pageKey)
+  );
+  const mobileBottomItems =
+    saprasNavItems.length > 0
+      ? saprasNavItems.slice(0, 6)
+      : dataMasterNavItems.slice(0, 6);
+  const mobileGridColsClass =
+    mobileBottomItems.length <= 1
+      ? "grid-cols-1"
+      : mobileBottomItems.length === 2
+      ? "grid-cols-2"
+      : mobileBottomItems.length === 3
+      ? "grid-cols-3"
+      : mobileBottomItems.length === 4
+      ? "grid-cols-4"
+      : mobileBottomItems.length === 5
+      ? "grid-cols-5"
+      : "grid-cols-6";
 
   const badgeToneClasses: Record<
     NonNullable<NavSubItem["badgeTone"]>,
@@ -285,31 +324,39 @@ export function Sidebar({
         </button>
       ) : null}
 
-      <div>
-        {!isCollapsedView ? (
-          <button
-            type="button"
-            onClick={() => setSarprasExpanded((prev) => !prev)}
-            aria-expanded={sarprasExpanded}
-            className="w-full min-h-[40px] flex items-center justify-between px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-white hover:bg-white/10 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-          >
-            <span>SAPRAS</span>
-            <ChevronDown
-              className={`w-4 h-4 transition-transform ${
-                sarprasExpanded ? "rotate-0" : "-rotate-90"
-              }`}
-              aria-hidden="true"
-            />
-          </button>
-        ) : null}
+      {saprasNavItems.length > 0 ? (
+        <div>
+          {!isCollapsedView ? (
+            <button
+              type="button"
+              onClick={() => setSarprasExpanded((prev) => !prev)}
+              aria-expanded={sarprasExpanded}
+              className="w-full min-h-[40px] flex items-center justify-between px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-white hover:bg-white/10 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+            >
+              <span>SAPRAS</span>
+              <ChevronDown
+                className={`w-4 h-4 transition-transform ${
+                  sarprasExpanded ? "rotate-0" : "-rotate-90"
+                }`}
+                aria-hidden="true"
+              />
+            </button>
+          ) : null}
 
-        {sarprasExpanded || isCollapsedView
-          ? renderNavItemList(saprasNavItems, isCollapsedView)
-          : null}
-      </div>
+          {sarprasExpanded || isCollapsedView
+            ? renderNavItemList(saprasNavItems, isCollapsedView)
+            : null}
+        </div>
+      ) : null}
 
-      {canManageDataMaster ? (
-        <div className="pt-2.5 mt-2.5 border-t border-white/15">
+      {dataMasterNavItems.length > 0 ? (
+        <div
+          className={
+            saprasNavItems.length > 0
+              ? "pt-2.5 mt-2.5 border-t border-white/15"
+              : ""
+          }
+        >
           {!isCollapsedView ? (
             <button
               type="button"
@@ -534,36 +581,38 @@ export function Sidebar({
       ) : null}
 
       {/* Bottom Navigation Bar untuk Mobile (Reflow Navigasi Mobile R-03) */}
-      <nav
-        aria-label="Navigasi Cepat Mobile"
-        className="fixed bottom-0 inset-x-0 z-40 lg:hidden bg-[#1E3A5F] dark:bg-slate-950 text-white border-t border-white/15 px-1 py-1"
-      >
-        <ul className="grid grid-cols-6 gap-0.5" role="list">
-          {saprasNavItems.map((item) => {
-            const Icon = item.icon;
-            const isActive =
-              pathname === item.href || pathname.startsWith(`${item.href}/`);
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  aria-current={isActive ? "page" : undefined}
-                  className={`min-h-[48px] flex flex-col items-center justify-center rounded px-1 py-1 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
-                    isActive
-                      ? "bg-amber-400 text-slate-950 font-bold"
-                      : "text-slate-200 hover:text-white"
-                  }`}
-                >
-                  <Icon className="w-4 h-4 shrink-0" aria-hidden={true} />
-                  <span className="mt-0.5 truncate max-w-full">
-                    {item.shortLabel}
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
+      {mobileBottomItems.length > 0 ? (
+        <nav
+          aria-label="Navigasi Cepat Mobile"
+          className="fixed bottom-0 inset-x-0 z-40 lg:hidden bg-[#1E3A5F] dark:bg-slate-950 text-white border-t border-white/15 px-1 py-1"
+        >
+          <ul className={`grid ${mobileGridColsClass} gap-0.5`} role="list">
+            {mobileBottomItems.map((item) => {
+              const Icon = item.icon;
+              const isActive =
+                pathname === item.href || pathname.startsWith(`${item.href}/`);
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`min-h-[48px] flex flex-col items-center justify-center rounded px-1 py-1 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                      isActive
+                        ? "bg-amber-400 text-slate-950 font-bold"
+                        : "text-slate-200 hover:text-white"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" aria-hidden={true} />
+                    <span className="mt-0.5 truncate max-w-full">
+                      {item.shortLabel}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      ) : null}
     </>
   );
 }

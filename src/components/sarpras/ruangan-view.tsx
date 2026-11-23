@@ -60,7 +60,8 @@ export function RuanganView() {
     attachments,
     lecturers,
     campusOfficials,
-    canManageDataMaster,
+    canAccessPage,
+    defaultHomeHref,
     uiSimState,
     setUiSimState,
     addBuilding,
@@ -153,8 +154,13 @@ export function RuanganView() {
     (filterCategory !== "ALL" ? 1 : 0) +
     (filterStatus !== "ALL" ? 1 : 0);
 
-  if (!canManageDataMaster) {
-    return <MasterAdminGuard sectionLabel="Master Gedung & Ruangan Kampus" />;
+  if (!canAccessPage("ruangan")) {
+    return (
+      <MasterAdminGuard
+        sectionLabel="Master Gedung & Ruangan Kampus"
+        backHref={defaultHomeHref}
+      />
+    );
   }
 
   if (uiSimState === "loading") {

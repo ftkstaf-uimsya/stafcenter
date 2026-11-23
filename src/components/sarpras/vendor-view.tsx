@@ -41,7 +41,8 @@ export function VendorView() {
   const {
     maintenanceVendors,
     maintenanceLogs,
-    canManageDataMaster,
+    canAccessPage,
+    defaultHomeHref,
     uiSimState,
     setUiSimState,
     addMaintenanceVendor,
@@ -111,9 +112,12 @@ export function VendorView() {
   const activeFilterCount =
     (filterType !== "ALL" ? 1 : 0) + (filterActive !== "ALL" ? 1 : 0);
 
-  if (!canManageDataMaster) {
+  if (!canAccessPage("vendor")) {
     return (
-      <MasterAdminGuard sectionLabel="Data Master Teknisi & Vendor Pemeliharaan" />
+      <MasterAdminGuard
+        sectionLabel="Data Master Teknisi & Vendor Pemeliharaan"
+        backHref={defaultHomeHref}
+      />
     );
   }
 

@@ -40,7 +40,8 @@ export function KelasView() {
     campusUnits,
     officeKitLoans,
     bookings,
-    canManageDataMaster,
+    canAccessPage,
+    defaultHomeHref,
     uiSimState,
     setUiSimState,
     addAcademicClass,
@@ -119,8 +120,13 @@ export function KelasView() {
     (filterSection !== "ALL" ? 1 : 0) +
     (filterActive !== "ALL" ? 1 : 0);
 
-  if (!canManageDataMaster) {
-    return <MasterAdminGuard sectionLabel="Data Master Kelas & DPM" />;
+  if (!canAccessPage("kelas")) {
+    return (
+      <MasterAdminGuard
+        sectionLabel="Data Master Kelas & DPM"
+        backHref={defaultHomeHref}
+      />
+    );
   }
 
   if (uiSimState === "loading") {

@@ -8,6 +8,8 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { LoadingStateView } from "@/components/ui/data-states";
 import { CommandSearch } from "@/components/ui/command-search";
+import { MasterAdminGuard } from "@/components/sarpras/master-admin-guard";
+import { getPageKeyFromPathname, getPageMeta } from "@/lib/auth/permissions";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -19,6 +21,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     isLiveSupabase,
     authUser,
     authLoading,
+    canAccessPage,
+    defaultHomeHref,
     toasts,
     dismissToast,
     theme,
@@ -27,6 +31,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const isAuthPage = pathname === "/login" || pathname?.startsWith("/login/");
   const requiresAuth = isLiveSupabase && !isAuthPage;
+  const pageKey = getPageKeyFromPathname(pathname);
+  const pageBlocked =
+    Boolean(isLiveSupabase && authUser && pageKey) &&
+    !canAccessPage(pageKey as NonNullable<typeof pageKey>);
+  const blockedPageLabel =
+    pageKey === "akun"
+      ? "Manajemen Akun Staf"
+      : pageKey
+      ? getPageMeta(pageKey)?.label || pageKey
+      : "halaman ini";
 
   useEffect(() => {
     if (requiresAuth && !authLoading && !authUser) {
@@ -175,7 +189,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               id="main-workspace"
               className="flex-1 p-4 sm:p-6 lg:p-8 pb-24 lg:pb-10 max-w-7xl w-full mx-auto"
             >
-              {children}
+              {pageBlocked ? (
+                <MasterAdminGuard
+                  title={
+                    pageKey === "akun"
+                      ? "Akses Terbatas: Khusus Master Admin"
+                      : "Akses Halaman Tidak Diizinkan"
+                  }
+                  sectionLabel={blockedPageLabel}
+                  description={
+                    pageKey === "akun"
+                      ? "Hanya akun Master Admin yang berhak mengakses dan mengelola Manajemen Akun Staf."
+                      : `Akun Anda belum diberi otoritas untuk mengakses halaman ${blockedPageLabel}. Hubungi Master Admin bila Anda memerlukan akses.`
+                  }
+                  backHref={defaultHomeHref}
+                  backLabel="Kembali ke Halaman Utama Anda"
+                />
+              ) : (
+                children
+              )}
             </main>
           </div>
 

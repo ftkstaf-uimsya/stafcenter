@@ -4,6 +4,7 @@ import {
   invalidateStaffSessionCache,
   verifySameOriginRequest,
 } from "@/lib/auth/session";
+import { normalizeAllowedPages } from "@/lib/auth/permissions";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { StaffRole } from "@/types/sarpras";
 
@@ -34,14 +35,32 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("staff_accounts")
-    .select("id, username, full_name, email, role, is_active, created_at, updated_at")
+    .select("*")
     .order("created_at", { ascending: true });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ accounts: data || [] }, { status: 200 });
+  const safeAccounts = (data || []).map((row) => {
+    const role = row.role as StaffRole;
+    return {
+      id: row.id,
+      username: row.username,
+      full_name: row.full_name,
+      email: row.email ?? null,
+      role,
+      is_active: row.is_active,
+      allowed_pages: normalizeAllowedPages(
+        role,
+        (row as { allowed_pages?: unknown }).allowed_pages
+      ),
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  });
+
+  return NextResponse.json({ accounts: safeAccounts }, { status: 200 });
 }
 
 export async function POST(request: NextRequest) {
@@ -79,6 +98,7 @@ export async function POST(request: NextRequest) {
       email?: string;
       role?: StaffRole;
       password?: string;
+      allowed_pages?: unknown;
     };
 
     const username = (body.username || "").trim().toLowerCase();
@@ -87,6 +107,17 @@ export async function POST(request: NextRequest) {
     const role: StaffRole =
       body.role === "master_admin" ? "master_admin" : "staff";
     const password = body.password || "";
+    const sanitizedPages =
+      role === "master_admin"
+        ? null
+        : normalizeAllowedPages("staff", body.allowed_pages);
+
+    if (role === "staff" && (!sanitizedPages || sanitizedPages.length === 0)) {
+      return NextResponse.json(
+        { error: "Pilih minimal 1 halaman yang boleh diakses oleh akun staf." },
+        { status: 400 }
+      );
+    }
 
     if (!username || !/^[a-z0-9._-]{3,40}$/.test(username)) {
       return NextResponse.json(
@@ -118,10 +149,23 @@ export async function POST(request: NextRequest) {
       p_email: email,
       p_role: role,
       p_password: password,
+      p_allowed_pages: sanitizedPages,
     });
 
     if (error) {
       const msg = error.message || "";
+      if (
+        msg.includes("p_allowed_pages") ||
+        msg.includes("fn_create_staff_account")
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Fungsi otoritas halaman akun belum dimigrasikan di Supabase. Jalankan migrasi supabase/migrations/010_staff_page_permissions.sql di SQL Editor Supabase.",
+          },
+          { status: 400 }
+        );
+      }
       if (msg.toLowerCase().includes("duplicate") || msg.includes("23505")) {
         return NextResponse.json(
           { error: `Username "${username}" sudah digunakan oleh akun lain.` },
@@ -131,7 +175,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 500 });
     }
 
-    const account = Array.isArray(data) ? data[0] : data;
+    const rawAccount = Array.isArray(data) ? data[0] : data;
+    const account = rawAccount
+      ? {
+          id: rawAccount.id,
+          username: rawAccount.username,
+          full_name: rawAccount.full_name,
+          email: rawAccount.email ?? null,
+          role: rawAccount.role as StaffRole,
+          is_active: rawAccount.is_active,
+          allowed_pages: normalizeAllowedPages(
+            rawAccount.role as StaffRole,
+            (rawAccount as { allowed_pages?: unknown }).allowed_pages ??
+              sanitizedPages
+          ),
+          created_at: rawAccount.created_at,
+          updated_at: rawAccount.updated_at,
+        }
+      : null;
     if (account?.id) {
       invalidateStaffSessionCache(String(account.id));
     }

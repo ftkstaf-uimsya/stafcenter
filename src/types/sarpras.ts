@@ -42,6 +42,22 @@ export type TransactionType = "Masuk" | "Keluar";
 
 export type StaffRole = "master_admin" | "staff";
 
+export type SarprasPageKey =
+  | "dashboard"
+  | "sirkulasi-invent"
+  | "inventaris"
+  | "peminjaman"
+  | "pemeliharaan"
+  | "bhp"
+  | "ruangan"
+  | "kelas"
+  | "dosen"
+  | "makul"
+  | "pengurus"
+  | "unit"
+  | "vendor"
+  | "referensi";
+
 export interface StaffAccount {
   id: string;
   username: string;
@@ -49,6 +65,7 @@ export interface StaffAccount {
   email: string | null;
   role: StaffRole;
   is_active: boolean;
+  allowed_pages?: SarprasPageKey[] | null;
   created_at: string;
   updated_at: string;
 }

@@ -13,7 +13,14 @@ import {
   XCircle,
 } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
-import { StaffAccount, StaffRole } from "@/types/sarpras";
+import {
+  DEFAULT_STAFF_PAGES,
+  getPageMeta,
+  normalizeAllowedPages,
+  PERMISSION_PRESETS,
+  SARPRAS_PAGES,
+} from "@/lib/auth/permissions";
+import { SarprasPageKey, StaffAccount, StaffRole } from "@/types/sarpras";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -42,6 +49,9 @@ export function AkunView() {
   const [formRole, setFormRole] = useState<StaffRole>("staff");
   const [formIsActive, setFormIsActive] = useState("true");
   const [formPassword, setFormPassword] = useState("");
+  const [formAllowedPages, setFormAllowedPages] = useState<SarprasPageKey[]>(
+    DEFAULT_STAFF_PAGES
+  );
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -154,6 +164,7 @@ export function AkunView() {
     setFormRole("staff");
     setFormIsActive("true");
     setFormPassword("");
+    setFormAllowedPages([...DEFAULT_STAFF_PAGES]);
     setFormError("");
     setModalOpen(true);
   };
@@ -166,8 +177,30 @@ export function AkunView() {
     setFormRole(acc.role);
     setFormIsActive(acc.is_active ? "true" : "false");
     setFormPassword("");
+    setFormAllowedPages(normalizeAllowedPages(acc.role, acc.allowed_pages));
     setFormError("");
     setModalOpen(true);
+  };
+
+  const togglePagePermission = (key: SarprasPageKey) => {
+    setFormAllowedPages((prev) =>
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
+    );
+  };
+
+  const toggleGroupPermissions = (group: "sapras" | "data_master") => {
+    const groupKeys = SARPRAS_PAGES.filter((p) => p.group === group).map(
+      (p) => p.key
+    );
+    const allSelected = groupKeys.every((k) => formAllowedPages.includes(k));
+    setFormAllowedPages((prev) => {
+      if (allSelected) {
+        return prev.filter((k) => !groupKeys.includes(k));
+      }
+      const next = new Set(prev);
+      for (const k of groupKeys) next.add(k);
+      return Array.from(next);
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -197,6 +230,13 @@ export function AkunView() {
       return;
     }
 
+    if (formRole === "staff" && formAllowedPages.length === 0) {
+      setFormError(
+        "Pilih minimal 1 halaman yang boleh diakses untuk akun Staf Operasional."
+      );
+      return;
+    }
+
     setSubmitting(true);
     try {
       if (editingAccount) {
@@ -210,6 +250,8 @@ export function AkunView() {
             role: formRole,
             is_active: formIsActive === "true",
             new_password: formPassword || undefined,
+            allowed_pages:
+              formRole === "master_admin" ? null : formAllowedPages,
           }),
         });
         const data = await res.json();
@@ -226,7 +268,7 @@ export function AkunView() {
         notify(
           "success",
           "Akun Staf Diperbarui",
-          `Data akun "${cleanUsername}" berhasil disimpan ke Supabase.`
+          `Data akun "${cleanUsername}" dan otoritas halamannya berhasil disimpan ke Supabase.`
         );
       } else {
         const res = await fetch("/api/admin/accounts", {
@@ -238,6 +280,8 @@ export function AkunView() {
             email: formEmail.trim(),
             role: formRole,
             password: formPassword,
+            allowed_pages:
+              formRole === "master_admin" ? null : formAllowedPages,
           }),
         });
         const data = await res.json();
@@ -326,6 +370,47 @@ export function AkunView() {
           </span>
         </Badge>
       ),
+    },
+    {
+      key: "permissions",
+      header: "Otoritas Halaman",
+      render: (row) => {
+        if (row.role === "master_admin") {
+          return (
+            <div className="space-y-1">
+              <Badge tone="info">Akses Penuh (Semua Modul)</Badge>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                Termasuk Kelola Akun & Riwayat Rekap
+              </p>
+            </div>
+          );
+        }
+        const allowed = normalizeAllowedPages("staff", row.allowed_pages);
+        const preview = allowed.slice(0, 3);
+        const restCount = allowed.length - preview.length;
+        return (
+          <div className="space-y-1 max-w-xs">
+            <div className="flex flex-wrap gap-1">
+              {preview.map((key) => (
+                <span
+                  key={key}
+                  className="px-1.5 py-0.5 text-[11px] font-medium rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+                >
+                  {getPageMeta(key)?.shortLabel || key}
+                </span>
+              ))}
+              {restCount > 0 ? (
+                <span className="px-1.5 py-0.5 text-[11px] font-mono font-bold rounded bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-slate-100">
+                  +{restCount} lainnya
+                </span>
+              ) : null}
+            </div>
+            <p className="text-[11px] font-mono text-slate-600 dark:text-slate-400">
+              {allowed.length} dari {SARPRAS_PAGES.length} halaman aktif
+            </p>
+          </div>
+        );
+      },
     },
     {
       key: "status",
@@ -497,9 +582,10 @@ export function AkunView() {
             ? `Edit Akun: ${editingAccount.username}`
             : "Tambah Akun Staf Baru"
         }
-        description="Akun yang dibuat langsung aktif dan dapat digunakan masuk pada halaman login."
+        description="Akun yang dibuat langsung aktif dan dapat digunakan masuk sesuai otoritas halaman yang ditentukan Master Admin."
+        maxWidthClass="max-w-2xl"
       >
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4">
           {formError ? (
             <div
               role="alert"
@@ -516,6 +602,7 @@ export function AkunView() {
               value={formUsername}
               onChange={(e) => setFormUsername(e.target.value)}
               disabled={editingAccount?.username === "staf"}
+              autoComplete="off"
               required
             />
             <Select
@@ -535,6 +622,7 @@ export function AkunView() {
             placeholder="Contoh: Hendra Wijaya, S.T."
             value={formFullName}
             onChange={(e) => setFormFullName(e.target.value)}
+            autoComplete="off"
             required
           />
 
@@ -544,6 +632,7 @@ export function AkunView() {
             placeholder="Contoh: hendra@kampus.ac.id"
             value={formEmail}
             onChange={(e) => setFormEmail(e.target.value)}
+            autoComplete="off"
           />
 
           {editingAccount ? (
@@ -567,6 +656,7 @@ export function AkunView() {
                 placeholder="Kosongkan jika tetap"
                 value={formPassword}
                 onChange={(e) => setFormPassword(e.target.value)}
+                autoComplete="new-password"
               />
             </div>
           ) : (
@@ -576,9 +666,135 @@ export function AkunView() {
               placeholder="Minimal 8 karakter"
               value={formPassword}
               onChange={(e) => setFormPassword(e.target.value)}
+              autoComplete="new-password"
               required
             />
           )}
+
+          {/* Pengaturan Otoritas Halaman per Akun */}
+          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  Otoritas Akses Halaman *
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Tentukan halaman apa saja yang boleh dibuka dan dikelola oleh
+                  akun ini.
+                </p>
+              </div>
+              {formRole === "staff" ? (
+                <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700">
+                  {formAllowedPages.length} / {SARPRAS_PAGES.length} halaman
+                </span>
+              ) : null}
+            </div>
+
+            {formRole === "master_admin" ? (
+              <div className="p-3.5 rounded-md border border-sky-300 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-950/30 text-xs text-sky-950 dark:text-sky-200">
+                Akun berperan <strong>Master Admin</strong> otomatis memiliki
+                akses penuh ke seluruh 14 modul SAPRAS &amp; Data Master,
+                Manajemen Akun Staf, serta Riwayat &amp; Rekap Peminjaman.
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {PERMISSION_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setFormAllowedPages([...preset.pages])}
+                      className="px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-[11px] font-semibold text-slate-800 dark:text-slate-200"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setFormAllowedPages([])}
+                    className="px-2.5 py-1.5 rounded-md border border-red-300 dark:border-red-800 bg-red-50/60 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-900/40 text-[11px] font-semibold text-red-800 dark:text-red-300"
+                  >
+                    Kosongkan
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {(
+                    [
+                      { group: "sapras", title: "Menu SAPRAS (6 Halaman)" },
+                      {
+                        group: "data_master",
+                        title: "Menu DATA MASTER (8 Halaman)",
+                      },
+                    ] as const
+                  ).map((section) => {
+                    const groupPages = SARPRAS_PAGES.filter(
+                      (p) => p.group === section.group
+                    );
+                    const selectedInGroup = groupPages.filter((p) =>
+                      formAllowedPages.includes(p.key)
+                    ).length;
+                    const allChecked = selectedInGroup === groupPages.length;
+
+                    return (
+                      <div
+                        key={section.group}
+                        className="p-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-950/40 space-y-2"
+                      >
+                        <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-200 dark:border-slate-800">
+                          <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                            {section.title} ({selectedInGroup}/
+                            {groupPages.length})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              toggleGroupPermissions(section.group)
+                            }
+                            className="text-[11px] font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline"
+                          >
+                            {allChecked ? "Lepas Semua" : "Pilih Semua"}
+                          </button>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {groupPages.map((page) => {
+                            const checked = formAllowedPages.includes(page.key);
+                            return (
+                              <label
+                                key={page.key}
+                                className={`flex items-center gap-2.5 px-2.5 py-2 rounded-md border text-xs cursor-pointer transition-colors ${
+                                  checked
+                                    ? "border-[#1E3A5F] bg-white dark:bg-slate-900 dark:border-sky-400 text-slate-900 dark:text-slate-100 font-semibold"
+                                    : "border-transparent hover:bg-white/80 dark:hover:bg-slate-900/60 text-slate-700 dark:text-slate-300"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    togglePagePermission(page.key)
+                                  }
+                                  className="w-4 h-4 rounded accent-[#1E3A5F]"
+                                />
+                                <span className="truncate">{page.label}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                  Catatan: Halaman Kelola Akun Staf serta tab Riwayat &amp;
+                  Rekap Peminjaman di Sirkulasi Invent tetap eksklusif hanya
+                  untuk Master Admin.
+                </p>
+              </>
+            )}
+          </div>
 
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <Button

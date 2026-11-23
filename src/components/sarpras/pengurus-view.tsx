@@ -32,7 +32,8 @@ export function PengurusView() {
     campusOfficials,
     campusUnits,
     rooms,
-    canManageDataMaster,
+    canAccessPage,
+    defaultHomeHref,
     uiSimState,
     setUiSimState,
     addCampusOfficial,
@@ -103,8 +104,13 @@ export function PengurusView() {
   const activeFilterCount =
     (filterCategory !== "ALL" ? 1 : 0) + (filterActive !== "ALL" ? 1 : 0);
 
-  if (!canManageDataMaster) {
-    return <MasterAdminGuard sectionLabel="Data Master Pengurus Kampus" />;
+  if (!canAccessPage("pengurus")) {
+    return (
+      <MasterAdminGuard
+        sectionLabel="Data Master Pengurus Kampus"
+        backHref={defaultHomeHref}
+      />
+    );
   }
 
   if (uiSimState === "loading") {

@@ -3,6 +3,7 @@ import {
   getVerifiedServerSession,
   verifySameOriginRequest,
 } from "@/lib/auth/session";
+import { canAccessPage } from "@/lib/auth/permissions";
 import {
   getSupabaseServerClient,
   isServerSupabaseConfigured,
@@ -74,6 +75,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           { error: "Sesi staf tidak valid. Silakan masuk kembali." },
           { status: 401 }
+        );
+      }
+      if (!canAccessPage(session, "inventaris")) {
+        return NextResponse.json(
+          { error: "Anda tidak memiliki otoritas mengakses impor Inventaris Aset." },
+          { status: 403 }
         );
       }
 

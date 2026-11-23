@@ -36,7 +36,8 @@ export function MakulView() {
     lecturers,
     rooms,
     campusUnits,
-    canManageDataMaster,
+    canAccessPage,
+    defaultHomeHref,
     uiSimState,
     setUiSimState,
     addCourse,
@@ -111,8 +112,13 @@ export function MakulView() {
     (filterSemester !== "ALL" ? 1 : 0) +
     (filterActive !== "ALL" ? 1 : 0);
 
-  if (!canManageDataMaster) {
-    return <MasterAdminGuard sectionLabel="Data Master Mata Kuliah (Makul)" />;
+  if (!canAccessPage("makul")) {
+    return (
+      <MasterAdminGuard
+        sectionLabel="Data Master Mata Kuliah (Makul)"
+        backHref={defaultHomeHref}
+      />
+    );
   }
 
   if (uiSimState === "loading") {

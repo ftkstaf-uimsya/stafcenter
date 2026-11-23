@@ -4,6 +4,7 @@ import {
   SESSION_COOKIE_NAME,
   verifySameOriginRequest,
 } from "@/lib/auth/session";
+import { normalizeAllowedPages } from "@/lib/auth/permissions";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { StaffRole } from "@/types/sarpras";
 
@@ -123,12 +124,17 @@ export async function POST(request: NextRequest) {
 
     failedLoginAttempts.delete(rateKey);
 
+    const role = row.role as StaffRole;
     const userPayload = {
       id: row.id as string,
       username: row.username as string,
       fullName: row.full_name as string,
       email: (row.email as string | null) || "",
-      role: row.role as StaffRole,
+      role,
+      allowedPages: normalizeAllowedPages(
+        role,
+        (row as { allowed_pages?: unknown }).allowed_pages
+      ),
     };
 
     const token = createSessionToken(userPayload);

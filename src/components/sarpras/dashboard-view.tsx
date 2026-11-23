@@ -39,7 +39,7 @@ export function DashboardView() {
     consumables,
     officeKitItems,
     officeKitLoans,
-    canManageDataMaster,
+    canAccessPage,
     uiSimState,
     setUiSimState,
     resetToSeedData,
@@ -131,27 +131,33 @@ export function DashboardView() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <Link
-            href="/sarpras/sirkulasi-invent"
-            className="min-h-[44px] px-4 py-2.5 inline-flex items-center gap-2 rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
-          >
-            <Cable className="w-4 h-4" aria-hidden="true" />
-            <span>Sirkulasi Invent</span>
-          </Link>
-          <Link
-            href="/sarpras/peminjaman"
-            className="min-h-[44px] px-4 py-2.5 inline-flex items-center gap-2 rounded-md bg-[#1E3A5F] text-white hover:bg-[#152943] dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
-          >
-            <Plus className="w-4 h-4" aria-hidden="true" />
-            <span>Catat Peminjaman</span>
-          </Link>
-          <Link
-            href="/sarpras/pemeliharaan"
-            className="min-h-[44px] px-4 py-2.5 inline-flex items-center gap-2 rounded-md bg-amber-700 text-white hover:bg-amber-800 dark:bg-amber-500 dark:text-slate-950 dark:hover:bg-amber-400 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
-          >
-            <Wrench className="w-4 h-4" aria-hidden="true" />
-            <span>Lapor Kerusakan</span>
-          </Link>
+          {canAccessPage("sirkulasi-invent") ? (
+            <Link
+              href="/sarpras/sirkulasi-invent"
+              className="min-h-[44px] px-4 py-2.5 inline-flex items-center gap-2 rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+            >
+              <Cable className="w-4 h-4" aria-hidden="true" />
+              <span>Sirkulasi Invent</span>
+            </Link>
+          ) : null}
+          {canAccessPage("peminjaman") ? (
+            <Link
+              href="/sarpras/peminjaman"
+              className="min-h-[44px] px-4 py-2.5 inline-flex items-center gap-2 rounded-md bg-[#1E3A5F] text-white hover:bg-[#152943] dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              <span>Catat Peminjaman</span>
+            </Link>
+          ) : null}
+          {canAccessPage("pemeliharaan") ? (
+            <Link
+              href="/sarpras/pemeliharaan"
+              className="min-h-[44px] px-4 py-2.5 inline-flex items-center gap-2 rounded-md bg-amber-700 text-white hover:bg-amber-800 dark:bg-amber-500 dark:text-slate-950 dark:hover:bg-amber-400 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+            >
+              <Wrench className="w-4 h-4" aria-hidden="true" />
+              <span>Lapor Kerusakan</span>
+            </Link>
+          ) : null}
         </div>
       </section>
 
@@ -192,12 +198,14 @@ export function DashboardView() {
               <span className="text-slate-800 dark:text-slate-200 font-medium">
                 {openTickets.length} tiket pemeliharaan aktif
               </span>
-              <Link
-                href="/sarpras/pemeliharaan"
-                className="font-bold text-amber-900 dark:text-amber-300 underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 rounded px-1 py-0.5"
-              >
-                Tindak Lanjuti
-              </Link>
+              {canAccessPage("pemeliharaan") ? (
+                <Link
+                  href="/sarpras/pemeliharaan"
+                  className="font-bold text-amber-900 dark:text-amber-300 underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 rounded px-1 py-0.5"
+                >
+                  Tindak Lanjuti
+                </Link>
+              ) : null}
             </div>
           </div>
 
@@ -236,7 +244,7 @@ export function DashboardView() {
               <span className="text-slate-600 dark:text-slate-400">
                 {buildings.length} gedung kampus
               </span>
-              {canManageDataMaster ? (
+              {canAccessPage("ruangan") ? (
                 <Link
                   href="/sarpras/ruangan"
                   className="font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-1 py-0.5"
@@ -281,12 +289,14 @@ export function DashboardView() {
               <span className="text-slate-600 dark:text-slate-400">
                 {assets.filter((a) => a.is_portable).length} unit portabel
               </span>
-              <Link
-                href="/sarpras/inventaris"
-                className="font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-1 py-0.5"
-              >
-                Buka Inventaris
-              </Link>
+              {canAccessPage("inventaris") ? (
+                <Link
+                  href="/sarpras/inventaris"
+                  className="font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-1 py-0.5"
+                >
+                  Buka Inventaris
+                </Link>
+              ) : null}
             </div>
           </div>
 
@@ -316,12 +326,18 @@ export function DashboardView() {
             </div>
 
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
-              <Link
-                href="/sarpras/peminjaman"
-                className="font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-1 py-0.5"
-              >
-                Cek Jadwal
-              </Link>
+              {canAccessPage("peminjaman") ? (
+                <Link
+                  href="/sarpras/peminjaman"
+                  className="font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-1 py-0.5"
+                >
+                  Cek Jadwal
+                </Link>
+              ) : (
+                <span className="text-slate-500 dark:text-slate-400">
+                  Terjadwal
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -341,7 +357,7 @@ export function DashboardView() {
                 agenda peminjaman hari ini.
               </p>
             </div>
-            {canManageDataMaster ? (
+            {canAccessPage("ruangan") ? (
               <Link
                 href="/sarpras/ruangan"
                 className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
@@ -411,7 +427,7 @@ export function DashboardView() {
                           </p>
                         )}
                       </div>
-                      {canManageDataMaster ? (
+                      {canAccessPage("ruangan") ? (
                         <div className="shrink-0">
                           <Link
                             href={`/sarpras/ruangan?inspect=${encodeURIComponent(
@@ -480,12 +496,14 @@ export function DashboardView() {
                 Diurutkan berdasarkan prioritas penanganan teknisi sarpras.
               </p>
             </div>
-            <Link
-              href="/sarpras/pemeliharaan"
-              className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
-            >
-              Semua Tiket ({maintenanceLogs.length})
-            </Link>
+            {canAccessPage("pemeliharaan") ? (
+              <Link
+                href="/sarpras/pemeliharaan"
+                className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
+              >
+                Semua Tiket ({maintenanceLogs.length})
+              </Link>
+            ) : null}
           </div>
 
           <div className="p-5 space-y-3 flex-1">
@@ -561,12 +579,14 @@ export function DashboardView() {
               </p>
             </div>
           </div>
-          <Link
-            href="/sarpras/sirkulasi-invent"
-            className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
-          >
-            Buka Sirkulasi Invent ({activeOfficeKitLoans.length} aktif)
-          </Link>
+          {canAccessPage("sirkulasi-invent") ? (
+            <Link
+              href="/sarpras/sirkulasi-invent"
+              className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
+            >
+              Buka Sirkulasi Invent ({activeOfficeKitLoans.length} aktif)
+            </Link>
+          ) : null}
         </div>
 
         {activeOfficeKitLoans.length === 0 ? (
@@ -636,12 +656,14 @@ export function DashboardView() {
                 </p>
               </div>
             </div>
-            <Link
-              href="/sarpras/bhp"
-              className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
-            >
-              Mutasi & Restock
-            </Link>
+            {canAccessPage("bhp") ? (
+              <Link
+                href="/sarpras/bhp"
+                className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
+              >
+                Mutasi & Restock
+              </Link>
+            ) : null}
           </div>
 
           {criticalConsumables.length === 0 ? (
@@ -702,7 +724,7 @@ export function DashboardView() {
                 </p>
               </div>
             </div>
-            {canManageDataMaster ? (
+            {canAccessPage("ruangan") ? (
               <Link
                 href="/sarpras/ruangan"
                 className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"

@@ -45,7 +45,8 @@ export function DosenView() {
     courses,
     rooms,
     campusUnits,
-    canManageDataMaster,
+    canAccessPage,
+    defaultHomeHref,
     uiSimState,
     setUiSimState,
     addLecturer,
@@ -116,8 +117,13 @@ export function DosenView() {
   const activeFilterCount =
     (filterStatus !== "ALL" ? 1 : 0) + (filterActive !== "ALL" ? 1 : 0);
 
-  if (!canManageDataMaster) {
-    return <MasterAdminGuard sectionLabel="Data Master Dosen" />;
+  if (!canAccessPage("dosen")) {
+    return (
+      <MasterAdminGuard
+        sectionLabel="Data Master Dosen"
+        backHref={defaultHomeHref}
+      />
+    );
   }
 
   if (uiSimState === "loading") {

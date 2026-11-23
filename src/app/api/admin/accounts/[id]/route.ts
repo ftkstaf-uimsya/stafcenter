@@ -4,6 +4,7 @@ import {
   invalidateStaffSessionCache,
   verifySameOriginRequest,
 } from "@/lib/auth/session";
+import { normalizeAllowedPages } from "@/lib/auth/permissions";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { StaffRole } from "@/types/sarpras";
 
@@ -43,7 +44,7 @@ export async function PATCH(
   try {
     const { data: existing, error: fetchErr } = await supabase
       .from("staff_accounts")
-      .select("id, username, role, is_active")
+      .select("*")
       .eq("id", targetId)
       .maybeSingle();
 
@@ -61,6 +62,7 @@ export async function PATCH(
       role?: StaffRole;
       is_active?: boolean;
       new_password?: string;
+      allowed_pages?: unknown;
     };
 
     const username = (body.username || "").trim().toLowerCase();
@@ -71,6 +73,27 @@ export async function PATCH(
     const isActive =
       typeof body.is_active === "boolean" ? body.is_active : existing.is_active;
     const newPassword = body.new_password || "";
+
+    let sanitizedPages: string[] | null = null;
+    if (role === "staff") {
+      if (body.allowed_pages !== undefined) {
+        sanitizedPages = normalizeAllowedPages("staff", body.allowed_pages);
+        if (sanitizedPages.length === 0) {
+          return NextResponse.json(
+            {
+              error:
+                "Pilih minimal 1 halaman yang boleh diakses oleh akun staf.",
+            },
+            { status: 400 }
+          );
+        }
+      } else {
+        sanitizedPages = normalizeAllowedPages(
+          "staff",
+          (existing as { allowed_pages?: unknown }).allowed_pages
+        );
+      }
+    }
 
     if (!username || !/^[a-z0-9._-]{3,40}$/.test(username)) {
       return NextResponse.json(
@@ -130,10 +153,23 @@ export async function PATCH(
       p_role: role,
       p_is_active: isActive,
       p_new_password: newPassword || null,
+      p_allowed_pages: sanitizedPages,
     });
 
     if (error) {
       const msg = error.message || "";
+      if (
+        msg.includes("p_allowed_pages") ||
+        msg.includes("fn_update_staff_account")
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Fungsi otoritas halaman akun belum dimigrasikan di Supabase. Jalankan migrasi supabase/migrations/010_staff_page_permissions.sql di SQL Editor Supabase.",
+          },
+          { status: 400 }
+        );
+      }
       if (msg.toLowerCase().includes("duplicate") || msg.includes("23505")) {
         return NextResponse.json(
           { error: `Username "${username}" sudah dipakai akun lain.` },
@@ -143,7 +179,24 @@ export async function PATCH(
       return NextResponse.json({ error: msg }, { status: 500 });
     }
 
-    const account = Array.isArray(data) ? data[0] : data;
+    const rawAccount = Array.isArray(data) ? data[0] : data;
+    const account = rawAccount
+      ? {
+          id: rawAccount.id,
+          username: rawAccount.username,
+          full_name: rawAccount.full_name,
+          email: rawAccount.email ?? null,
+          role: rawAccount.role as StaffRole,
+          is_active: rawAccount.is_active,
+          allowed_pages: normalizeAllowedPages(
+            rawAccount.role as StaffRole,
+            (rawAccount as { allowed_pages?: unknown }).allowed_pages ??
+              sanitizedPages
+          ),
+          created_at: rawAccount.created_at,
+          updated_at: rawAccount.updated_at,
+        }
+      : null;
     invalidateStaffSessionCache(targetId);
     return NextResponse.json({ account }, { status: 200 });
   } catch {

@@ -48,7 +48,7 @@ export function CommandSearch() {
     academicClasses,
     officeKitItems,
     officeKitLoans,
-    canManageDataMaster,
+    canAccessPage,
     isLiveSupabase,
     resetToSeedData,
     commandSearchOpen,
@@ -82,7 +82,7 @@ export function CommandSearch() {
     const q = query.trim().toLowerCase();
     const hits: SearchHit[] = [];
 
-    if (canManageDataMaster) {
+    if (canAccessPage("ruangan")) {
       for (const r of rooms) {
         if (
           !q ||
@@ -101,7 +101,9 @@ export function CommandSearch() {
           });
         }
       }
+    }
 
+    if (canAccessPage("dosen")) {
       for (const l of lecturers) {
         if (
           !q ||
@@ -122,7 +124,9 @@ export function CommandSearch() {
           });
         }
       }
+    }
 
+    if (canAccessPage("makul")) {
       for (const c of courses) {
         if (
           !q ||
@@ -141,7 +145,9 @@ export function CommandSearch() {
           });
         }
       }
+    }
 
+    if (canAccessPage("pengurus")) {
       for (const o of campusOfficials) {
         if (
           !q ||
@@ -161,7 +167,9 @@ export function CommandSearch() {
           });
         }
       }
+    }
 
+    if (canAccessPage("unit")) {
       for (const u of campusUnits) {
         if (
           !q ||
@@ -181,7 +189,9 @@ export function CommandSearch() {
           });
         }
       }
+    }
 
+    if (canAccessPage("vendor")) {
       for (const v of maintenanceVendors) {
         if (
           !q ||
@@ -201,6 +211,9 @@ export function CommandSearch() {
           });
         }
       }
+    }
+
+    if (canAccessPage("kelas")) {
       for (const cls of academicClasses) {
         if (
           !q ||
@@ -221,128 +234,138 @@ export function CommandSearch() {
       }
     }
 
-    for (const loan of officeKitLoans) {
-      if (
-        !q ||
-        loan.loan_code.toLowerCase().includes(q) ||
-        loan.class_code.toLowerCase().includes(q) ||
-        loan.dpm_name.toLowerCase().includes(q) ||
-        loan.borrower_name.toLowerCase().includes(q) ||
-        loan.kit_items_label.toLowerCase().includes(q)
-      ) {
-        hits.push({
-          id: `srk-${loan.id}`,
-          category: "Sirkulasi Invent",
-          code: loan.loan_code,
-          title: `Kelas ${loan.class_code} - ${loan.borrower_name}`,
-          meta: `${loan.status} • ${loan.kit_items_label}`,
-          href: `/sarpras/sirkulasi-invent?inspect=${loan.id}`,
-          icon: <Cable className="w-4 h-4 text-amber-700 dark:text-amber-400" />,
-        });
+    if (canAccessPage("sirkulasi-invent")) {
+      for (const loan of officeKitLoans) {
+        if (
+          !q ||
+          loan.loan_code.toLowerCase().includes(q) ||
+          loan.class_code.toLowerCase().includes(q) ||
+          loan.dpm_name.toLowerCase().includes(q) ||
+          loan.borrower_name.toLowerCase().includes(q) ||
+          loan.kit_items_label.toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `srk-${loan.id}`,
+            category: "Sirkulasi Invent",
+            code: loan.loan_code,
+            title: `Kelas ${loan.class_code} - ${loan.borrower_name}`,
+            meta: `${loan.status} • ${loan.kit_items_label}`,
+            href: `/sarpras/sirkulasi-invent?inspect=${loan.id}`,
+            icon: <Cable className="w-4 h-4 text-amber-700 dark:text-amber-400" />,
+          });
+        }
+      }
+
+      for (const kit of officeKitItems) {
+        if (
+          !q ||
+          kit.kit_code.toLowerCase().includes(q) ||
+          kit.name.toLowerCase().includes(q) ||
+          kit.category.toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `kit-${kit.id}`,
+            category: "Alat Kantor Staf",
+            code: kit.kit_code,
+            title: kit.name,
+            meta: `${kit.category} • ${kit.status}`,
+            href: `/sarpras/sirkulasi-invent?inspect=${kit.id}`,
+            icon: <Cable className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
+          });
+        }
       }
     }
 
-    for (const kit of officeKitItems) {
-      if (
-        !q ||
-        kit.kit_code.toLowerCase().includes(q) ||
-        kit.name.toLowerCase().includes(q) ||
-        kit.category.toLowerCase().includes(q)
-      ) {
-        hits.push({
-          id: `kit-${kit.id}`,
-          category: "Alat Kantor Staf",
-          code: kit.kit_code,
-          title: kit.name,
-          meta: `${kit.category} • ${kit.status}`,
-          href: `/sarpras/sirkulasi-invent?inspect=${kit.id}`,
-          icon: <Cable className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
-        });
+    if (canAccessPage("inventaris")) {
+      for (const a of assets) {
+        if (
+          !q ||
+          a.inventory_code.toLowerCase().includes(q) ||
+          a.name.toLowerCase().includes(q) ||
+          a.brand_model.toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `ast-${a.id}`,
+            category: "Inventaris Aset",
+            code: a.inventory_code,
+            title: a.name,
+            meta: `${a.brand_model} • Kondisi: ${a.condition}`,
+            href: `/sarpras/inventaris?inspect=${a.id}`,
+            icon: <Package className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
+          });
+        }
       }
     }
 
-    for (const a of assets) {
-      if (
-        !q ||
-        a.inventory_code.toLowerCase().includes(q) ||
-        a.name.toLowerCase().includes(q) ||
-        a.brand_model.toLowerCase().includes(q)
-      ) {
-        hits.push({
-          id: `ast-${a.id}`,
-          category: "Inventaris Aset",
-          code: a.inventory_code,
-          title: a.name,
-          meta: `${a.brand_model} • Kondisi: ${a.condition}`,
-          href: `/sarpras/inventaris?inspect=${a.id}`,
-          icon: <Package className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />,
-        });
+    if (canAccessPage("peminjaman")) {
+      for (const b of bookings) {
+        if (
+          !q ||
+          b.booking_code.toLowerCase().includes(q) ||
+          b.activity_name.toLowerCase().includes(q) ||
+          b.borrower_name.toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `bk-${b.id}`,
+            category: "Peminjaman",
+            code: b.booking_code,
+            title: b.activity_name,
+            meta: `${b.borrower_name} • ${b.booking_date} (${b.status})`,
+            href: `/sarpras/peminjaman?inspect=${b.id}`,
+            icon: (
+              <CalendarClock className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+            ),
+          });
+        }
       }
     }
 
-    for (const b of bookings) {
-      if (
-        !q ||
-        b.booking_code.toLowerCase().includes(q) ||
-        b.activity_name.toLowerCase().includes(q) ||
-        b.borrower_name.toLowerCase().includes(q)
-      ) {
-        hits.push({
-          id: `bk-${b.id}`,
-          category: "Peminjaman",
-          code: b.booking_code,
-          title: b.activity_name,
-          meta: `${b.borrower_name} • ${b.booking_date} (${b.status})`,
-          href: `/sarpras/peminjaman?inspect=${b.id}`,
-          icon: (
-            <CalendarClock className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-          ),
-        });
+    if (canAccessPage("pemeliharaan")) {
+      for (const m of maintenanceLogs) {
+        const kit = m.office_kit_item_id
+          ? officeKitItems.find((k) => k.id === m.office_kit_item_id)
+          : null;
+        if (
+          !q ||
+          m.ticket_code.toLowerCase().includes(q) ||
+          m.issue_title.toLowerCase().includes(q) ||
+          m.reporter_name.toLowerCase().includes(q) ||
+          (kit &&
+            (kit.kit_code.toLowerCase().includes(q) ||
+              kit.name.toLowerCase().includes(q)))
+        ) {
+          hits.push({
+            id: `mnt-${m.id}`,
+            category: "Pemeliharaan",
+            code: m.ticket_code,
+            title: m.issue_title,
+            meta: `${m.priority} • ${m.status}${
+              kit ? ` • Alat Kantor: ${kit.kit_code}` : ""
+            }`,
+            href: `/sarpras/pemeliharaan?inspect=${m.id}`,
+            icon: <Wrench className="w-4 h-4 text-red-700 dark:text-red-400" />,
+          });
+        }
       }
     }
 
-    for (const m of maintenanceLogs) {
-      const kit = m.office_kit_item_id
-        ? officeKitItems.find((k) => k.id === m.office_kit_item_id)
-        : null;
-      if (
-        !q ||
-        m.ticket_code.toLowerCase().includes(q) ||
-        m.issue_title.toLowerCase().includes(q) ||
-        m.reporter_name.toLowerCase().includes(q) ||
-        (kit &&
-          (kit.kit_code.toLowerCase().includes(q) ||
-            kit.name.toLowerCase().includes(q)))
-      ) {
-        hits.push({
-          id: `mnt-${m.id}`,
-          category: "Pemeliharaan",
-          code: m.ticket_code,
-          title: m.issue_title,
-          meta: `${m.priority} • ${m.status}${
-            kit ? ` • Alat Kantor: ${kit.kit_code}` : ""
-          }`,
-          href: `/sarpras/pemeliharaan?inspect=${m.id}`,
-          icon: <Wrench className="w-4 h-4 text-red-700 dark:text-red-400" />,
-        });
-      }
-    }
-
-    for (const c of consumables) {
-      if (
-        !q ||
-        c.code.toLowerCase().includes(q) ||
-        c.name.toLowerCase().includes(q)
-      ) {
-        hits.push({
-          id: `bhp-${c.id}`,
-          category: "Stok BHP",
-          code: c.code,
-          title: c.name,
-          meta: `Stok: ${c.current_stock} ${c.unit} (Min. ${c.min_stock})`,
-          href: `/sarpras/bhp?inspect=${c.id}`,
-          icon: <Boxes className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />,
-        });
+    if (canAccessPage("bhp")) {
+      for (const c of consumables) {
+        if (
+          !q ||
+          c.code.toLowerCase().includes(q) ||
+          c.name.toLowerCase().includes(q)
+        ) {
+          hits.push({
+            id: `bhp-${c.id}`,
+            category: "Stok BHP",
+            code: c.code,
+            title: c.name,
+            meta: `Stok: ${c.current_stock} ${c.unit} (Min. ${c.min_stock})`,
+            href: `/sarpras/bhp?inspect=${c.id}`,
+            icon: <Boxes className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />,
+          });
+        }
       }
     }
 
@@ -371,7 +394,7 @@ export function CommandSearch() {
     bookings,
     campusOfficials,
     campusUnits,
-    canManageDataMaster,
+    canAccessPage,
     consumables,
     courses,
     isLiveSupabase,

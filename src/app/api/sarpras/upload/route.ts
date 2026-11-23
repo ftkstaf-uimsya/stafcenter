@@ -4,6 +4,7 @@ import {
   getVerifiedServerSession,
   verifySameOriginRequest,
 } from "@/lib/auth/session";
+import { canAccessPage, ENTITY_TYPE_TO_PAGE_KEY } from "@/lib/auth/permissions";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { SarprasEntityType } from "@/types/sarpras";
 
@@ -109,20 +110,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (
-      [
-        "room",
-        "lecturer",
-        "course",
-        "official",
-        "unit",
-        "vendor",
-        "class",
-      ].includes(entityType) &&
-      session.role !== "master_admin"
-    ) {
+    const uploadPageKey = ENTITY_TYPE_TO_PAGE_KEY[entityType];
+    if (!uploadPageKey || !canAccessPage(session, uploadPageKey)) {
       return NextResponse.json(
-        { error: "Hanya Master Admin yang berhak mengunggah lampiran Data Master." },
+        { error: "Anda tidak memiliki otoritas untuk mengunggah lampiran pada modul ini." },
         { status: 403 }
       );
     }

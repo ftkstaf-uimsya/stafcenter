@@ -3,6 +3,12 @@ import {
   getVerifiedServerSession,
   verifySameOriginRequest,
 } from "@/lib/auth/session";
+import {
+  ACTION_TO_PAGE_KEY,
+  canAccessPage,
+  ENTITY_TYPE_TO_PAGE_KEY,
+  getPageMeta,
+} from "@/lib/auth/permissions";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import {
   ASSET_CATEGORY_LABELS,
@@ -129,55 +135,6 @@ type MutationPayload =
   | { action: "delete_office_kit_loan"; id: string }
   | { action: "insert_note"; data: Record<string, unknown> }
   | { action: "delete_attachment"; id: string; filePath?: string };
-
-const DATA_MASTER_ACTIONS = new Set([
-  "insert_building",
-  "update_building",
-  "delete_building",
-  "insert_room",
-  "update_room",
-  "delete_room",
-  "insert_lecturer",
-  "update_lecturer",
-  "delete_lecturer",
-  "insert_course",
-  "update_course",
-  "delete_course",
-  "insert_official",
-  "update_official",
-  "delete_official",
-  "insert_campus_unit",
-  "update_campus_unit",
-  "delete_campus_unit",
-  "insert_vendor",
-  "update_vendor",
-  "delete_vendor",
-  "insert_asset_category",
-  "update_asset_category",
-  "delete_asset_category",
-  "insert_funding_source",
-  "update_funding_source",
-  "delete_funding_source",
-  "insert_consumable_category",
-  "update_consumable_category",
-  "delete_consumable_category",
-  "insert_consumable_unit",
-  "update_consumable_unit",
-  "delete_consumable_unit",
-  "insert_academic_class",
-  "update_academic_class",
-  "delete_academic_class",
-]);
-
-const DATA_MASTER_ENTITY_TYPES = new Set<string>([
-  "room",
-  "lecturer",
-  "course",
-  "official",
-  "unit",
-  "vendor",
-  "class",
-]);
 
 const TABLE_ALLOWED_COLUMNS: Record<string, readonly string[]> = {
   buildings: ["id", "code", "name", "floors_count", "zone", "description"],
@@ -951,12 +908,13 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as MutationPayload;
     const nowIso = new Date().toISOString();
 
-    if (
-      DATA_MASTER_ACTIONS.has(body.action) &&
-      session.role !== "master_admin"
-    ) {
+    const requiredPage = ACTION_TO_PAGE_KEY[body.action];
+    if (requiredPage && !canAccessPage(session, requiredPage)) {
+      const pageLabel = getPageMeta(requiredPage)?.label || requiredPage;
       return NextResponse.json(
-        { error: "Hanya Master Admin yang berhak mengelola Data Master." },
+        {
+          error: `Akun Anda tidak memiliki otoritas untuk mengelola halaman ${pageLabel}.`,
+        },
         { status: 403 }
       );
     }
@@ -2235,13 +2193,11 @@ export async function POST(request: NextRequest) {
       }
       case "insert_note": {
         artifactsTablesMissingUntil = 0;
-        const entityType = String(body.data?.entity_type || "");
-        if (
-          DATA_MASTER_ENTITY_TYPES.has(entityType) &&
-          session.role !== "master_admin"
-        ) {
+        const entityType = String(body.data?.entity_type || "") as SarprasEntityType;
+        const notePageKey = ENTITY_TYPE_TO_PAGE_KEY[entityType];
+        if (!notePageKey || !canAccessPage(session, notePageKey)) {
           return NextResponse.json(
-            { error: "Hanya Master Admin yang berhak menambah catatan Data Master." },
+            { error: "Anda tidak memiliki otoritas untuk menambah catatan pada modul ini." },
             { status: 403 }
           );
         }
@@ -2281,12 +2237,13 @@ export async function POST(request: NextRequest) {
             { status: 404 }
           );
         }
-        if (
-          DATA_MASTER_ENTITY_TYPES.has(String(attRow.entity_type)) &&
-          session.role !== "master_admin"
-        ) {
+        const attPageKey =
+          ENTITY_TYPE_TO_PAGE_KEY[
+            String(attRow.entity_type) as SarprasEntityType
+          ];
+        if (!attPageKey || !canAccessPage(session, attPageKey)) {
           return NextResponse.json(
-            { error: "Hanya Master Admin yang berhak menghapus lampiran Data Master." },
+            { error: "Anda tidak memiliki otoritas untuk menghapus lampiran pada modul ini." },
             { status: 403 }
           );
         }

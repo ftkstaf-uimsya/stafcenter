@@ -42,7 +42,8 @@ export function ReferensiView() {
     consumableUnits,
     assets,
     consumables,
-    canManageDataMaster,
+    canAccessPage,
+    defaultHomeHref,
     uiSimState,
     setUiSimState,
     addAssetCategory,
@@ -129,9 +130,12 @@ export function ReferensiView() {
     );
   }, [consumableUnits, searchQuery]);
 
-  if (!canManageDataMaster) {
+  if (!canAccessPage("referensi")) {
     return (
-      <MasterAdminGuard sectionLabel="Master Referensi & Klasifikasi" />
+      <MasterAdminGuard
+        sectionLabel="Master Referensi & Klasifikasi"
+        backHref={defaultHomeHref}
+      />
     );
   }
 
