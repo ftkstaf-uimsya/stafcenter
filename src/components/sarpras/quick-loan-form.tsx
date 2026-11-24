@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   CheckCircle2,
+  Clock,
   ImagePlus,
   PackageCheck,
+  Phone,
   RotateCcw,
   ScanLine,
   Search,
@@ -13,7 +15,11 @@ import {
   X,
 } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
-import { useTodayWibIso } from "@/lib/sarpras/sirkulasi-utils";
+import {
+  getCurrentWibTimeHHMM,
+  getDefaultExpectedReturnTimeWib,
+  getTodayWibIso,
+} from "@/lib/sarpras/sirkulasi-utils";
 import {
   matchesFlexibleQuery,
   normalizeCompactSearch,
@@ -22,6 +28,7 @@ import { compressPhotoIfNeeded } from "@/lib/media/compress-image";
 import { OfficeKitCategory } from "@/types/sarpras";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import {
   BarcodeScannerModal,
@@ -36,6 +43,16 @@ const OFFICE_KIT_CATEGORIES: OfficeKitCategory[] = [
   "Kunci & Akses",
   "Adapter & Converter",
   "Lainnya",
+];
+
+const RETURN_SESSION_PRESETS: Array<{
+  key: "A" | "B" | "C";
+  time: string;
+  label: string;
+}> = [
+  { key: "A", time: "09:30", label: "Sesi A" },
+  { key: "B", time: "10:45", label: "Sesi B" },
+  { key: "C", time: "12:00", label: "Sesi C" },
 ];
 
 interface QuickLoanFormProps {
@@ -61,8 +78,6 @@ export function QuickLoanForm({
     uploadEntityFile,
   } = useSarpras();
 
-  const todayWibIso = useTodayWibIso();
-
   const activeClasses = useMemo(
     () => academicClasses.filter((c) => c.is_active),
     [academicClasses]
@@ -80,6 +95,7 @@ export function QuickLoanForm({
   const [borrowerPhone, setBorrowerPhone] = useState(
     () => firstClass?.dpm_phone || ""
   );
+  const [showWhatsappInput, setShowWhatsappInput] = useState(false);
   const [roomId, setRoomId] = useState(
     () => firstClass?.default_room_id || rooms[0]?.id || ""
   );
@@ -87,10 +103,7 @@ export function QuickLoanForm({
   const [selectedKitIds, setSelectedKitIds] = useState<string[]>(() =>
     preselectedKitId ? [preselectedKitId] : []
   );
-  const [loanDate, setLoanDate] = useState(todayWibIso);
-  const [loanDateDirty, setLoanDateDirty] = useState(false);
-  const [borrowTime, setBorrowTime] = useState("08:00");
-  const [expectedReturnTime, setExpectedReturnTime] = useState("10:30");
+
   const [checkoutError, setCheckoutError] = useState("");
   const [inlineSuccessMessage, setInlineSuccessMessage] = useState("");
   const [kitPickerSearch, setKitPickerSearch] = useState("");
@@ -106,14 +119,9 @@ export function QuickLoanForm({
     string | null
   >(null);
   const [submittingCheckout, setSubmittingCheckout] = useState(false);
+  const [sessionModalOpen, setSessionModalOpen] = useState(false);
+  const [customReturnTime, setCustomReturnTime] = useState("15:00");
   const galleryPhotoInputRef = useRef<HTMLInputElement>(null);
-
-  // Sinkronkan tanggal default jika berganti hari WIB dan user belum mengubah tanggal manual
-  useEffect(() => {
-    if (!loanDateDirty) {
-      setLoanDate(todayWibIso);
-    }
-  }, [loanDateDirty, todayWibIso]);
 
   // Sinkronkan pilihan awal kelas setelah data Supabase selesai dimuat
   useEffect(() => {
@@ -169,29 +177,30 @@ export function QuickLoanForm({
     });
   }, [availableKitItems, kitPickerCategory, kitPickerSearch]);
 
-  const resetFormFields = (keepSuccessNotice = false) => {
-    const cls = activeClasses[0] || null;
-    setSelectedClassId(cls?.id || "");
-    setBorrowerType("representative");
-    setBorrowerName("");
-    setBorrowerPhone(cls?.dpm_phone || "");
-    setRoomId(cls?.default_room_id || rooms[0]?.id || "");
-    setCourseName("");
-    setSelectedKitIds([]);
-    setLoanDate(todayWibIso);
-    setLoanDateDirty(false);
-    setBorrowTime("08:00");
-    setExpectedReturnTime("10:30");
-    setCheckoutError("");
-    if (!keepSuccessNotice) {
-      setInlineSuccessMessage("");
-    }
-    setKitPickerSearch("");
-    setKitPickerCategory("ALL");
-    setScanFeedback(null);
-    setCheckoutPhotoFile(null);
-    setCheckoutPhotoPreview(null);
-  };
+  const resetFormFields = useCallback(
+    (keepSuccessNotice = false) => {
+      const cls = activeClasses[0] || null;
+      setSelectedClassId(cls?.id || "");
+      setBorrowerType("representative");
+      setBorrowerName("");
+      setBorrowerPhone(cls?.dpm_phone || "");
+      setShowWhatsappInput(false);
+      setSessionModalOpen(false);
+      setRoomId(cls?.default_room_id || rooms[0]?.id || "");
+      setCourseName("");
+      setSelectedKitIds([]);
+      setCheckoutError("");
+      if (!keepSuccessNotice) {
+        setInlineSuccessMessage("");
+      }
+      setKitPickerSearch("");
+      setKitPickerCategory("ALL");
+      setScanFeedback(null);
+      setCheckoutPhotoFile(null);
+      setCheckoutPhotoPreview(null);
+    },
+    [activeClasses, rooms]
+  );
 
   const handlePickCheckoutPhoto = (file: File | null) => {
     if (!file) return;
@@ -343,7 +352,131 @@ export function QuickLoanForm({
     setScanFeedback({ tone: "error", text: outcome.message });
   };
 
-  const handleCheckoutSubmit = async (e: React.FormEvent) => {
+  const finalizeCheckout = useCallback(
+    async (chosenReturnTime: string) => {
+      if (submittingCheckout) return;
+      if (!selectedClassObj) {
+        setSessionModalOpen(false);
+        setCheckoutError(
+          "Pilih Kelas Mahasiswa terlebih dahulu dari Data Master Kelas."
+        );
+        return;
+      }
+
+      const finalBorrowerName =
+        borrowerType === "dpm"
+          ? `${selectedClassObj.dpm_name} (DPM)`
+          : borrowerName.trim();
+
+      if (!finalBorrowerName) {
+        setSessionModalOpen(false);
+        setCheckoutError(
+          "Isi nama perwakilan mahasiswa yang mengambil barang di kantor staf."
+        );
+        return;
+      }
+
+      if (!/^\d{2}:\d{2}$/.test(chosenReturnTime)) {
+        setCheckoutError("Pilih atau isi estimasi jam kembali yang valid.");
+        return;
+      }
+
+      const nowDateWib = getTodayWibIso();
+      const nowTimeWib = getCurrentWibTimeHHMM();
+
+      const res = checkoutOfficeKitLoan({
+        class_id: selectedClassObj.id,
+        class_code: selectedClassObj.class_code,
+        prodi: selectedClassObj.prodi,
+        dpm_name: selectedClassObj.dpm_name,
+        borrower_name: finalBorrowerName,
+        borrower_phone:
+          borrowerPhone.trim() || selectedClassObj.dpm_phone || "-",
+        room_id: roomId || null,
+        course_name: courseName.trim(),
+        kit_item_ids: selectedKitIds,
+        loan_date: nowDateWib,
+        borrow_time: nowTimeWib,
+        expected_return_time: chosenReturnTime,
+      });
+
+      if (!res.ok) {
+        setSessionModalOpen(false);
+        setCheckoutError(res.error || "Gagal mencatat peminjaman alat.");
+        return;
+      }
+
+      setSessionModalOpen(false);
+
+      const pendingPhoto = checkoutPhotoFile;
+      if (pendingPhoto && res.id) {
+        setSubmittingCheckout(true);
+        try {
+          const compressed = await compressPhotoIfNeeded(pendingPhoto);
+          await uploadEntityFile("office_loan", res.id, compressed);
+        } finally {
+          setSubmittingCheckout(false);
+        }
+      }
+
+      if (mode === "inline") {
+        const count = selectedKitIds.length;
+        const clsCode = selectedClassObj.class_code;
+        resetFormFields(true);
+        setInlineSuccessMessage(
+          `Berhasil diserahkan: ${count} barang untuk kelas ${clsCode} (${finalBorrowerName}) pukul ${nowTimeWib} WIB, est. kembali ${chosenReturnTime} WIB.`
+        );
+      }
+
+      onSuccess?.();
+    },
+    [
+      borrowerName,
+      borrowerPhone,
+      borrowerType,
+      checkoutOfficeKitLoan,
+      checkoutPhotoFile,
+      courseName,
+      mode,
+      onSuccess,
+      resetFormFields,
+      roomId,
+      selectedClassObj,
+      selectedKitIds,
+      submittingCheckout,
+      uploadEntityFile,
+    ]
+  );
+
+  // Pintasan keyboard A / B / C saat modal pilih sesi terbuka
+  useEffect(() => {
+    if (!sessionModalOpen || submittingCheckout) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const lower = e.key.toLowerCase();
+      const matched = RETURN_SESSION_PRESETS.find(
+        (p) => p.key.toLowerCase() === lower
+      );
+      if (matched) {
+        e.preventDefault();
+        void finalizeCheckout(matched.time);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [finalizeCheckout, sessionModalOpen, submittingCheckout]);
+
+  const handleCheckoutSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (submittingCheckout) return;
     setCheckoutError("");
@@ -368,49 +501,25 @@ export function QuickLoanForm({
       return;
     }
 
-    const res = checkoutOfficeKitLoan({
-      class_id: selectedClassObj.id,
-      class_code: selectedClassObj.class_code,
-      prodi: selectedClassObj.prodi,
-      dpm_name: selectedClassObj.dpm_name,
-      borrower_name: finalBorrowerName,
-      borrower_phone:
-        borrowerPhone.trim() || selectedClassObj.dpm_phone || "-",
-      room_id: roomId || null,
-      course_name: courseName.trim(),
-      kit_item_ids: selectedKitIds,
-      loan_date: loanDate,
-      borrow_time: borrowTime,
-      expected_return_time: expectedReturnTime,
-    });
-
-    if (!res.ok) {
-      setCheckoutError(res.error || "Gagal mencatat peminjaman alat.");
+    if (selectedKitIds.length === 0) {
+      setCheckoutError(
+        "Pilih minimal 1 barang (Kabel HDMI, Stop Kontak, atau Remote TV) untuk dipinjamkan."
+      );
       return;
     }
 
-    const pendingPhoto = checkoutPhotoFile;
-    if (pendingPhoto && res.id) {
-      setSubmittingCheckout(true);
-      try {
-        const compressed = await compressPhotoIfNeeded(pendingPhoto);
-        await uploadEntityFile("office_loan", res.id, compressed);
-      } finally {
-        setSubmittingCheckout(false);
-      }
-    }
-
-    if (mode === "inline") {
-      const count = selectedKitIds.length;
-      const clsCode = selectedClassObj.class_code;
-      resetFormFields(true);
-      setInlineSuccessMessage(
-        `Berhasil diserahkan: ${count} barang untuk kelas ${clsCode} (${finalBorrowerName}).`
-      );
-    }
-
-    onSuccess?.();
+    setCustomReturnTime(getDefaultExpectedReturnTimeWib(120));
+    setSessionModalOpen(true);
   };
+
+  const hasWhatsappValue = Boolean(
+    borrowerPhone.trim() && borrowerPhone.trim() !== "-"
+  );
+
+  const nowWibPreview = sessionModalOpen ? getCurrentWibTimeHHMM() : "";
+  const nextUpcomingSession = RETURN_SESSION_PRESETS.find(
+    (s) => s.time > nowWibPreview
+  );
 
   return (
     <>
@@ -463,35 +572,6 @@ export function QuickLoanForm({
           }
         />
 
-        {selectedClassObj ? (
-          <div className="p-3 rounded-md border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-xs grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <div>
-              <span className="text-slate-600 dark:text-slate-400">
-                Kode Kelas:
-              </span>{" "}
-              <strong className="font-mono text-[#1E3A5F] dark:text-sky-400">
-                {selectedClassObj.class_code}
-              </strong>
-            </div>
-            <div>
-              <span className="text-slate-600 dark:text-slate-400">
-                DPM (Ketua Kelas):
-              </span>{" "}
-              <strong className="text-slate-900 dark:text-slate-100">
-                {selectedClassObj.dpm_name}
-              </strong>
-            </div>
-            <div>
-              <span className="text-slate-600 dark:text-slate-400">
-                WA DPM:
-              </span>{" "}
-              <strong className="font-mono text-slate-900 dark:text-slate-100">
-                {selectedClassObj.dpm_phone}
-              </strong>
-            </div>
-          </div>
-        ) : null}
-
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Select
             label="Pengambil di Loket Kantor Staf *"
@@ -537,13 +617,7 @@ export function QuickLoanForm({
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Input
-            label="No. WhatsApp Kontak"
-            placeholder="08xx-xxxx-xxxx"
-            value={borrowerPhone}
-            onChange={(e) => setBorrowerPhone(e.target.value)}
-          />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Select
             label="Ruang Perkuliahan"
             value={roomId}
@@ -586,7 +660,6 @@ export function QuickLoanForm({
             ) : null}
           </div>
 
-          {/* Chip barang yang sudah terpilih agar selalu terlihat saat mencari */}
           {selectedKitIds.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 p-2 rounded-md border border-sky-200 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-950/30">
               {selectedKitIds.map((kitId) => {
@@ -615,7 +688,6 @@ export function QuickLoanForm({
             </div>
           ) : null}
 
-          {/* Toolbar Pencarian, Filter Kategori & Scan Barcode Kamera */}
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
             <div className="sm:col-span-6 relative">
               <Search
@@ -754,33 +826,6 @@ export function QuickLoanForm({
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Input
-            label="Tanggal *"
-            type="date"
-            value={loanDate}
-            onChange={(e) => {
-              setLoanDateDirty(true);
-              setLoanDate(e.target.value);
-            }}
-            required
-          />
-          <Input
-            label="Jam Ambil *"
-            type="time"
-            value={borrowTime}
-            onChange={(e) => setBorrowTime(e.target.value)}
-            required
-          />
-          <Input
-            label="Estimasi Kembali *"
-            type="time"
-            value={expectedReturnTime}
-            onChange={(e) => setExpectedReturnTime(e.target.value)}
-            required
-          />
-        </div>
-
         {/* Input Foto Bukti Serah Terima (Opsional) */}
         <div className="p-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/60 space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -855,7 +900,40 @@ export function QuickLoanForm({
           ) : null}
         </div>
 
+        {/* Kolom WA Tersembunyi (Dibuka saat klik tombol WA) */}
+        {showWhatsappInput ? (
+          <div className="p-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/60">
+            <Input
+              label="Nomor WhatsApp / Telepon Aktif (Opsional)"
+              placeholder="08xx-xxxx-xxxx"
+              value={borrowerPhone}
+              onChange={(e) => setBorrowerPhone(e.target.value)}
+            />
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+          <Button
+            type="button"
+            variant="outline"
+            aria-expanded={showWhatsappInput}
+            aria-label={
+              hasWhatsappValue
+                ? "WA (Nomor WhatsApp sudah terisi)"
+                : "WA (Tampilkan kolom nomor WhatsApp)"
+            }
+            onClick={() => setShowWhatsappInput((prev) => !prev)}
+          >
+            <Phone className="w-4 h-4" aria-hidden="true" />
+            <span>WA</span>
+            {hasWhatsappValue ? (
+              <span
+                aria-hidden="true"
+                className="w-2 h-2 rounded-full bg-emerald-600 dark:bg-emerald-400"
+              />
+            ) : null}
+          </Button>
+
           {mode === "modal" && onCancel ? (
             <Button
               type="button"
@@ -886,6 +964,103 @@ export function QuickLoanForm({
           </Button>
         </div>
       </form>
+
+      {/* Modal Pilihan Estimasi Jam Kembali (Sesi A / B / C / Custom) */}
+      <Modal
+        isOpen={sessionModalOpen}
+        onClose={() => {
+          if (!submittingCheckout) setSessionModalOpen(false);
+        }}
+        title="Pilih Estimasi Jam Kembali"
+        description={`Tanggal (${getTodayWibIso()}) dan jam ambil (${nowWibPreview} WIB) otomatis tercatat saat Anda memilih sesi kembali.`}
+        maxWidthClass="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {RETURN_SESSION_PRESETS.map((session) => {
+              const isPastNow = session.time <= nowWibPreview;
+              const isNext = nextUpcomingSession?.key === session.key;
+              return (
+                <button
+                  key={session.key}
+                  type="button"
+                  disabled={submittingCheckout}
+                  onClick={() => void finalizeCheckout(session.time)}
+                  className={`min-h-[84px] p-3 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400 ${
+                    isNext
+                      ? "border-[#1E3A5F] bg-sky-50/80 hover:bg-sky-100/80 dark:border-sky-400 dark:bg-sky-950/40 dark:hover:bg-sky-950/70"
+                      : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-[#1E3A5F] text-white dark:bg-sky-400 dark:text-slate-950">
+                      {session.key}
+                    </span>
+                    <Clock
+                      className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <p className="mt-2 text-base font-mono font-bold text-slate-900 dark:text-slate-100">
+                    {session.time} WIB
+                  </p>
+                  <p className="mt-0.5 text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                    {isNext
+                      ? "Sesi berikutnya"
+                      : isPastNow
+                      ? "Lewat jam saat ini"
+                      : session.label}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 space-y-2">
+            <label
+              htmlFor="custom-return-session-time"
+              className="block text-xs font-bold text-slate-800 dark:text-slate-200"
+            >
+              Jam Lainnya (Custom)
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                id="custom-return-session-time"
+                type="time"
+                value={customReturnTime}
+                onChange={(e) => setCustomReturnTime(e.target.value)}
+                aria-label="Estimasi jam kembali lainnya"
+                className="min-h-[44px] flex-1 min-w-[140px] px-3 py-2 text-sm font-mono rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={submittingCheckout || !customReturnTime}
+                onClick={() => void finalizeCheckout(customReturnTime)}
+              >
+                <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                <span>Konfirmasi Jam</span>
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <span className="text-[11px] text-slate-600 dark:text-slate-400">
+              Pintasan keyboard: tekan <kbd className="font-mono font-bold">A</kbd>,{" "}
+              <kbd className="font-mono font-bold">B</kbd>, atau{" "}
+              <kbd className="font-mono font-bold">C</kbd>.
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={submittingCheckout}
+              onClick={() => setSessionModalOpen(false)}
+            >
+              Batal
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <BarcodeScannerModal
         isOpen={scannerModalOpen}

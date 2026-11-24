@@ -259,6 +259,31 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
       page.getByRole("heading", { name: "DIKEMBALIKAN" })
     ).toBeVisible();
 
+    // Pastikan kotak review kelas dan input Tanggal/Jam Ambil tidak ada lagi, sementara tombol WA & preset lebar tersedia
+    await expect(page.getByText(/WA DPM:/i)).toHaveCount(0);
+    await expect(page.getByLabel("Tanggal *")).toHaveCount(0);
+    await expect(page.getByLabel("Jam Ambil *")).toHaveCount(0);
+    await expect(page.getByRole("separator")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Fokus Form" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Seimbang" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Fokus Antrean" })
+    ).toBeVisible();
+
+    const waBtn = page.getByRole("button", { name: /^WA/i }).first();
+    await expect(waBtn).toBeVisible();
+    await expect(
+      page.getByLabel(/Nomor WhatsApp \/ Telepon Aktif/i)
+    ).toHaveCount(0);
+    await waBtn.click();
+    await expect(
+      page.getByLabel(/Nomor WhatsApp \/ Telepon Aktif/i)
+    ).toBeVisible();
+    await waBtn.click();
+    await expect(
+      page.getByLabel(/Nomor WhatsApp \/ Telepon Aktif/i)
+    ).toHaveCount(0);
+
     // Uji pencarian fleksibel di dropdown Pilih Kelas Mahasiswa tanpa tanda hubung
     const classCombo = page.getByRole("combobox", {
       name: /Pilih Kelas Mahasiswa/i,

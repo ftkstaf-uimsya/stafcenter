@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 import {
+  formatWibDateTime,
   isBookingOverdueDay,
   isBookingVisibleOnQuickDesk,
   isLoanVisibleOnDailyDesk,
@@ -34,6 +35,7 @@ import { Modal } from "@/components/ui/modal";
 import { Drawer } from "@/components/ui/drawer";
 import { ConfirmDeleteModal } from "@/components/ui/confirm-delete-modal";
 import { ProgressRing } from "@/components/ui/progress-ring";
+import { ResizableSplitPane } from "@/components/ui/resizable-split-pane";
 import { EntityDrawerSections } from "@/components/ui/entity-drawer-sections";
 import { ErrorStateView, LoadingStateView } from "@/components/ui/data-states";
 import { QuickLoanForm } from "@/components/sarpras/quick-loan-form";
@@ -561,43 +563,40 @@ export function QuickLoanView() {
 
       {/* MODE 1: ALAT KANTOR STAF */}
       {isAlatMode ? (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          {/* Panel Kiri: Form Pinjamkan Alat Kantor Staf ke Kelas */}
-          <section
-            aria-label="Form Pinjamkan Alat Kantor Staf ke Kelas"
-            className={`${
-              mobileTab === "form" ? "block" : "hidden"
-            } lg:block lg:col-span-5 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6.5rem)] lg:overflow-y-auto`}
-          >
-            <div className="pb-3 mb-4 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-2">
-              <div>
-                <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                  <ClipboardPlus
-                    className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400 shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span>Pinjamkan Alat Kantor Staf ke Kelas</span>
-                </h2>
-                <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
-                  Pilih kelas (DPM otomatis tercatat) lalu pilih peralatan yang
-                  diambil.
-                </p>
+        <ResizableSplitPane
+          storageKey="stafcenter_pinjam_cepat_split_v1"
+          leftVisibleOnMobile={mobileTab === "form"}
+          rightVisibleOnMobile={mobileTab !== "form"}
+          left={
+            <section
+              aria-label="Form Pinjamkan Alat Kantor Staf ke Kelas"
+              className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 lg:sticky lg:top-20"
+            >
+              <div className="pb-3 mb-4 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-2">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <ClipboardPlus
+                      className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>Pinjamkan Alat Kantor Staf ke Kelas</span>
+                  </h2>
+                  <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
+                    Pilih kelas (DPM otomatis tercatat) lalu pilih peralatan
+                    yang diambil.
+                  </p>
+                </div>
+                <span className="px-2 py-0.5 text-[11px] font-mono font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 shrink-0">
+                  {availableUnitsCount} siap
+                </span>
               </div>
-              <span className="px-2 py-0.5 text-[11px] font-mono font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 shrink-0">
-                {availableUnitsCount} siap
-              </span>
-            </div>
 
-            <QuickLoanForm mode="inline" />
-          </section>
-
-          {/* Panel Kanan: Daftar Sedang Dipinjam & Dikembalikan */}
-          <div
-            className={`${
-              mobileTab !== "form" ? "block" : "hidden"
-            } lg:block lg:col-span-7 space-y-4`}
-          >
-            <div className="relative">
+              <QuickLoanForm mode="inline" />
+            </section>
+          }
+          right={
+            <div className="space-y-4">
+              <div className="relative">
               <Search
                 className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
                 aria-hidden="true"
@@ -755,46 +754,44 @@ export function QuickLoanView() {
               )}
             </section>
           </div>
-        </div>
+        }
+      />
       ) : (
         /* MODE 2: RUANGAN & ALAT PORTABEL (PEMINJAMAN & RESERVASI) */
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          {/* Panel Kiri: Form Pengajuan Peminjaman Ruangan & Alat */}
-          <section
-            aria-label="Form Pengajuan Peminjaman Ruangan & Alat"
-            className={`${
-              mobileTab === "form" ? "block" : "hidden"
-            } lg:block lg:col-span-5 rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6.5rem)] lg:overflow-y-auto`}
-          >
-            <div className="pb-3 mb-4 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-2">
-              <div>
-                <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                  <Building2
-                    className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400 shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span>Form Peminjaman Ruangan &amp; Alat</span>
-                </h2>
-                <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
-                  Deteksi bentrok jadwal otomatis (<em>Conflict Detection</em>)
-                  beserta dokumentasi foto bukti.
-                </p>
+        <ResizableSplitPane
+          storageKey="stafcenter_pinjam_cepat_split_v1"
+          leftVisibleOnMobile={mobileTab === "form"}
+          rightVisibleOnMobile={mobileTab !== "form"}
+          left={
+            <section
+              aria-label="Form Pengajuan Peminjaman Ruangan & Alat"
+              className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 lg:sticky lg:top-20"
+            >
+              <div className="pb-3 mb-4 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-2">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <Building2
+                      className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>Form Peminjaman Ruangan &amp; Alat</span>
+                  </h2>
+                  <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
+                    Deteksi bentrok jadwal otomatis (<em>Conflict Detection</em>)
+                    beserta dokumentasi foto bukti.
+                  </p>
+                </div>
+                <span className="px-2 py-0.5 text-[11px] font-mono font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 shrink-0">
+                  {rooms.length} ruang
+                </span>
               </div>
-              <span className="px-2 py-0.5 text-[11px] font-mono font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 shrink-0">
-                {rooms.length} ruang
-              </span>
-            </div>
 
-            <BookingLoanForm mode="inline" />
-          </section>
-
-          {/* Panel Kanan: Antrean & Sedang Dipinjam + Selesai / Dikembalikan */}
-          <div
-            className={`${
-              mobileTab !== "form" ? "block" : "hidden"
-            } lg:block lg:col-span-7 space-y-4`}
-          >
-            <div className="relative">
+              <BookingLoanForm mode="inline" />
+            </section>
+          }
+          right={
+            <div className="space-y-4">
+              <div className="relative">
               <Search
                 className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
                 aria-hidden="true"
@@ -1029,8 +1026,9 @@ export function QuickLoanView() {
                 </ul>
               )}
             </section>
-          </div>
-        </div>
+            </div>
+          }
+        />
       )}
 
       {/* Drawer Detail Tiket Sirkulasi Alat Kantor Staf */}
@@ -1172,6 +1170,19 @@ export function QuickLoanView() {
                   {selectedLoan.kit_items_label}
                 </dd>
               </div>
+              {selectedLoan.returned_at ? (
+                <div className="sm:col-span-2">
+                  <dt className="text-slate-600 dark:text-slate-400">
+                    Waktu Kembali Aktual
+                  </dt>
+                  <dd className="mt-0.5 font-semibold text-emerald-800 dark:text-emerald-300">
+                    {formatWibDateTime(selectedLoan.returned_at)}
+                    {selectedLoan.received_by_staff
+                      ? ` (Diterima oleh ${selectedLoan.received_by_staff})`
+                      : ""}
+                  </dd>
+                </div>
+              ) : null}
               {selectedLoan.return_condition_notes ? (
                 <div className="sm:col-span-2">
                   <dt className="text-slate-600 dark:text-slate-400">

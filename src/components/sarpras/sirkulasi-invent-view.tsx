@@ -58,6 +58,7 @@ import { PrintableBarcodeItem } from "@/lib/barcode/render-codes";
 import { LoanBoardCompactCard } from "@/components/sarpras/loan-compact-card";
 import { QuickLoanForm } from "@/components/sarpras/quick-loan-form";
 import {
+  formatWibDateTime,
   isLoanVisibleOnDailyDesk,
   useTodayWibIso,
 } from "@/lib/sarpras/sirkulasi-utils";
@@ -141,21 +142,6 @@ function shiftIsoDate(baseIso: string, deltaDays: number): string {
   if (parts.length !== 3 || parts.some(Number.isNaN)) return baseIso;
   const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + deltaDays));
   return dt.toISOString().slice(0, 10);
-}
-
-function formatWibDateTime(iso?: string | null): string {
-  if (!iso) return "-";
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return iso;
-  return new Intl.DateTimeFormat("id-ID", {
-    timeZone: "Asia/Jakarta",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(parsed);
 }
 
 function inferKitCategoryFromLabel(label: string): OfficeKitCategory {
@@ -2889,6 +2875,19 @@ export function SirkulasiInventView() {
                   {selectedLoan.kit_items_label}
                 </dd>
               </div>
+              {selectedLoan.returned_at ? (
+                <div className="sm:col-span-2">
+                  <dt className="text-slate-600 dark:text-slate-400">
+                    Waktu Kembali Aktual
+                  </dt>
+                  <dd className="mt-0.5 font-mono font-semibold text-emerald-800 dark:text-emerald-300">
+                    {formatWibDateTime(selectedLoan.returned_at)}
+                    {selectedLoan.received_by_staff
+                      ? ` • Diterima oleh ${selectedLoan.received_by_staff}`
+                      : ""}
+                  </dd>
+                </div>
+              ) : null}
               {selectedLoan.return_condition_notes ? (
                 <div className="sm:col-span-2">
                   <dt className="text-slate-600 dark:text-slate-400">

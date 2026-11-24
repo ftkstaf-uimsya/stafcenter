@@ -4730,10 +4730,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
             "Pilih minimal 1 barang (Kabel HDMI, Stop Kontak, atau Remote TV) untuk dipinjamkan.",
         };
       }
-      if (payload.expected_return_time <= payload.borrow_time) {
+      if (!/^\d{2}:\d{2}$/.test(payload.expected_return_time)) {
         return {
           ok: false,
-          error: "Estimasi jam kembali harus lebih besar daripada jam pinjam.",
+          error: "Pilih atau isi estimasi jam kembali yang valid (format HH:MM).",
         };
       }
 

@@ -7,6 +7,7 @@ import {
   Camera,
   CheckCircle2,
   ImagePlus,
+  Phone,
   RotateCcw,
   Trash2,
   X,
@@ -81,6 +82,7 @@ export function BookingLoanForm({
     () => activeUnits[0]?.name || ""
   );
   const [borrowerPhone, setBorrowerPhone] = useState("");
+  const [showWhatsappInput, setShowWhatsappInput] = useState(false);
   const [targetType, setTargetType] = useState<BookingTargetType>("Ruangan");
   const [roomId, setRoomId] = useState(() => rooms[0]?.id || "");
   const [assetId, setAssetId] = useState(() => portableAssets[0]?.id || "");
@@ -166,6 +168,7 @@ export function BookingLoanForm({
     setSelectedUnitId(firstUnit?.id || "");
     setBorrowerUnit(firstUnit?.name || "");
     setBorrowerPhone("");
+    setShowWhatsappInput(false);
     setTargetType("Ruangan");
     setRoomId(rooms[0]?.id || "");
     setAssetId(portableAssets[0]?.id || "");
@@ -486,7 +489,7 @@ export function BookingLoanForm({
           />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
           {activeUnits.length > 0 ? (
             <Select
               label="Program Studi / Unit / Ormawa *"
@@ -525,13 +528,6 @@ export function BookingLoanForm({
               required
             />
           )}
-          <Input
-            label="Nomor WhatsApp / Telepon Aktif *"
-            placeholder="Contoh: 0813-2211-9001"
-            value={borrowerPhone}
-            onChange={(e) => setBorrowerPhone(e.target.value)}
-            required
-          />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -730,7 +726,40 @@ export function BookingLoanForm({
           ) : null}
         </div>
 
+        {/* Kolom WA Tersembunyi (Dibuka saat klik tombol WA) */}
+        {showWhatsappInput ? (
+          <div className="p-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/60">
+            <Input
+              label="Nomor WhatsApp / Telepon Aktif (Opsional)"
+              placeholder="Contoh: 0813-2211-9001"
+              value={borrowerPhone}
+              onChange={(e) => setBorrowerPhone(e.target.value)}
+            />
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+          <Button
+            type="button"
+            variant="outline"
+            aria-expanded={showWhatsappInput}
+            aria-label={
+              borrowerPhone.trim() && borrowerPhone.trim() !== "-"
+                ? "WA (Nomor WhatsApp sudah terisi)"
+                : "WA (Tampilkan kolom nomor WhatsApp)"
+            }
+            onClick={() => setShowWhatsappInput((prev) => !prev)}
+          >
+            <Phone className="w-4 h-4" aria-hidden="true" />
+            <span>WA</span>
+            {borrowerPhone.trim() && borrowerPhone.trim() !== "-" ? (
+              <span
+                aria-hidden="true"
+                className="w-2 h-2 rounded-full bg-emerald-600 dark:bg-emerald-400"
+              />
+            ) : null}
+          </Button>
+
           {mode === "modal" && onCancel ? (
             <Button
               type="button"

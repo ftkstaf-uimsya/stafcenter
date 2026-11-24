@@ -10,11 +10,66 @@ const WIB_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 });
 
+const WIB_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Jakarta",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+const WIB_DATETIME_FORMATTER = new Intl.DateTimeFormat("id-ID", {
+  timeZone: "Asia/Jakarta",
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 /**
  * Returns the current operational reference date (YYYY-MM-DD) in Asia/Jakarta (WIB).
  */
 export function getTodayWibIso(): string {
   return WIB_DATE_FORMATTER.format(new Date());
+}
+
+/**
+ * Returns the current time in HH:MM (24h) for Asia/Jakarta (WIB).
+ */
+export function getCurrentWibTimeHHMM(date: Date = new Date()): string {
+  const formatted = WIB_TIME_FORMATTER.format(date).slice(0, 5);
+  if (formatted.startsWith("24:")) {
+    return `00:${formatted.slice(3)}`;
+  }
+  return formatted;
+}
+
+/**
+ * Returns an HH:MM WIB time offset by `offsetMinutes` from now, clamped to 23:59.
+ */
+export function getDefaultExpectedReturnTimeWib(
+  offsetMinutes = 120,
+  baseDate: Date = new Date()
+): string {
+  const currentHHMM = getCurrentWibTimeHHMM(baseDate);
+  const [hStr, mStr] = currentHHMM.split(":");
+  const baseTotal = Number(hStr) * 60 + Number(mStr);
+  if (Number.isNaN(baseTotal)) return "12:00";
+  const targetTotal = Math.min(23 * 60 + 59, Math.max(0, baseTotal + offsetMinutes));
+  const targetH = String(Math.floor(targetTotal / 60)).padStart(2, "0");
+  const targetM = String(targetTotal % 60).padStart(2, "0");
+  return `${targetH}:${targetM}`;
+}
+
+/**
+ * Formats an ISO timestamp string into readable WIB date and time.
+ */
+export function formatWibDateTime(iso?: string | null): string {
+  if (!iso) return "-";
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return `${WIB_DATETIME_FORMATTER.format(parsed)} WIB`;
 }
 
 /**
