@@ -1,7 +1,14 @@
 "use client";
 
 import React, { useEffect, useId, useRef, useState } from "react";
-import { Camera, CheckCircle2, RefreshCw, ScanLine, XCircle } from "lucide-react";
+import {
+  Camera,
+  CheckCircle2,
+  ImagePlus,
+  RefreshCw,
+  ScanLine,
+  XCircle,
+} from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 
@@ -34,12 +41,13 @@ interface ScanLogItem {
 export function BarcodeScannerModal({
   isOpen,
   onClose,
-  title = "Scan Barcode / QR Barang Kantor Staf",
+  title = "Scan QR Code Barang Kantor Staf",
   onScanCode,
   selectedCount = 0,
 }: BarcodeScannerModalProps) {
   const reactId = useId();
   const readerElementId = `stafcenter-scanner-${reactId.replace(/:/g, "")}`;
+  const scanImageInputRef = useRef<HTMLInputElement>(null);
 
   const onScanCodeRef = useRef(onScanCode);
   onScanCodeRef.current = onScanCode;
@@ -48,15 +56,52 @@ export function BarcodeScannerModal({
     isScanning: boolean;
     stop: () => Promise<void>;
     clear: () => void;
+    scanFile: (file: File, showImage?: boolean) => Promise<string>;
   } | null>(null);
   const lastScanRef = useRef<{ code: string; at: number }>({ code: "", at: 0 });
 
   const [cameras, setCameras] = useState<CameraOption[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string>("");
+  const [retryNonce, setRetryNonce] = useState(0);
   const [initializing, setInitializing] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [feedback, setFeedback] = useState<ScanCodeOutcome | null>(null);
   const [scanLogs, setScanLogs] = useState<ScanLogItem[]>([]);
+
+  const pushDecodedResult = (decodedText: string) => {
+    const clean = decodedText.trim();
+    if (!clean) return;
+    const normalized = clean.toUpperCase();
+    const now = Date.now();
+    if (
+      lastScanRef.current.code === normalized &&
+      now - lastScanRef.current.at < 1500
+    ) {
+      return;
+    }
+    lastScanRef.current = { code: normalized, at: now };
+
+    const outcome = onScanCodeRef.current(clean);
+    setFeedback(outcome);
+    const timeStr = new Date().toLocaleTimeString("id-ID", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    setScanLogs((prev) =>
+      [
+        {
+          id: `${now}-${Math.random().toString(36).slice(2, 6)}`,
+          code: normalized,
+          status: outcome.status,
+          message: outcome.message,
+          time: timeStr,
+        },
+        ...prev,
+      ].slice(0, 6)
+    );
+  };
 
   useEffect(() => {
     if (!isOpen) {
@@ -82,97 +127,87 @@ export function BarcodeScannerModal({
 
         const { Html5Qrcode, Html5QrcodeSupportedFormats } = mod;
 
-        let detectedCameras: CameraOption[] = [];
-        try {
-          const list = await Html5Qrcode.getCameras();
-          detectedCameras = list.map((c, idx) => ({
-            id: c.id,
-            label: c.label || `Kamera ${idx + 1}`,
-          }));
-        } catch {
-          detectedCameras = [];
-        }
-
-        if (cancelled) return;
-        if (detectedCameras.length > 0) {
-          setCameras(detectedCameras);
-        }
-
         const instance = new Html5Qrcode(readerElementId, {
           verbose: false,
-          formatsToSupport: [
-            Html5QrcodeSupportedFormats.QR_CODE,
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.CODE_39,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.EAN_8,
-          ],
+          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
         });
         scannerInstanceRef.current = instance;
 
         const scanConfig = {
-          fps: 10,
-          qrbox: { width: 250, height: 150 },
-          aspectRatio: 1.333334,
+          fps: 12,
+          qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            const size = Math.max(160, Math.floor(minEdge * 0.72));
+            return { width: size, height: size };
+          },
         };
 
         const handleDecoded = (decodedText: string) => {
-          const clean = decodedText.trim();
-          if (!clean) return;
-          const normalized = clean.toUpperCase();
-          const now = Date.now();
-          if (
-            lastScanRef.current.code === normalized &&
-            now - lastScanRef.current.at < 1500
-          ) {
-            return;
-          }
-          lastScanRef.current = { code: normalized, at: now };
-
-          const outcome = onScanCodeRef.current(clean);
-          setFeedback(outcome);
-          const timeStr = new Date().toLocaleTimeString("id-ID", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            hour12: false,
-          });
-          setScanLogs((prev) =>
-            [
-              {
-                id: `${now}-${Math.random().toString(36).slice(2, 6)}`,
-                code: normalized,
-                status: outcome.status,
-                message: outcome.message,
-                time: timeStr,
-              },
-              ...prev,
-            ].slice(0, 6)
-          );
+          pushDecodedResult(decodedText);
         };
 
-        const cameraConstraint: string | MediaTrackConstraints = selectedCameraId
-          ? selectedCameraId
-          : { facingMode: "environment" };
+        let started = false;
 
-        try {
+        if (selectedCameraId) {
           await instance.start(
-            cameraConstraint,
+            selectedCameraId,
             scanConfig,
             handleDecoded,
             () => {}
           );
-        } catch (primaryErr) {
-          if (!selectedCameraId && detectedCameras.length > 0 && !cancelled) {
+          started = true;
+        } else {
+          try {
             await instance.start(
-              detectedCameras[0].id,
+              { facingMode: "environment" },
               scanConfig,
               handleDecoded,
               () => {}
             );
-          } else {
-            throw primaryErr;
+            started = true;
+          } catch {
+            try {
+              await instance.start(
+                { facingMode: "user" },
+                scanConfig,
+                handleDecoded,
+                () => {}
+              );
+              started = true;
+            } catch {
+              const list = await Html5Qrcode.getCameras().catch(() => []);
+              if (cancelled) return;
+              if (list.length > 0) {
+                setCameras(
+                  list.map((c, idx) => ({
+                    id: c.id,
+                    label: c.label || `Kamera ${idx + 1}`,
+                  }))
+                );
+                await instance.start(
+                  list[0].id,
+                  scanConfig,
+                  handleDecoded,
+                  () => {}
+                );
+                started = true;
+              }
+            }
           }
+        }
+
+        if (started && !cancelled) {
+          const list = await Html5Qrcode.getCameras().catch(() => []);
+          if (!cancelled && list.length > 0) {
+            setCameras(
+              list.map((c, idx) => ({
+                id: c.id,
+                label: c.label || `Kamera ${idx + 1}`,
+              }))
+            );
+          }
+        } else if (!started && !cancelled) {
+          throw new Error("Perangkat kamera tidak ditemukan.");
         }
       } catch (err) {
         if (!cancelled) {
@@ -180,21 +215,22 @@ export function BarcodeScannerModal({
           const isHttpsIssue =
             typeof window !== "undefined" &&
             !window.isSecureContext &&
-            window.location.hostname !== "localhost";
+            window.location.hostname !== "localhost" &&
+            window.location.hostname !== "127.0.0.1";
           if (isHttpsIssue) {
             setCameraError(
-              "Akses kamera membutuhkan koneksi HTTPS yang aman (atau localhost). Gunakan kotak pencarian/scan manual sebagai alternatif."
+              "Akses kamera membutuhkan koneksi HTTPS yang aman (atau localhost). Gunakan tombol Scan dari Gambar atau kotak pencarian kode barang."
             );
           } else if (
             rawMsg.toLowerCase().includes("permission") ||
             rawMsg.toLowerCase().includes("notallowed")
           ) {
             setCameraError(
-              "Izin akses kamera ditolak oleh browser. Izinkan kamera pada ikon gembok/alamat situs lalu muat ulang."
+              "Izin kamera ditolak oleh browser. Klik ikon gembok di bilah alamat untuk mengizinkan kamera lalu tekan Muat Ulang Kamera."
             );
           } else {
             setCameraError(
-              "Kamera tidak ditemukan atau sedang dipakai aplikasi lain. Anda tetap dapat mengetik kode barang secara langsung di form."
+              `Kamera tidak dapat dibuka (${rawMsg || "sedang dipakai aplikasi lain"}). Coba Muat Ulang Kamera atau gunakan Scan dari Gambar.`
             );
           }
         }
@@ -228,7 +264,45 @@ export function BarcodeScannerModal({
         })();
       }
     };
-  }, [isOpen, readerElementId, selectedCameraId]);
+  }, [isOpen, readerElementId, retryNonce, selectedCameraId]);
+
+  const handleScanImageFile = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const mod = await import("html5-qrcode");
+      const { Html5Qrcode, Html5QrcodeSupportedFormats } = mod;
+      const tempId = `${readerElementId}-file`;
+      let tempEl = document.getElementById(tempId);
+      if (!tempEl) {
+        tempEl = document.createElement("div");
+        tempEl.id = tempId;
+        tempEl.style.display = "none";
+        document.body.appendChild(tempEl);
+      }
+      const fileScanner = new Html5Qrcode(tempId, {
+        verbose: false,
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+      });
+      try {
+        const decoded = await fileScanner.scanFile(file, false);
+        pushDecodedResult(decoded);
+      } finally {
+        try {
+          fileScanner.clear();
+        } catch {
+          // ignore
+        }
+        if (tempEl.parentNode) {
+          tempEl.parentNode.removeChild(tempEl);
+        }
+      }
+    } catch {
+      setFeedback({
+        status: "not_found",
+        message: "QR Code tidak terbaca dari gambar tersebut. Pastikan gambar jelas.",
+      });
+    }
+  };
 
   const feedbackStyle =
     feedback?.status === "added"
@@ -242,33 +316,70 @@ export function BarcodeScannerModal({
       isOpen={isOpen}
       onClose={onClose}
       title={title}
-      description="Arahkan kamera ke stiker QR Code atau Barcode 1D barang. Pemindaian berlangsung terus-menerus untuk memilih beberapa barang sekaligus."
+      description="Arahkan kamera HP atau laptop ke stiker QR Code barang. Anda dapat memindai beberapa barang berurutan tanpa menutup kamera."
       maxWidthClass="max-w-lg"
     >
       <div className="space-y-4">
-        {cameras.length > 1 ? (
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor={`${readerElementId}-cam`}
-              className="text-xs font-bold text-slate-700 dark:text-slate-300 shrink-0"
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {cameras.length > 1 ? (
+            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+              <label
+                htmlFor={`${readerElementId}-cam`}
+                className="text-xs font-bold text-slate-700 dark:text-slate-300 shrink-0"
+              >
+                Kamera:
+              </label>
+              <select
+                id={`${readerElementId}-cam`}
+                value={selectedCameraId}
+                onChange={(e) => setSelectedCameraId(e.target.value)}
+                className="flex-1 min-h-[38px] px-2.5 py-1 text-xs rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              >
+                <option value="">Otomatis</option>
+                {cameras.map((cam) => (
+                  <option key={cam.id} value={cam.id}>
+                    {cam.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <span className="text-xs text-slate-600 dark:text-slate-400">
+              Posisikan QR Code di dalam kotak bidik kamera.
+            </span>
+          )}
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <input
+              ref={scanImageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                void handleScanImageFile(e.target.files?.[0] || null);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => scanImageInputRef.current?.click()}
             >
-              Pilih Kamera:
-            </label>
-            <select
-              id={`${readerElementId}-cam`}
-              value={selectedCameraId}
-              onChange={(e) => setSelectedCameraId(e.target.value)}
-              className="flex-1 min-h-[38px] px-2.5 py-1 text-xs rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              <ImagePlus className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Scan Gambar</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setRetryNonce((n) => n + 1)}
+              aria-label="Muat ulang kamera"
             >
-              <option value="">Kamera Belakang (Otomatis)</option>
-              {cameras.map((cam) => (
-                <option key={cam.id} value={cam.id}>
-                  {cam.label}
-                </option>
-              ))}
-            </select>
+              <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+            </Button>
           </div>
-        ) : null}
+        </div>
 
         {/* Viewport Kamera Scanner */}
         <div className="relative rounded-lg border-2 border-slate-300 dark:border-slate-700 bg-slate-950 overflow-hidden min-h-[260px] flex items-center justify-center">
@@ -276,23 +387,48 @@ export function BarcodeScannerModal({
 
           {initializing ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-slate-950/85 text-white text-xs p-4 text-center">
-              <RefreshCw className="w-5 h-5 animate-spin text-sky-400" aria-hidden="true" />
-              <span>Menyalakan kamera pemindai barcode &amp; QR...</span>
+              <RefreshCw
+                className="w-5 h-5 animate-spin text-sky-400"
+                aria-hidden="true"
+              />
+              <span>Menyalakan kamera pemindai QR Code...</span>
             </div>
           ) : null}
 
           {cameraError ? (
-            <div className="p-5 text-center space-y-2 text-xs text-slate-100 max-w-sm">
-              <Camera className="w-8 h-8 mx-auto text-amber-400" aria-hidden="true" />
+            <div className="p-5 text-center space-y-3 text-xs text-slate-100 max-w-sm">
+              <Camera
+                className="w-8 h-8 mx-auto text-amber-400"
+                aria-hidden="true"
+              />
               <p className="font-bold text-amber-300">
                 Kamera Tidak Dapat Dibuka
               </p>
               <p className="text-slate-300 leading-relaxed">{cameraError}</p>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRetryNonce((n) => n + 1)}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Coba Lagi</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => scanImageInputRef.current?.click()}
+                >
+                  <ImagePlus className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Scan dari Gambar</span>
+                </Button>
+              </div>
             </div>
           ) : null}
         </div>
 
-        {/* Status Pemindaian Terakhir */}
         {feedback ? (
           <div
             role="status"
@@ -309,7 +445,6 @@ export function BarcodeScannerModal({
           </div>
         ) : null}
 
-        {/* Riwayat Singkat Hasil Scan Sesi Ini */}
         {scanLogs.length > 0 ? (
           <div className="space-y-1.5">
             <p className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">

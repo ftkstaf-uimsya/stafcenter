@@ -356,6 +356,7 @@ export const ACTION_TO_PAGE_KEY: Record<string, SarprasPageKey> = {
   checkin_office_kit_loan: "sirkulasi-invent",
   reopen_office_kit_loan: "sirkulasi-invent",
   delete_office_kit_loan: "sirkulasi-invent",
+  resequence_office_kit_items: "sirkulasi-invent",
 };
 
 export const ENTITY_TYPE_TO_PAGE_KEY: Record<

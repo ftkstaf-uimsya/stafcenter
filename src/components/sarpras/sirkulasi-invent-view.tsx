@@ -64,6 +64,7 @@ import {
   BarcodeScannerModal,
   ScanCodeOutcome,
 } from "@/components/ui/barcode-scanner-modal";
+import { CameraPhotoModal } from "@/components/ui/camera-photo-modal";
 import { PrintableBarcodeItem } from "@/lib/barcode/render-codes";
 import { compressPhotoIfNeeded } from "@/lib/media/compress-image";
 
@@ -75,6 +76,48 @@ const OFFICE_KIT_CATEGORIES: OfficeKitCategory[] = [
   "Adapter & Converter",
   "Lainnya",
 ];
+
+const KIT_CATEGORY_NUMERIC_PREFIX: Record<OfficeKitCategory, number> = {
+  "Kabel HDMI": 1,
+  "Stop Kontak": 2,
+  "Remote TV": 3,
+  "Kunci & Akses": 4,
+  "Adapter & Converter": 5,
+  Lainnya: 9,
+};
+
+function getNextKitCodeForCategory(
+  category: OfficeKitCategory,
+  items: OfficeKitItem[]
+): string {
+  const base = (KIT_CATEGORY_NUMERIC_PREFIX[category] || 9) * 1000;
+  const used = new Set(items.map((i) => i.kit_code.trim().toUpperCase()));
+  let seq = 1;
+  while (used.has(String(base + seq))) {
+    seq += 1;
+  }
+  return String(base + seq);
+}
+
+function getNextKitNameForCategory(
+  category: OfficeKitCategory,
+  items: OfficeKitItem[]
+): string {
+  const usedNames = new Set(items.map((i) => i.name.trim().toLowerCase()));
+  let seq = 1;
+  while (usedNames.has(`${category} ${seq}`.toLowerCase())) {
+    seq += 1;
+  }
+  return `${category} ${seq}`;
+}
+
+function isSimpleNumericOrCodeName(name: string, currentCode: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === "-") return true;
+  if (/^\d+$/.test(trimmed)) return true;
+  if (trimmed.toUpperCase() === currentCode.trim().toUpperCase()) return true;
+  return false;
+}
 
 const OFFICE_KIT_CONDITIONS: AssetCondition[] = [
   "Baik",
@@ -187,6 +230,7 @@ export function SirkulasiInventView() {
     checkinOfficeKitLoan,
     reopenOfficeKitLoan,
     deleteOfficeKitLoan,
+    resequenceOfficeKitItems,
     uploadEntityFile,
   } = useSarpras();
 
@@ -240,19 +284,23 @@ export function SirkulasiInventView() {
     text: string;
   } | null>(null);
   const [scannerModalOpen, setScannerModalOpen] = useState(false);
+  const [cameraPhotoModalOpen, setCameraPhotoModalOpen] = useState(false);
   const [checkoutPhotoFile, setCheckoutPhotoFile] = useState<File | null>(null);
   const [checkoutPhotoPreview, setCheckoutPhotoPreview] = useState<string | null>(
     null
   );
   const [submittingCheckout, setSubmittingCheckout] = useState(false);
   const galleryPhotoInputRef = useRef<HTMLInputElement>(null);
-  const cameraPhotoInputRef = useRef<HTMLInputElement>(null);
 
-  // Seleksi & Cetak Label Barcode Barang Kantor Staf
+  // Seleksi, Cetak Label QR & Penomoran Ulang Barang Kantor Staf
   const [selectedKitRowKeys, setSelectedKitRowKeys] = useState<string[]>([]);
   const [barcodePrintItems, setBarcodePrintItems] = useState<
     PrintableBarcodeItem[] | null
   >(null);
+  const [resequenceModalOpen, setResequenceModalOpen] = useState(false);
+  const [resequenceAllNames, setResequenceAllNames] = useState(false);
+  const [resequenceSubmitting, setResequenceSubmitting] = useState(false);
+  const [resequenceError, setResequenceError] = useState("");
 
   // Modal Check-In Pengembalian
   const [returningLoan, setReturningLoan] = useState<OfficeKitLoan | null>(
@@ -266,6 +314,8 @@ export function SirkulasiInventView() {
   const [editingKit, setEditingKit] = useState<OfficeKitItem | null>(null);
   const [kitCode, setKitCode] = useState("");
   const [kitName, setKitName] = useState("");
+  const [kitCodeDirty, setKitCodeDirty] = useState(false);
+  const [kitNameDirty, setKitNameDirty] = useState(false);
   const [kitCategory, setKitCategory] =
     useState<OfficeKitCategory>("Kabel HDMI");
   const [kitSpec, setKitSpec] = useState("");
@@ -793,6 +843,7 @@ export function SirkulasiInventView() {
     setKitPickerCategory("ALL");
     setScanFeedback(null);
     setScannerModalOpen(false);
+    setCameraPhotoModalOpen(false);
     setCheckoutPhotoFile(null);
     setCheckoutPhotoPreview(null);
     setSubmittingCheckout(false);
@@ -1048,10 +1099,13 @@ export function SirkulasiInventView() {
   };
 
   const openAddKitModal = () => {
+    const defaultCategory: OfficeKitCategory = "Kabel HDMI";
     setEditingKit(null);
-    setKitCode("");
-    setKitName("");
-    setKitCategory("Kabel HDMI");
+    setKitCategory(defaultCategory);
+    setKitCode(getNextKitCodeForCategory(defaultCategory, officeKitItems));
+    setKitName(getNextKitNameForCategory(defaultCategory, officeKitItems));
+    setKitCodeDirty(false);
+    setKitNameDirty(false);
     setKitSpec("");
     setKitTray("Kotak Kabel Loker A1 - Kantor Staf");
     setKitLinkedRoomId("");
@@ -1065,6 +1119,8 @@ export function SirkulasiInventView() {
     setEditingKit(item);
     setKitCode(item.kit_code);
     setKitName(item.name);
+    setKitCodeDirty(true);
+    setKitNameDirty(true);
     setKitCategory(item.category);
     setKitSpec(item.brand_spec);
     setKitTray(item.storage_tray);
@@ -1073,6 +1129,69 @@ export function SirkulasiInventView() {
     setKitNotes(item.notes || "");
     setKitError("");
     setKitModalOpen(true);
+  };
+
+  const handleKitCategoryChange = (nextCategory: OfficeKitCategory) => {
+    setKitCategory(nextCategory);
+    if (!editingKit) {
+      if (!kitCodeDirty) {
+        setKitCode(getNextKitCodeForCategory(nextCategory, officeKitItems));
+      }
+      if (!kitNameDirty) {
+        setKitName(getNextKitNameForCategory(nextCategory, officeKitItems));
+      }
+    }
+  };
+
+  const resequencePreviewRows = useMemo(() => {
+    const seqByCategory = new Map<OfficeKitCategory, number>();
+    const sorted = [...officeKitItems].sort((a, b) => {
+      const catCompare =
+        OFFICE_KIT_CATEGORIES.indexOf(a.category) -
+        OFFICE_KIT_CATEGORIES.indexOf(b.category);
+      if (catCompare !== 0) return catCompare;
+      const byCreated = a.created_at.localeCompare(b.created_at);
+      if (byCreated !== 0) return byCreated;
+      return a.kit_code.localeCompare(b.kit_code, undefined, { numeric: true });
+    });
+
+    return sorted.map((item) => {
+      const nextSeq = (seqByCategory.get(item.category) || 0) + 1;
+      seqByCategory.set(item.category, nextSeq);
+      const base = (KIT_CATEGORY_NUMERIC_PREFIX[item.category] || 9) * 1000;
+      const nextCode = String(base + nextSeq);
+      const shouldFixName =
+        resequenceAllNames || isSimpleNumericOrCodeName(item.name, item.kit_code);
+      const nextName = shouldFixName ? `${item.category} ${nextSeq}` : item.name;
+      return {
+        id: item.id,
+        category: item.category,
+        oldCode: item.kit_code,
+        oldName: item.name,
+        nextCode,
+        nextName,
+        changed: nextCode !== item.kit_code || nextName !== item.name,
+      };
+    });
+  }, [officeKitItems, resequenceAllNames]);
+
+  const handleApplyResequence = async () => {
+    const toUpdate = resequencePreviewRows
+      .filter((r) => r.changed)
+      .map((r) => ({ id: r.id, kit_code: r.nextCode, name: r.nextName }));
+    if (toUpdate.length === 0) {
+      setResequenceModalOpen(false);
+      return;
+    }
+    setResequenceSubmitting(true);
+    setResequenceError("");
+    const res = await resequenceOfficeKitItems(toUpdate);
+    setResequenceSubmitting(false);
+    if (!res.ok) {
+      setResequenceError(res.error || "Gagal merapikan kode unit barang.");
+      return;
+    }
+    setResequenceModalOpen(false);
   };
 
   const handleKitSubmit = (e: React.FormEvent) => {
@@ -1334,7 +1453,7 @@ export function SirkulasiInventView() {
     },
     {
       key: "actions",
-      header: "Barcode & Aksi",
+      header: "Label QR & Aksi",
       render: (row) => (
         <div
           className="flex flex-wrap items-center gap-1.5"
@@ -1345,10 +1464,10 @@ export function SirkulasiInventView() {
             variant="outline"
             size="sm"
             onClick={() => setBarcodePrintItems([toKitPrintableItem(row)])}
-            aria-label={`Cetak barcode ${row.kit_code}`}
+            aria-label={`Cetak QR ${row.kit_code}`}
           >
             <QrCode className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Barcode</span>
+            <span>Label QR</span>
           </Button>
           <Button
             type="button"
@@ -1900,6 +2019,19 @@ export function SirkulasiInventView() {
         <div className="flex flex-wrap items-center gap-2">
           {activeTab === "items" ? (
             <>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={officeKitItems.length === 0}
+                onClick={() => {
+                  setResequenceError("");
+                  setResequenceAllNames(false);
+                  setResequenceModalOpen(true);
+                }}
+              >
+                <RotateCcw className="w-4 h-4" aria-hidden="true" />
+                <span>Rapikan Kode &amp; Nama Unit</span>
+              </Button>
               {selectedKitRowKeys.length > 0 ? (
                 <button
                   type="button"
@@ -1918,8 +2050,8 @@ export function SirkulasiInventView() {
                 <Printer className="w-4 h-4" aria-hidden="true" />
                 <span>
                   {selectedKitRowKeys.length > 0
-                    ? `Cetak Barcode (${selectedKitRowKeys.length} dipilih)`
-                    : "Cetak Barcode Massal"}
+                    ? `Cetak QR (${selectedKitRowKeys.length} dipilih)`
+                    : "Cetak QR Massal"}
                 </span>
               </Button>
             </>
@@ -3662,17 +3794,6 @@ export function SirkulasiInventView() {
                     e.target.value = "";
                   }}
                 />
-                <input
-                  ref={cameraPhotoInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => {
-                    handlePickCheckoutPhoto(e.target.files?.[0] || null);
-                    e.target.value = "";
-                  }}
-                />
                 <Button
                   type="button"
                   variant="outline"
@@ -3686,7 +3807,7 @@ export function SirkulasiInventView() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => cameraPhotoInputRef.current?.click()}
+                  onClick={() => setCameraPhotoModalOpen(true)}
                 >
                   <Camera className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>Ambil Foto</span>
@@ -3846,18 +3967,45 @@ export function SirkulasiInventView() {
           ) : null}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Input
-              label="Kode Unit Barang *"
-              placeholder="Contoh: KST-HDMI-04"
-              value={kitCode}
-              onChange={(e) => setKitCode(e.target.value)}
-              required
-            />
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <label
+                  htmlFor="kit-code-input"
+                  className="block text-sm font-medium text-slate-900 dark:text-slate-100"
+                >
+                  Kode Unit Barang *
+                </label>
+                {!editingKit ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setKitCodeDirty(false);
+                      setKitCode(
+                        getNextKitCodeForCategory(kitCategory, officeKitItems)
+                      );
+                    }}
+                    className="text-[11px] font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline"
+                  >
+                    Auto Angka
+                  </button>
+                ) : null}
+              </div>
+              <Input
+                id="kit-code-input"
+                placeholder="Otomatis: 1001, 2001, ..."
+                value={kitCode}
+                onChange={(e) => {
+                  setKitCodeDirty(true);
+                  setKitCode(e.target.value);
+                }}
+                required
+              />
+            </div>
             <Select
               label="Kategori Peralatan *"
               value={kitCategory}
               onChange={(e) =>
-                setKitCategory(e.target.value as OfficeKitCategory)
+                handleKitCategoryChange(e.target.value as OfficeKitCategory)
               }
               options={OFFICE_KIT_CATEGORIES.map((c) => ({
                 value: c,
@@ -3866,13 +4014,40 @@ export function SirkulasiInventView() {
             />
           </div>
 
-          <Input
-            label="Nama Barang *"
-            placeholder="Contoh: Kabel HDMI 5 Meter #04"
-            value={kitName}
-            onChange={(e) => setKitName(e.target.value)}
-            required
-          />
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="kit-name-input"
+                className="block text-sm font-medium text-slate-900 dark:text-slate-100"
+              >
+                Nama Barang *
+              </label>
+              {!editingKit ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setKitNameDirty(false);
+                    setKitName(
+                      getNextKitNameForCategory(kitCategory, officeKitItems)
+                    );
+                  }}
+                  className="text-[11px] font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline"
+                >
+                  Auto Nama
+                </button>
+              ) : null}
+            </div>
+            <Input
+              id="kit-name-input"
+              placeholder="Otomatis: Kabel HDMI 1, Kabel HDMI 2, ..."
+              value={kitName}
+              onChange={(e) => {
+                setKitNameDirty(true);
+                setKitName(e.target.value);
+              }}
+              required
+            />
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
@@ -4005,7 +4180,7 @@ export function SirkulasiInventView() {
         }}
       />
 
-      {/* Modal Pemindai Barcode / QR Kamera untuk Form Pinjam */}
+      {/* Modal Pemindai QR Kamera untuk Form Pinjam */}
       <BarcodeScannerModal
         isOpen={scannerModalOpen}
         onClose={() => setScannerModalOpen(false)}
@@ -4013,18 +4188,137 @@ export function SirkulasiInventView() {
         selectedCount={selectedKitIds.length}
       />
 
-      {/* Modal Cetak Stiker Barcode / QR Satuan & Massal Barang Kantor Staf */}
+      {/* Modal Kamera Live untuk Ambil Foto Bukti Peminjaman */}
+      <CameraPhotoModal
+        isOpen={cameraPhotoModalOpen}
+        onClose={() => setCameraPhotoModalOpen(false)}
+        onCapture={(file) => handlePickCheckoutPhoto(file)}
+      />
+
+      {/* Modal Cetak Stiker QR Satuan & Massal Barang Kantor Staf */}
       <BarcodeLabelModal
         isOpen={Boolean(barcodePrintItems && barcodePrintItems.length > 0)}
         onClose={() => setBarcodePrintItems(null)}
         title={
           barcodePrintItems && barcodePrintItems.length > 1
-            ? `Cetak Label Barcode Massal (${barcodePrintItems.length} Barang Kantor Staf)`
-            : `Label Stiker & Barcode ${barcodePrintItems?.[0]?.code || ""}`
+            ? `Cetak Label QR Massal (${barcodePrintItems.length} Barang Kantor Staf)`
+            : `Label Stiker QR ${barcodePrintItems?.[0]?.code || ""}`
         }
         items={barcodePrintItems || []}
-        defaultFormat="combo"
       />
+
+      {/* Modal Penomoran Ulang Kode Unit & Nama Barang Eksisting */}
+      <Modal
+        isOpen={resequenceModalOpen}
+        onClose={() => {
+          if (!resequenceSubmitting) setResequenceModalOpen(false);
+        }}
+        title="Rapikan Kode Unit & Nama Barang Kantor Staf"
+        description="Menstandarkan Kode Unit Barang menjadi kode angka Pola A (1001+ Kabel HDMI, 2001+ Stop Kontak, 3001+ Remote TV, dst.) dan merapikan nama yang masih berupa angka."
+        maxWidthClass="max-w-3xl"
+      >
+        <div className="space-y-4">
+          {resequenceError ? (
+            <div
+              role="alert"
+              className="p-3 rounded-md bg-red-50 dark:bg-red-950 border border-red-600 text-xs font-medium text-red-900 dark:text-red-200"
+            >
+              {resequenceError}
+            </div>
+          ) : null}
+
+          <label className="flex items-center gap-2.5 p-3 rounded-md border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/70 text-xs cursor-pointer">
+            <input
+              type="checkbox"
+              checked={resequenceAllNames}
+              onChange={(e) => setResequenceAllNames(e.target.checked)}
+              className="w-4 h-4 accent-[#1E3A5F]"
+            />
+            <span className="text-slate-800 dark:text-slate-200">
+              Standarkan <strong>semua nama barang</strong> menjadi format{" "}
+              <code className="font-mono font-bold">&lt;Kategori&gt; &lt;No&gt;</code>{" "}
+              (bila tidak dicentang, hanya nama yang berupa angka atau kode saja yang dirapikan).
+            </span>
+          </label>
+
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-300 dark:border-slate-700">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-300 dark:border-slate-700 font-mono uppercase text-[11px] text-slate-600 dark:text-slate-300">
+                  <th className="px-3 py-2">Kategori</th>
+                  <th className="px-3 py-2">Kode &amp; Nama Lama</th>
+                  <th className="px-3 py-2">Kode &amp; Nama Baru (Pola A)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                {resequencePreviewRows.map((r) => (
+                  <tr
+                    key={r.id}
+                    className={
+                      r.changed
+                        ? "bg-white dark:bg-slate-900"
+                        : "bg-slate-50/70 dark:bg-slate-950/40 opacity-70"
+                    }
+                  >
+                    <td className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">
+                      {r.category}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="font-mono font-bold text-slate-600 dark:text-slate-400">
+                        {r.oldCode}
+                      </span>{" "}
+                      <span className="text-slate-700 dark:text-slate-300">
+                        ({r.oldName})
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="px-1.5 py-0.5 rounded font-mono font-bold bg-[#1E3A5F] text-white dark:bg-sky-400 dark:text-slate-950">
+                        {r.nextCode}
+                      </span>{" "}
+                      <strong className="text-slate-900 dark:text-slate-100">
+                        {r.nextName}
+                      </strong>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <span className="text-xs text-slate-600 dark:text-slate-400">
+              {resequencePreviewRows.filter((r) => r.changed).length} dari{" "}
+              {resequencePreviewRows.length} barang akan diperbarui.
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={resequenceSubmitting}
+                onClick={() => setResequenceModalOpen(false)}
+              >
+                Batal
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={
+                  resequenceSubmitting ||
+                  resequencePreviewRows.filter((r) => r.changed).length === 0
+                }
+                onClick={handleApplyResequence}
+              >
+                <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                <span>
+                  {resequenceSubmitting
+                    ? "Menyimpan..."
+                    : "Terapkan Kode Angka Baru"}
+                </span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

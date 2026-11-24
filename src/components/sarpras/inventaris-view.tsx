@@ -457,8 +457,8 @@ export function InventarisView() {
             <Printer className="w-4 h-4" aria-hidden="true" />
             <span>
               {selectedAssetRowKeys.length > 0
-                ? `Cetak Barcode (${selectedAssetRowKeys.length} dipilih)`
-                : "Cetak Barcode Massal"}
+                ? `Cetak QR (${selectedAssetRowKeys.length} dipilih)`
+                : "Cetak QR Massal"}
             </span>
           </Button>
           <Button
@@ -954,18 +954,17 @@ export function InventarisView() {
         </form>
       </Modal>
 
-      {/* Modal Generate Label Stiker Inventaris / QR & Barcode 1D Standar */}
+      {/* Modal Generate Label Stiker Inventaris QR Code */}
       <BarcodeLabelModal
         isOpen={Boolean(barcodePrintItems && barcodePrintItems.length > 0)}
         onClose={() => setBarcodePrintItems(null)}
         title={
           barcodePrintItems && barcodePrintItems.length > 1
-            ? `Cetak Label Barcode Massal (${barcodePrintItems.length} Aset Inventaris)`
-            : `Label Stiker & QR Inventaris ${barcodePrintItems?.[0]?.code || ""}`
+            ? `Cetak Label QR Massal (${barcodePrintItems.length} Aset Inventaris)`
+            : `Label Stiker QR Inventaris ${barcodePrintItems?.[0]?.code || ""}`
         }
-        description="Stiker standar inventaris kampus dengan QR Code dan Barcode Code 128 asli siap scan melalui lembar cetak terisolasi."
+        description="Stiker standar inventaris kampus dengan QR Code asli siap scan melalui lembar cetak terisolasi."
         items={barcodePrintItems || []}
-        defaultFormat="combo"
       />
 
       <ConfirmDeleteModal

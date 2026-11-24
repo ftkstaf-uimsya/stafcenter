@@ -1,7 +1,5 @@
 import QRCode from "qrcode";
-import JsBarcode from "jsbarcode";
 
-export type LabelCodeFormat = "combo" | "qr" | "barcode";
 export type LabelPrintLayout = "a4_small" | "a4_medium" | "thermal_50x30";
 
 export interface PrintableBarcodeItem {
@@ -17,7 +15,6 @@ export interface PrintableLabelEntry {
   item: PrintableBarcodeItem;
   copies: number;
   qrDataUrl: string;
-  barcodeDataUrl: string;
 }
 
 export async function generateQrDataUrl(value: string): Promise<string> {
@@ -39,28 +36,6 @@ export async function generateQrDataUrl(value: string): Promise<string> {
   }
 }
 
-export function generateCode128DataUrl(value: string): string {
-  const clean = value.trim();
-  if (typeof document === "undefined" || !clean) return "";
-  try {
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    JsBarcode(svg, clean, {
-      format: "CODE128",
-      lineColor: "#0F172A",
-      background: "#FFFFFF",
-      width: 1.6,
-      height: 44,
-      displayValue: false,
-      margin: 4,
-    });
-    svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    const serialized = new XMLSerializer().serializeToString(svg);
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`;
-  } catch {
-    return "";
-  }
-}
-
 function escapeHtml(raw: string): string {
   return raw
     .replace(/&/g, "&amp;")
@@ -72,10 +47,9 @@ function escapeHtml(raw: string): string {
 
 function buildStickerHtml(
   entry: PrintableLabelEntry,
-  format: LabelCodeFormat,
   layout: LabelPrintLayout
 ): string {
-  const { item, qrDataUrl, barcodeDataUrl } = entry;
+  const { item, qrDataUrl } = entry;
   const tag = escapeHtml(item.headerTag || "BIRO SARPRAS • STAFCENTER");
   const code = escapeHtml(item.code);
   const title = escapeHtml(item.title);
@@ -83,96 +57,34 @@ function buildStickerHtml(
   const meta = item.meta ? escapeHtml(item.meta) : "";
 
   const isThermal = layout === "thermal_50x30";
-  const showQr = (format === "combo" || format === "qr") && Boolean(qrDataUrl);
-  const showBarcode =
-    (format === "combo" || format === "barcode") && Boolean(barcodeDataUrl);
-
-  const qrSize =
-    format === "qr"
-      ? isThermal
-        ? "17mm"
-        : layout === "a4_medium"
-        ? "24mm"
-        : "18mm"
-      : isThermal
-      ? "13mm"
-      : layout === "a4_medium"
-      ? "19mm"
-      : "15mm";
-
-  const barcodeHeight = isThermal
-    ? "8mm"
+  const qrSize = isThermal
+    ? "18mm"
     : layout === "a4_medium"
-    ? "12mm"
-    : "9.5mm";
-
-  if (format === "combo") {
-    return `
-      <div class="sticker">
-        <div class="tag">${tag}</div>
-        <div class="combo-row">
-          ${
-            showQr
-              ? `<img class="qr-img" src="${qrDataUrl}" alt="QR ${code}" style="width:${qrSize};height:${qrSize};" />`
-              : ""
-          }
-          <div class="info-col">
-            <div class="code">${code}</div>
-            <div class="title">${title}</div>
-            ${subtitle ? `<div class="sub">${subtitle}</div>` : ""}
-            ${meta ? `<div class="meta">${meta}</div>` : ""}
-          </div>
-        </div>
-        ${
-          showBarcode
-            ? `<div class="bar-wrap"><img class="bar-img" src="${barcodeDataUrl}" alt="Barcode ${code}" style="height:${barcodeHeight};" /></div>`
-            : ""
-        }
-      </div>
-    `;
-  }
-
-  if (format === "qr") {
-    return `
-      <div class="sticker">
-        <div class="tag">${tag}</div>
-        <div class="combo-row">
-          ${
-            showQr
-              ? `<img class="qr-img" src="${qrDataUrl}" alt="QR ${code}" style="width:${qrSize};height:${qrSize};" />`
-              : ""
-          }
-          <div class="info-col">
-            <div class="code">${code}</div>
-            <div class="title">${title}</div>
-            ${subtitle ? `<div class="sub">${subtitle}</div>` : ""}
-            ${meta ? `<div class="meta">${meta}</div>` : ""}
-          </div>
-        </div>
-      </div>
-    `;
-  }
+    ? "24mm"
+    : "18mm";
 
   return `
     <div class="sticker">
       <div class="tag">${tag}</div>
-      <div class="info-col" style="margin-bottom:1.5mm;">
-        <div class="code">${code}</div>
-        <div class="title">${title}</div>
-        ${subtitle ? `<div class="sub">${subtitle}</div>` : ""}
+      <div class="combo-row">
+        ${
+          qrDataUrl
+            ? `<img class="qr-img" src="${qrDataUrl}" alt="QR ${code}" style="width:${qrSize};height:${qrSize};" />`
+            : ""
+        }
+        <div class="info-col">
+          <div class="code">${code}</div>
+          <div class="title">${title}</div>
+          ${subtitle ? `<div class="sub">${subtitle}</div>` : ""}
+          ${meta ? `<div class="meta">${meta}</div>` : ""}
+        </div>
       </div>
-      ${
-        showBarcode
-          ? `<div class="bar-wrap"><img class="bar-img" src="${barcodeDataUrl}" alt="Barcode ${code}" style="height:${barcodeHeight};" /></div>`
-          : ""
-      }
     </div>
   `;
 }
 
 export function printBarcodeLabelsIsolated(
   entries: PrintableLabelEntry[],
-  format: LabelCodeFormat,
   layout: LabelPrintLayout
 ): void {
   if (typeof document === "undefined" || entries.length === 0) return;
@@ -181,7 +93,7 @@ export function printBarcodeLabelsIsolated(
   for (const entry of entries) {
     const safeCopies = Math.max(1, Math.min(50, Math.round(entry.copies || 1)));
     for (let i = 0; i < safeCopies; i++) {
-      expandedStickers.push(buildStickerHtml(entry, format, layout));
+      expandedStickers.push(buildStickerHtml(entry, layout));
     }
   }
   if (expandedStickers.length === 0) return;
@@ -246,7 +158,7 @@ export function printBarcodeLabelsIsolated(
 <html lang="id">
 <head>
   <meta charset="utf-8" />
-  <title>Cetak Label Barcode StafCenter</title>
+  <title>Cetak Label QR StafCenter</title>
   <style>
     ${pageCss}
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -265,7 +177,7 @@ export function printBarcodeLabelsIsolated(
       letter-spacing: 0.04em;
       text-transform: uppercase;
       color: #475569;
-      margin-bottom: ${isThermal ? "0.8mm" : "1.5mm"};
+      margin-bottom: ${isThermal ? "1mm" : "1.6mm"};
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -273,7 +185,7 @@ export function printBarcodeLabelsIsolated(
     .combo-row {
       display: flex;
       align-items: center;
-      gap: ${isThermal ? "1.6mm" : "2.5mm"};
+      gap: ${isThermal ? "1.8mm" : "2.6mm"};
     }
     .qr-img {
       display: block;
@@ -287,18 +199,18 @@ export function printBarcodeLabelsIsolated(
     }
     .code {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: ${isThermal ? "8.5pt" : layout === "a4_medium" ? "11pt" : "9.5pt"};
+      font-size: ${isThermal ? "9.5pt" : layout === "a4_medium" ? "12pt" : "10.5pt"};
       font-weight: 800;
       color: #0F172A;
       line-height: 1.15;
       word-break: break-all;
     }
     .title {
-      font-size: ${isThermal ? "6.8pt" : layout === "a4_medium" ? "8.8pt" : "7.5pt"};
+      font-size: ${isThermal ? "7pt" : layout === "a4_medium" ? "9pt" : "7.8pt"};
       font-weight: 700;
       color: #0F172A;
       line-height: 1.2;
-      margin-top: 0.4mm;
+      margin-top: 0.5mm;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
@@ -308,24 +220,10 @@ export function printBarcodeLabelsIsolated(
       font-size: ${isThermal ? "5.8pt" : "6.8pt"};
       color: #334155;
       line-height: 1.2;
-      margin-top: 0.3mm;
+      margin-top: 0.4mm;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-    }
-    .bar-wrap {
-      margin-top: ${isThermal ? "1mm" : "1.6mm"};
-      padding-top: ${isThermal ? "0.6mm" : "1mm"};
-      border-top: 0.2mm solid #E2E8F0;
-      text-align: center;
-      background: #FFFFFF;
-    }
-    .bar-img {
-      width: 100%;
-      max-width: 100%;
-      object-fit: contain;
-      display: block;
-      margin: 0 auto;
     }
   </style>
 </head>

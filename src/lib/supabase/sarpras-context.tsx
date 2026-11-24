@@ -380,6 +380,9 @@ interface SarprasContextValue {
   ) => ActionResult;
   reopenOfficeKitLoan: (id: string) => ActionResult;
   deleteOfficeKitLoan: (id: string) => Promise<ActionResult>;
+  resequenceOfficeKitItems: (
+    updates: Array<{ id: string; kit_code: string; name: string }>
+  ) => Promise<ActionResult>;
 
   // Tugas Akhir (Skripsi & Artikel Jurnal - Proposal & Sidang)
   addThesisWorkflow: (
@@ -4844,6 +4847,71 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  const resequenceOfficeKitItems = useCallback(
+    async (
+      updates: Array<{ id: string; kit_code: string; name: string }>
+    ): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite("sirkulasi-invent")) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      if (updates.length === 0) {
+        return { ok: true };
+      }
+
+      const updateMap = new Map(updates.map((u) => [u.id, u] as const));
+      const applyLocal = () => {
+        const nextKits = officeKitItems.map((item) => {
+          const patch = updateMap.get(item.id);
+          return patch
+            ? { ...item, kit_code: patch.kit_code, name: patch.name }
+            : item;
+        });
+        setOfficeKitItems(nextKits);
+
+        const kitById = new Map(nextKits.map((k) => [k.id, k] as const));
+        setOfficeKitLoans((prev) =>
+          prev.map((loan) => {
+            if (loan.status !== "Dipinjam") return loan;
+            const label = loan.kit_item_ids
+              .map((kid) => {
+                const found = kitById.get(kid);
+                return found ? `${found.kit_code} (${found.name})` : null;
+              })
+              .filter(Boolean)
+              .join(", ");
+            return label ? { ...loan, kit_items_label: label } : loan;
+          })
+        );
+      };
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "resequence_office_kit_items", items: updates },
+          "Merapikan Kode Unit Barang",
+          "Kode Unit & Nama Barang Diperbarui",
+          `${updates.length} barang kantor staf telah disesuaikan ke kode angka baru.`,
+          applyLocal
+        );
+      }
+
+      applyLocal();
+      notify(
+        "success",
+        "Kode Unit & Nama Barang Diperbarui",
+        `${updates.length} barang kantor staf telah disesuaikan ke kode angka baru.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      officeKitItems,
+      requireStaffForLiveWrite,
+      sendConfirmedMutation,
+    ]
+  );
+
   const addThesisWorkflow = useCallback(
     (
       payload: Omit<ThesisWorkflow, "id" | "ticket_code" | "created_at">
@@ -5465,6 +5533,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       checkinOfficeKitLoan,
       reopenOfficeKitLoan,
       deleteOfficeKitLoan,
+      resequenceOfficeKitItems,
       addThesisWorkflow,
       updateThesisWorkflow,
       moveThesisWorkflow,
@@ -5576,6 +5645,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       checkinOfficeKitLoan,
       reopenOfficeKitLoan,
       deleteOfficeKitLoan,
+      resequenceOfficeKitItems,
       addThesisWorkflow,
       updateThesisWorkflow,
       moveThesisWorkflow,

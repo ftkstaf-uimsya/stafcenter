@@ -140,6 +140,10 @@ type MutationPayload =
       data?: Record<string, unknown>;
     }
   | { action: "delete_office_kit_loan"; id: string }
+  | {
+      action: "resequence_office_kit_items";
+      items: Array<{ id: string; kit_code: string; name: string }>;
+    }
   | { action: "insert_thesis_workflow"; data: Record<string, unknown> }
   | { action: "update_thesis_workflow"; id: string; data: Record<string, unknown> }
   | { action: "delete_thesis_workflow"; id: string }
@@ -2244,6 +2248,112 @@ export async function POST(request: NextRequest) {
             .in("id", existingLoan.kit_item_ids as string[])
             .eq("status", "Dipinjam");
         }
+        return NextResponse.json({ ok: true });
+      }
+      case "resequence_office_kit_items": {
+        const rawItems = Array.isArray(body.items) ? body.items : [];
+        if (rawItems.length === 0) {
+          return NextResponse.json(
+            { error: "Tidak ada data barang yang diperbarui." },
+            { status: 400 }
+          );
+        }
+
+        const cleaned = rawItems
+          .map((item) => ({
+            id: String(item.id || "").trim(),
+            kit_code: String(item.kit_code || "").trim().toUpperCase(),
+            name: String(item.name || "").trim(),
+          }))
+          .filter((item) => item.id && item.kit_code && item.name);
+
+        if (cleaned.length !== rawItems.length) {
+          return NextResponse.json(
+            { error: "Setiap barang harus memiliki ID, Kode Unit, dan Nama yang valid." },
+            { status: 400 }
+          );
+        }
+
+        const seenCodes = new Set<string>();
+        for (const item of cleaned) {
+          if (seenCodes.has(item.kit_code)) {
+            return NextResponse.json(
+              { error: `Terdapat duplikasi Kode Unit "${item.kit_code}".` },
+              { status: 400 }
+            );
+          }
+          seenCodes.add(item.kit_code);
+        }
+
+        // Tahap 1: isi kode sementara agar tidak bentrok constraint UNIQUE saat pertukaran/geser kode
+        await Promise.all(
+          cleaned.map((item, idx) =>
+            supabase
+              .from("office_kit_items")
+              .update({
+                kit_code: `__TMP_${idx}_${item.id.slice(0, 8)}`,
+                updated_at: nowIso,
+              })
+              .eq("id", item.id)
+          )
+        );
+
+        // Tahap 2: terapkan kode angka & nama baru
+        const updateResults = await Promise.all(
+          cleaned.map((item) =>
+            supabase
+              .from("office_kit_items")
+              .update({
+                kit_code: item.kit_code,
+                name: item.name,
+                updated_at: nowIso,
+              })
+              .eq("id", item.id)
+          )
+        );
+        const firstUpdErr = updateResults.find((r) => r.error)?.error;
+        if (firstUpdErr) {
+          return NextResponse.json(
+            { error: formatSafeDbError(firstUpdErr.message) },
+            { status: 400 }
+          );
+        }
+
+        // Sinkronkan label barang pada tiket yang masih aktif dipinjam
+        const { data: allKits } = await supabase
+          .from("office_kit_items")
+          .select("id, kit_code, name");
+        const { data: activeLoans } = await supabase
+          .from("office_kit_loans")
+          .select("id, kit_item_ids")
+          .eq("status", "Dipinjam");
+
+        if (allKits && activeLoans && activeLoans.length > 0) {
+          const kitById = new Map(
+            allKits.map((k) => [String(k.id), k] as const)
+          );
+          await Promise.all(
+            activeLoans.map((loan) => {
+              const ids = Array.isArray(loan.kit_item_ids)
+                ? (loan.kit_item_ids as string[])
+                : [];
+              if (ids.length === 0) return Promise.resolve(null);
+              const nextLabel = ids
+                .map((kid) => {
+                  const found = kitById.get(kid);
+                  return found ? `${found.kit_code} (${found.name})` : null;
+                })
+                .filter(Boolean)
+                .join(", ");
+              if (!nextLabel) return Promise.resolve(null);
+              return supabase
+                .from("office_kit_loans")
+                .update({ kit_items_label: nextLabel, updated_at: nowIso })
+                .eq("id", loan.id);
+            })
+          );
+        }
+
         return NextResponse.json({ ok: true });
       }
       case "insert_thesis_workflow": {

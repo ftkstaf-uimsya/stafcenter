@@ -1,11 +1,9 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Minus, Plus, Printer, QrCode, ScanBarcode, Trash2 } from "lucide-react";
+import { Minus, Plus, Printer, QrCode, Trash2 } from "lucide-react";
 import {
-  generateCode128DataUrl,
   generateQrDataUrl,
-  LabelCodeFormat,
   LabelPrintLayout,
   PrintableBarcodeItem,
   printBarcodeLabelsIsolated,
@@ -19,55 +17,46 @@ interface BarcodeLabelModalProps {
   title: string;
   description?: string;
   items: PrintableBarcodeItem[];
-  defaultFormat?: LabelCodeFormat;
 }
 
 export function BarcodeLabelModal({
   isOpen,
   onClose,
   title,
-  description = "Stiker QR Code & Barcode 1D standar siap scan (kamera HP/laptop dan alat scanner) melalui lembar cetak terisolasi.",
+  description = "Stiker QR Code standar siap scan melalui kamera HP atau laptop pada lembar cetak terisolasi.",
   items,
-  defaultFormat = "combo",
 }: BarcodeLabelModalProps) {
-  const [format, setFormat] = useState<LabelCodeFormat>(defaultFormat);
   const [layout, setLayout] = useState<LabelPrintLayout>("a4_small");
   const [queue, setQueue] = useState<
     Array<{ item: PrintableBarcodeItem; copies: number }>
   >([]);
-  const [codeMap, setCodeMap] = useState<
-    Record<string, { qr: string; barcode: string }>
-  >({});
+  const [qrMap, setQrMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!isOpen) return;
-    setFormat(defaultFormat);
     setQueue(items.map((item) => ({ item, copies: 1 })));
-  }, [defaultFormat, isOpen, items]);
+  }, [isOpen, items]);
 
   useEffect(() => {
     if (!isOpen || queue.length === 0) return;
     let active = true;
 
-    const buildAllCodes = async () => {
+    const buildAllQrs = async () => {
       const nextEntries = await Promise.all(
         queue.map(async ({ item }) => {
-          const [qr, barcode] = await Promise.all([
-            generateQrDataUrl(item.code),
-            Promise.resolve(generateCode128DataUrl(item.code)),
-          ]);
-          return [item.id, { qr, barcode }] as const;
+          const qr = await generateQrDataUrl(item.code);
+          return [item.id, qr] as const;
         })
       );
       if (!active) return;
-      const map: Record<string, { qr: string; barcode: string }> = {};
+      const map: Record<string, string> = {};
       for (const [id, data] of nextEntries) {
         map[id] = data;
       }
-      setCodeMap(map);
+      setQrMap(map);
     };
 
-    void buildAllCodes();
+    void buildAllQrs();
     return () => {
       active = false;
     };
@@ -98,10 +87,8 @@ export function BarcodeLabelModal({
       queue.map(({ item, copies }) => ({
         item,
         copies,
-        qrDataUrl: codeMap[item.id]?.qr || "",
-        barcodeDataUrl: codeMap[item.id]?.barcode || "",
+        qrDataUrl: qrMap[item.id] || "",
       })),
-      format,
       layout
     );
   };
@@ -115,55 +102,23 @@ export function BarcodeLabelModal({
       maxWidthClass="max-w-4xl"
     >
       <div className="space-y-4">
-        {/* Pengaturan Format Kode & Ukuran Kertas */}
-        <div className="p-3.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/70 grid grid-cols-1 lg:grid-cols-12 gap-3 items-center">
-          <div className="lg:col-span-7 space-y-1.5">
-            <span className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
-              Format Kode Stiker
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {(
-                [
-                  {
-                    id: "combo",
-                    label: "Kombinasi (QR + Barcode)",
-                    icon: QrCode,
-                  },
-                  {
-                    id: "qr",
-                    label: "QR Code Saja",
-                    icon: QrCode,
-                  },
-                  {
-                    id: "barcode",
-                    label: "Barcode 1D Saja",
-                    icon: ScanBarcode,
-                  },
-                ] as const
-              ).map((opt) => {
-                const Icon = opt.icon;
-                const active = format === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setFormat(opt.id)}
-                    aria-pressed={active}
-                    className={`min-h-[38px] px-3 py-1.5 rounded-md text-xs font-bold inline-flex items-center gap-1.5 border transition-colors ${
-                      active
-                        ? "bg-[#1E3A5F] text-white border-[#1E3A5F] dark:bg-sky-500 dark:text-slate-950 dark:border-sky-500"
-                        : "bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700"
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>{opt.label}</span>
-                  </button>
-                );
-              })}
+        {/* Pengaturan Ukuran Kertas / Layout Cetak QR */}
+        <div className="p-3.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-md bg-[#1E3A5F] dark:bg-sky-500 text-white dark:text-slate-950 flex items-center justify-center shrink-0">
+              <QrCode className="w-5 h-5" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                Stiker QR Code Standar (ISO/IEC 18004)
+              </p>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                Dioptimalkan agar cepat terbaca oleh pemindai kamera HP dan webcam laptop.
+              </p>
             </div>
           </div>
 
-          <div className="lg:col-span-5 space-y-1.5">
+          <div className="sm:w-72 space-y-1">
             <label
               htmlFor="barcode-print-layout"
               className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400"
@@ -189,17 +144,17 @@ export function BarcodeLabelModal({
           </div>
         </div>
 
-        {/* Antrean & Pratinjau Stiker */}
+        {/* Antrean & Pratinjau Stiker QR */}
         {queue.length === 0 ? (
           <div className="p-6 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-600 dark:text-slate-400">
-            Tidak ada item dalam antrean cetak stiker.
+            Tidak ada item dalam antrean cetak stiker QR.
           </div>
         ) : (
           <div className="space-y-3 max-h-[54vh] overflow-y-auto pr-1">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700 dark:text-slate-300">
               <span>
                 Antrean Cetak: <strong>{queue.length}</strong> jenis barang (total{" "}
-                <strong className="font-mono">{totalStickers}</strong> stiker siap cetak)
+                <strong className="font-mono">{totalStickers}</strong> stiker QR siap cetak)
               </span>
               <span className="text-[11px] text-slate-500 dark:text-slate-400">
                 Atur jumlah salinan jika ingin mencetak lebih dari 1 stiker per barang.
@@ -214,61 +169,35 @@ export function BarcodeLabelModal({
               }`}
             >
               {queue.map(({ item, copies }) => {
-                const codes = codeMap[item.id];
+                const qrUrl = qrMap[item.id];
                 return (
                   <div
                     key={item.id}
                     className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/60 p-3 space-y-2.5"
                   >
-                    {/* Pratinjau Stiker Putih (Kontras Tinggi untuk Scanner) */}
                     <div className="rounded border-2 border-slate-900 bg-white text-slate-950 p-3 space-y-2">
                       <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-600 truncate">
                         {item.headerTag || "BIRO SARPRAS • STAFCENTER"}
                       </p>
 
-                      {format === "combo" || format === "qr" ? (
-                        <div className="flex items-center gap-3">
-                          <div className="p-1 border border-slate-300 rounded bg-white shrink-0">
-                            {codes?.qr ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={codes.qr}
-                                alt={`QR Code ${item.code}`}
-                                className={
-                                  format === "qr"
-                                    ? "w-20 h-20 block"
-                                    : "w-16 h-16 block"
-                                }
-                              />
-                            ) : (
-                              <div className="w-16 h-16 bg-slate-100" />
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1 space-y-0.5">
-                            <p className="text-sm font-mono font-extrabold text-slate-950 break-all">
-                              {item.code}
-                            </p>
-                            <p className="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">
-                              {item.title}
-                            </p>
-                            {item.subtitle ? (
-                              <p className="text-[11px] text-slate-700 truncate">
-                                {item.subtitle}
-                              </p>
-                            ) : null}
-                            {item.meta ? (
-                              <p className="text-[11px] font-mono text-slate-600 truncate">
-                                {item.meta}
-                              </p>
-                            ) : null}
-                          </div>
+                      <div className="flex items-center gap-3">
+                        <div className="p-1 border border-slate-300 rounded bg-white shrink-0">
+                          {qrUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={qrUrl}
+                              alt={`QR Code ${item.code}`}
+                              className="w-20 h-20 block"
+                            />
+                          ) : (
+                            <div className="w-20 h-20 bg-slate-100" />
+                          )}
                         </div>
-                      ) : (
-                        <div className="space-y-0.5">
-                          <p className="text-sm font-mono font-extrabold text-slate-950 break-all">
+                        <div className="min-w-0 flex-1 space-y-0.5">
+                          <p className="text-base font-mono font-extrabold text-slate-950 break-all">
                             {item.code}
                           </p>
-                          <p className="text-xs font-bold text-slate-900 line-clamp-1">
+                          <p className="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">
                             {item.title}
                           </p>
                           {item.subtitle ? (
@@ -276,23 +205,15 @@ export function BarcodeLabelModal({
                               {item.subtitle}
                             </p>
                           ) : null}
+                          {item.meta ? (
+                            <p className="text-[11px] font-mono text-slate-600 truncate">
+                              {item.meta}
+                            </p>
+                          ) : null}
                         </div>
-                      )}
-
-                      {(format === "combo" || format === "barcode") &&
-                      codes?.barcode ? (
-                        <div className="pt-1.5 border-t border-slate-200 bg-white">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={codes.barcode}
-                            alt={`Barcode Code 128 ${item.code}`}
-                            className="w-full h-10 object-contain mx-auto block"
-                          />
-                        </div>
-                      ) : null}
+                      </div>
                     </div>
 
-                    {/* Kontrol Salinan & Hapus */}
                     <div className="flex items-center justify-between gap-2 text-xs">
                       <div className="inline-flex items-center gap-1.5">
                         <span className="font-semibold text-slate-700 dark:text-slate-300">
@@ -349,7 +270,7 @@ export function BarcodeLabelModal({
             onClick={handlePrint}
           >
             <Printer className="w-4 h-4" aria-hidden="true" />
-            <span>Cetak Label ({totalStickers} stiker)</span>
+            <span>Cetak Label QR ({totalStickers} stiker)</span>
           </Button>
         </div>
       </div>
