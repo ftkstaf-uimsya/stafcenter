@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { OfficeKitLoan } from "@/types/sarpras";
+import { Booking, BookingStatus, OfficeKitLoan } from "@/types/sarpras";
 
 const WIB_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Jakarta",
@@ -59,6 +59,48 @@ export function isLoanOverdueDay(
     loan.status === "Dipinjam" &&
     Boolean(loan.loan_date) &&
     loan.loan_date < todayWibIso
+  );
+}
+
+/**
+ * Returns true if a facility booking has reached a finished terminal status.
+ */
+export function isBookingFinishedStatus(status: BookingStatus): boolean {
+  return status === "Selesai / Dikembalikan" || status === "Ditolak";
+}
+
+/**
+ * Quick desk daily rollover rule for facility bookings:
+ * - Active bookings ("Menunggu Persetujuan", "Disetujui", "Sedang Dipinjam") always stay visible.
+ * - Finished bookings ("Selesai / Dikembalikan", "Ditolak") appear on the quick desk only for today (WIB)
+ *   or when transitioned during the current desk shift.
+ */
+export function isBookingVisibleOnQuickDesk(
+  booking: Booking,
+  todayWibIso: string,
+  recentlyFinishedIds?: Set<string>
+): boolean {
+  if (!isBookingFinishedStatus(booking.status)) {
+    return true;
+  }
+  if (recentlyFinishedIds?.has(booking.id)) {
+    return true;
+  }
+  const createdDayIso = toWibDateIso(booking.created_at);
+  return booking.booking_date === todayWibIso || createdDayIso === todayWibIso;
+}
+
+/**
+ * Flags unfinished facility bookings whose booking date is earlier than today (WIB).
+ */
+export function isBookingOverdueDay(
+  booking: Booking,
+  todayWibIso: string
+): boolean {
+  return (
+    !isBookingFinishedStatus(booking.status) &&
+    Boolean(booking.booking_date) &&
+    booking.booking_date < todayWibIso
   );
 }
 

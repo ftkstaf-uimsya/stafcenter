@@ -32,9 +32,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isAuthPage = pathname === "/login" || pathname?.startsWith("/login/");
   const requiresAuth = isLiveSupabase && !isAuthPage;
   const pageKey = getPageKeyFromPathname(pathname);
+  const isPinjamCepatRoute =
+    pathname === "/sarpras/sirkulasi-invent/pinjam-cepat";
+  const hasPinjamCepatAccess =
+    canAccessPage("sirkulasi-invent") || canAccessPage("peminjaman");
   const pageBlocked =
     Boolean(isLiveSupabase && authUser && pageKey) &&
-    !canAccessPage(pageKey as NonNullable<typeof pageKey>);
+    (isPinjamCepatRoute
+      ? !hasPinjamCepatAccess
+      : !canAccessPage(pageKey as NonNullable<typeof pageKey>));
   const blockedPageLabel =
     pageKey === "akun"
       ? "Manajemen Akun Staf"

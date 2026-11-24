@@ -1,10 +1,12 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
-  AlertCircle,
   CalendarClock,
+  Camera,
   CheckCircle2,
+  ClipboardPlus,
   KanbanSquare,
   Plus,
   RotateCcw,
@@ -13,16 +15,15 @@ import {
   XCircle,
 } from "lucide-react";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
-import { TODAY_ISO } from "@/lib/supabase/seed-data";
+import { matchesFlexibleQuery } from "@/lib/search-normalize";
 import {
   Booking,
   BookingStatus,
-  BookingTargetType,
   BorrowerRole,
+  SarprasAttachment,
 } from "@/types/sarpras";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
 import { Drawer } from "@/components/ui/drawer";
 import { ConfirmDeleteModal } from "@/components/ui/confirm-delete-modal";
@@ -39,13 +40,9 @@ import {
   LoadingStateView,
 } from "@/components/ui/data-states";
 import { BookingStatusBadge } from "@/components/sarpras/status-badges";
+import { BookingLoanForm } from "@/components/sarpras/booking-loan-form";
 
 const BORROWER_ROLES: BorrowerRole[] = ["Dosen", "Staf", "Mahasiswa/Ormawa"];
-const TARGET_TYPES: BookingTargetType[] = [
-  "Ruangan",
-  "Alat",
-  "Ruangan & Alat",
-];
 const BOOKING_STATUSES: BookingStatus[] = [
   "Menunggu Persetujuan",
   "Disetujui",
@@ -53,6 +50,15 @@ const BOOKING_STATUSES: BookingStatus[] = [
   "Selesai / Dikembalikan",
   "Ditolak",
 ];
+
+function isSafePreviewImageAttachment(att: SarprasAttachment): boolean {
+  return (
+    att.mime_type.startsWith("image/") &&
+    (att.file_url.startsWith("https://") ||
+      att.file_url.startsWith("http://") ||
+      att.file_url.startsWith("blob:"))
+  );
+}
 
 function getBookingProgress(status: BookingStatus): {
   percent: number;
@@ -63,13 +69,29 @@ function getBookingProgress(status: BookingStatus): {
     case "Menunggu Persetujuan":
       return { percent: 25, tone: "amber", barClass: "bg-amber-500" };
     case "Disetujui":
-      return { percent: 55, tone: "navy", barClass: "bg-[#1E3A5F] dark:bg-sky-400" };
+      return {
+        percent: 55,
+        tone: "navy",
+        barClass: "bg-[#1E3A5F] dark:bg-sky-400",
+      };
     case "Sedang Dipinjam":
-      return { percent: 80, tone: "amber", barClass: "bg-sky-600 dark:bg-sky-400" };
+      return {
+        percent: 80,
+        tone: "amber",
+        barClass: "bg-sky-600 dark:bg-sky-400",
+      };
     case "Selesai / Dikembalikan":
-      return { percent: 100, tone: "emerald", barClass: "bg-emerald-600 dark:bg-emerald-400" };
+      return {
+        percent: 100,
+        tone: "emerald",
+        barClass: "bg-emerald-600 dark:bg-emerald-400",
+      };
     case "Ditolak":
-      return { percent: 100, tone: "danger", barClass: "bg-red-600 dark:bg-red-400" };
+      return {
+        percent: 100,
+        tone: "danger",
+        barClass: "bg-red-600 dark:bg-red-400",
+      };
   }
 }
 
@@ -80,14 +102,9 @@ export function PeminjamanView() {
     bookings,
     notes,
     attachments,
-    lecturers,
-    campusOfficials,
-    campusUnits,
-    academicClasses,
     authUser,
     uiSimState,
     setUiSimState,
-    addBooking,
     updateBookingStatus,
     deleteBooking,
   } = useSarpras();
@@ -105,23 +122,6 @@ export function PeminjamanView() {
 
   // Modal Form Pengajuan Peminjaman
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
-  const [borrowerName, setBorrowerName] = useState("");
-  const [borrowerRole, setBorrowerRole] = useState<BorrowerRole>("Dosen");
-  const [selectedLecturerId, setSelectedLecturerId] = useState("");
-  const [selectedOfficialId, setSelectedOfficialId] = useState("");
-  const [selectedClassId, setSelectedClassId] = useState("");
-  const [selectedUnitId, setSelectedUnitId] = useState("");
-  const [borrowerUnit, setBorrowerUnit] = useState("");
-  const [borrowerPhone, setBorrowerPhone] = useState("");
-  const [targetType, setTargetType] = useState<BookingTargetType>("Ruangan");
-  const [roomId, setRoomId] = useState("");
-  const [assetId, setAssetId] = useState("");
-  const [activityName, setActivityName] = useState("");
-  const [attendeesCount, setAttendeesCount] = useState("30");
-  const [bookingDate, setBookingDate] = useState(TODAY_ISO);
-  const [startTime, setStartTime] = useState("08:00");
-  const [endTime, setEndTime] = useState("10:00");
-  const [conflictError, setConflictError] = useState("");
 
   // Modal Pengembalian & Catatan Kondisi Barang
   const [returningBooking, setReturningBooking] = useState<Booking | null>(
@@ -147,25 +147,37 @@ export function PeminjamanView() {
     [bookings, selectedBookingId]
   );
 
-  const portableAssets = useMemo(
-    () => assets.filter((a) => a.is_portable && a.condition !== "Hilang"),
-    [assets]
-  );
+  const bookingPhotoMap = useMemo(() => {
+    const map = new Map<string, SarprasAttachment[]>();
+    for (const att of attachments) {
+      if (
+        att.entity_type === "booking" &&
+        isSafePreviewImageAttachment(att)
+      ) {
+        const list = map.get(att.entity_id) || [];
+        list.push(att);
+        map.set(att.entity_id, list);
+      }
+    }
+    return map;
+  }, [attachments]);
 
   const filteredBookings = useMemo(() => {
+    const q = searchQuery.trim();
     return bookings.filter((b) => {
-      const q = searchQuery.trim().toLowerCase();
+      const room = rooms.find((r) => r.id === b.room_id);
+      const asset = assets.find((a) => a.id === b.asset_id);
       const matchSearch =
         !q ||
-        b.booking_code.toLowerCase().includes(q) ||
-        b.borrower_name.toLowerCase().includes(q) ||
-        b.activity_name.toLowerCase().includes(q) ||
-        b.borrower_unit.toLowerCase().includes(q);
+        matchesFlexibleQuery(
+          `${b.booking_code} ${b.borrower_name} ${b.activity_name} ${b.borrower_unit} ${b.class_code || ""} ${room?.code || ""} ${room?.name || ""} ${asset?.inventory_code || ""} ${asset?.name || ""}`,
+          q
+        );
       const matchStatus = filterStatus === "ALL" || b.status === filterStatus;
       const matchRole = filterRole === "ALL" || b.borrower_role === filterRole;
       return matchSearch && matchStatus && matchRole;
     });
-  }, [bookings, searchQuery, filterStatus, filterRole]);
+  }, [assets, bookings, filterRole, filterStatus, rooms, searchQuery]);
 
   const activeFilterCount =
     (filterStatus !== "ALL" ? 1 : 0) + (filterRole !== "ALL" ? 1 : 0);
@@ -187,93 +199,7 @@ export function PeminjamanView() {
   }
 
   const openBookingModal = () => {
-    setBorrowerName("");
-    setBorrowerRole("Dosen");
-    setSelectedLecturerId("");
-    setSelectedOfficialId("");
-    setSelectedClassId("");
-    const firstActiveUnit = campusUnits.find((u) => u.is_active);
-    setSelectedUnitId(firstActiveUnit?.id || "");
-    setBorrowerUnit(firstActiveUnit?.name || "");
-    setBorrowerPhone("");
-    setTargetType("Ruangan");
-    setRoomId(rooms[0]?.id || "");
-    setAssetId(portableAssets[0]?.id || "");
-    setActivityName("");
-    setAttendeesCount("35");
-    setBookingDate(TODAY_ISO);
-    setStartTime("13:00");
-    setEndTime("15:00");
-    setConflictError("");
     setBookingModalOpen(true);
-  };
-
-  const handleBookingSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setConflictError("");
-
-    const matchedUnit = campusUnits.find((u) => u.id === selectedUnitId);
-    const finalUnitName = (matchedUnit?.name || borrowerUnit).trim();
-
-    if (
-      !borrowerName.trim() ||
-      !finalUnitName ||
-      !activityName.trim()
-    ) {
-      setConflictError(
-        "Nama Peminjam, Unit/Prodi, dan Nama Kegiatan wajib diisi."
-      );
-      return;
-    }
-
-    const selectedRoomId =
-      targetType === "Ruangan" || targetType === "Ruangan & Alat"
-        ? roomId || null
-        : null;
-    const selectedAssetId =
-      targetType === "Alat" || targetType === "Ruangan & Alat"
-        ? assetId || null
-        : null;
-
-    if (!selectedRoomId && !selectedAssetId) {
-      setConflictError("Pilih minimal satu ruangan atau satu alat portabel.");
-      return;
-    }
-
-    const matchedClass = academicClasses.find((c) => c.id === selectedClassId);
-
-    const res = addBooking({
-      borrower_name: borrowerName.trim(),
-      borrower_role: borrowerRole,
-      borrower_unit: finalUnitName,
-      unit_id: matchedUnit?.id || null,
-      class_id:
-        borrowerRole === "Mahasiswa/Ormawa" ? matchedClass?.id || null : null,
-      class_code:
-        borrowerRole === "Mahasiswa/Ormawa"
-          ? matchedClass?.class_code || null
-          : null,
-      borrower_lecturer_id:
-        borrowerRole === "Dosen" ? selectedLecturerId || null : null,
-      borrower_official_id:
-        borrowerRole === "Staf" ? selectedOfficialId || null : null,
-      borrower_phone: borrowerPhone.trim() || "-",
-      target_type: targetType,
-      room_id: selectedRoomId,
-      asset_id: selectedAssetId,
-      activity_name: activityName.trim(),
-      attendees_count: Math.max(1, Number(attendeesCount) || 1),
-      booking_date: bookingDate,
-      start_time: startTime,
-      end_time: endTime,
-    });
-
-    if (!res.ok) {
-      setConflictError(res.error || "Terjadi bentrok jadwal peminjaman.");
-      return;
-    }
-
-    setBookingModalOpen(false);
   };
 
   const handleCompleteReturn = (e: React.FormEvent) => {
@@ -337,26 +263,35 @@ export function PeminjamanView() {
     {
       key: "code_activity",
       header: "Kode Tiket & Kegiatan",
-      render: (row) => (
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100">
-              {row.booking_code}
-            </span>
-            <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
-              {row.target_type}
-            </span>
-          </div>
-          <p className="font-bold text-slate-900 dark:text-slate-100">
-            {row.activity_name}
-          </p>
-          {row.return_condition_notes ? (
-            <p className="text-xs text-emerald-800 dark:text-emerald-300 font-medium">
-              Catatan Kembali: {row.return_condition_notes}
+      render: (row) => {
+        const photoCount = (bookingPhotoMap.get(row.id) || []).length;
+        return (
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+                {row.booking_code}
+              </span>
+              <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                {row.target_type}
+              </span>
+              {photoCount > 0 ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-mono font-semibold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700">
+                  <Camera className="w-3 h-3 shrink-0" aria-hidden="true" />
+                  <span>{photoCount}</span>
+                </span>
+              ) : null}
+            </div>
+            <p className="font-bold text-slate-900 dark:text-slate-100">
+              {row.activity_name}
             </p>
-          ) : null}
-        </div>
-      ),
+            {row.return_condition_notes ? (
+              <p className="text-xs text-emerald-800 dark:text-emerald-300 font-medium">
+                Catatan Kembali: {row.return_condition_notes}
+              </p>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       key: "borrower",
@@ -451,7 +386,7 @@ export function PeminjamanView() {
                     row.id,
                     "Disetujui",
                     undefined,
-                    "Kepala Biro Sarpras"
+                    authUser?.fullName || "Kepala Biro Sarpras"
                   )
                 }
               >
@@ -517,16 +452,19 @@ export function PeminjamanView() {
   const selectedAsset = selectedBooking
     ? assets.find((a) => a.id === selectedBooking.asset_id)
     : null;
+  const selectedBookingPhotos = selectedBooking
+    ? bookingPhotoMap.get(selectedBooking.id) || []
+    : [];
 
   return (
     <div className="space-y-5">
       <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-slate-300 dark:border-slate-800">
         <div>
           <p className="text-xs font-mono font-bold uppercase tracking-wider text-[#1E3A5F] dark:text-sky-400">
-            SUB-MODUL 04 • SIRKULASI RUANGAN & ALAT PORTABEL
+            SUB-MODUL 04 • SIRKULASI RUANGAN &amp; ALAT PORTABEL
           </p>
           <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100">
-            Peminjaman & Reservasi Fasilitas
+            Peminjaman &amp; Reservasi Fasilitas
           </h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
             Alur sirkulasi dengan validasi deteksi bentrok jadwal otomatis (
@@ -535,10 +473,19 @@ export function PeminjamanView() {
           </p>
         </div>
 
-        <Button type="button" variant="primary" onClick={openBookingModal}>
-          <Plus className="w-4 h-4" aria-hidden="true" />
-          <span>Ajukan Peminjaman Baru</span>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <Link
+            href="/sarpras/sirkulasi-invent/pinjam-cepat?mode=fasilitas"
+            className="min-h-[44px] px-3.5 py-2 inline-flex items-center gap-2 rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+          >
+            <ClipboardPlus className="w-4 h-4" aria-hidden="true" />
+            <span>Pinjam Cepat</span>
+          </Link>
+          <Button type="button" variant="primary" onClick={openBookingModal}>
+            <Plus className="w-4 h-4" aria-hidden="true" />
+            <span>Ajukan Peminjaman Baru</span>
+          </Button>
+        </div>
       </section>
 
       {/* Toolbar Ringkas Tunggal: Cari + Filter Popover + Pengalih Tampilan + Kolom */}
@@ -551,9 +498,9 @@ export function PeminjamanView() {
             type="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari tiket PJM-, peminjam, unit, atau kegiatan..."
+            placeholder="Cari tiket PJM-, peminjam, ruang, alat (mis. INVELK), atau kegiatan..."
             aria-label="Cari peminjaman"
-            className="min-h-[44px] w-full sm:w-72 px-3 py-2 text-xs rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+            className="min-h-[44px] w-full sm:w-80 px-3 py-2 text-xs rounded-md border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
           />
 
           <FilterPopover
@@ -649,6 +596,7 @@ export function PeminjamanView() {
             const attCount = attachments.filter(
               (a) => a.entity_type === "booking" && a.entity_id === row.id
             ).length;
+            const photos = bookingPhotoMap.get(row.id) || [];
 
             const facilityLine = [
               room ? `Ruang ${room.code}` : "",
@@ -663,6 +611,7 @@ export function PeminjamanView() {
               subtitle: facilityLine || row.target_type,
               description: `${row.borrower_unit} • ${row.booking_date} (${row.start_time}-${row.end_time})`,
               valueBadge: `${row.attendees_count} org`,
+              thumbnailUrl: photos[0]?.file_url || null,
               assigneeName: row.borrower_name,
               progressPercent: prog.percent,
               progressColorClass: prog.barClass,
@@ -846,7 +795,6 @@ export function PeminjamanView() {
       >
         {selectedBooking && selectedProgress ? (
           <div className="space-y-5">
-            {/* Peringatan Tindakan Berikutnya */}
             {selectedBooking.status === "Menunggu Persetujuan" ? (
               <div className="p-3.5 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-700 text-xs text-amber-950 dark:text-amber-200">
                 <strong>Menunggu Persetujuan Sarpras:</strong> Tinjau jadwal{" "}
@@ -858,7 +806,6 @@ export function PeminjamanView() {
               </div>
             ) : null}
 
-            {/* Ring Progres & Ringkasan Sirkulasi */}
             <div className="p-4 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 flex items-center gap-4">
               <ProgressRing
                 percent={selectedProgress.percent}
@@ -879,14 +826,14 @@ export function PeminjamanView() {
               </div>
             </div>
 
-            {/* Rincian Fasilitas */}
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs p-4 rounded-lg border border-slate-200 dark:border-slate-800">
               <div>
                 <dt className="text-slate-600 dark:text-slate-400">
-                  Peminjam & Peran
+                  Peminjam &amp; Peran
                 </dt>
                 <dd className="mt-0.5 font-bold text-slate-900 dark:text-slate-100">
-                  {selectedBooking.borrower_name} ({selectedBooking.borrower_role})
+                  {selectedBooking.borrower_name} (
+                  {selectedBooking.borrower_role})
                 </dd>
               </div>
               <div>
@@ -949,6 +896,35 @@ export function PeminjamanView() {
               ) : null}
             </dl>
 
+            {selectedBookingPhotos.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-xs font-mono font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Foto Bukti Peminjaman ({selectedBookingPhotos.length})
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {selectedBookingPhotos.map((photo) => (
+                    <a
+                      key={photo.id}
+                      href={photo.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group block rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={photo.file_url}
+                        alt={`Foto bukti ${selectedBooking.booking_code}`}
+                        className="w-full h-40 object-cover group-hover:opacity-90 transition-opacity"
+                      />
+                      <div className="px-2.5 py-1.5 text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
+                        {photo.file_name}
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <EntityDrawerSections
               entityType="booking"
               entityId={selectedBooking.id}
@@ -958,7 +934,7 @@ export function PeminjamanView() {
         ) : null}
       </Drawer>
 
-      {/* Modal Form Pengajuan Peminjaman (Dengan Conflict Detection) */}
+      {/* Modal Form Pengajuan Peminjaman (Dengan Conflict Detection & Foto Bukti) */}
       <Modal
         isOpen={bookingModalOpen}
         onClose={() => setBookingModalOpen(false)}
@@ -966,347 +942,11 @@ export function PeminjamanView() {
         description="Sistem secara otomatis memeriksa apakah ruangan atau alat sudah dipesan pada jam yang sama."
         maxWidthClass="max-w-2xl"
       >
-        <form onSubmit={handleBookingSubmit} className="space-y-4">
-          {conflictError ? (
-            <div
-              role="alert"
-              className="p-3.5 rounded-md bg-red-50 dark:bg-red-950 border-2 border-red-600 text-xs text-red-900 dark:text-red-200 flex items-start gap-2.5"
-            >
-              <AlertCircle
-                className="w-5 h-5 text-red-700 dark:text-red-400 shrink-0 mt-0.5"
-                aria-hidden="true"
-              />
-              <div>
-                <p className="font-bold">Konflik Jadwal / Validasi Gagal</p>
-                <p className="mt-0.5">{conflictError}</p>
-              </div>
-            </div>
-          ) : null}
-
-          {borrowerRole === "Dosen" && lecturers.length > 0 ? (
-            <Select
-              label="Pilih dari Data Master Dosen (Opsional)"
-              value={selectedLecturerId}
-              onChange={(e) => {
-                const id = e.target.value;
-                setSelectedLecturerId(id);
-                const found = lecturers.find((l) => l.id === id);
-                if (found) {
-                  setBorrowerName(found.full_name);
-                  setBorrowerUnit(found.homebase_prodi);
-                  const matchedUnit =
-                    campusUnits.find((u) => u.id === found.unit_id) ||
-                    campusUnits.find(
-                      (u) =>
-                        u.name.trim().toLowerCase() ===
-                        found.homebase_prodi.trim().toLowerCase()
-                    );
-                  setSelectedUnitId(matchedUnit?.id || "");
-                  if (found.phone) setBorrowerPhone(found.phone);
-                }
-              }}
-              options={[
-                { value: "", label: "-- Pilih dosen atau ketik manual di bawah --" },
-                ...lecturers
-                  .filter((l) => l.is_active)
-                  .map((l) => ({
-                    value: l.id,
-                    label: `${l.nidn_nip} - ${l.full_name} (${l.homebase_prodi})`,
-                  })),
-              ]}
-            />
-          ) : null}
-
-          {borrowerRole === "Staf" && campusOfficials.length > 0 ? (
-            <Select
-              label="Pilih dari Data Master Pengurus / Staf (Opsional)"
-              value={selectedOfficialId}
-              onChange={(e) => {
-                const id = e.target.value;
-                setSelectedOfficialId(id);
-                const found = campusOfficials.find((o) => o.id === id);
-                if (found) {
-                  setBorrowerName(found.full_name);
-                  setBorrowerUnit(found.unit_name);
-                  const matchedUnit =
-                    campusUnits.find((u) => u.id === found.unit_id) ||
-                    campusUnits.find(
-                      (u) =>
-                        u.name.trim().toLowerCase() ===
-                        found.unit_name.trim().toLowerCase()
-                    );
-                  setSelectedUnitId(matchedUnit?.id || "");
-                  if (found.phone) setBorrowerPhone(found.phone);
-                }
-              }}
-              options={[
-                { value: "", label: "-- Pilih pengurus/staf atau ketik manual --" },
-                ...campusOfficials
-                  .filter((o) => o.is_active)
-                  .map((o) => ({
-                    value: o.id,
-                    label: `${o.official_code} - ${o.full_name} (${o.unit_name})`,
-                  })),
-              ]}
-            />
-          ) : null}
-
-          {borrowerRole === "Mahasiswa/Ormawa" &&
-          academicClasses.some((c) => c.is_active) ? (
-            <Select
-              label="Pilih dari Data Master Kelas & DPM (Opsional)"
-              value={selectedClassId}
-              onChange={(e) => {
-                const id = e.target.value;
-                setSelectedClassId(id);
-                const cls = academicClasses.find((c) => c.id === id);
-                if (cls) {
-                  setBorrowerName(`${cls.dpm_name} (DPM ${cls.class_code})`);
-                  if (cls.dpm_phone && cls.dpm_phone !== "-") {
-                    setBorrowerPhone(cls.dpm_phone);
-                  }
-                  setAttendeesCount(String(cls.students_count));
-                  const matchedUnit =
-                    campusUnits.find((u) => u.id === cls.unit_id) ||
-                    campusUnits.find(
-                      (u) => u.code.toUpperCase() === cls.prodi.toUpperCase()
-                    );
-                  setSelectedUnitId(matchedUnit?.id || "");
-                  setBorrowerUnit(matchedUnit?.name || cls.prodi);
-                  if (cls.default_room_id) {
-                    setRoomId(cls.default_room_id);
-                  }
-                }
-              }}
-              options={[
-                {
-                  value: "",
-                  label: "-- Pilih kelas & DPM atau pilih Ormawa di bawah --",
-                },
-                ...academicClasses
-                  .filter((c) => c.is_active)
-                  .map((c) => ({
-                    value: c.id,
-                    label: `${c.class_code} - DPM: ${c.dpm_name} (${c.students_count} mhs)`,
-                  })),
-              ]}
-            />
-          ) : null}
-
-          {borrowerRole === "Mahasiswa/Ormawa" &&
-          campusUnits.some((u) => u.is_active && u.unit_type === "Ormawa / UKM") ? (
-            <Select
-              label="Pilih dari Master Ormawa / UKM (Opsional)"
-              value={selectedUnitId}
-              onChange={(e) => {
-                const id = e.target.value;
-                setSelectedUnitId(id);
-                setSelectedClassId("");
-                const found = campusUnits.find((u) => u.id === id);
-                if (found) {
-                  setBorrowerUnit(found.name);
-                  if (found.leader_name && !borrowerName.trim()) {
-                    setBorrowerName(found.leader_name);
-                  }
-                  if (found.phone && !borrowerPhone.trim()) {
-                    setBorrowerPhone(found.phone);
-                  }
-                }
-              }}
-              options={[
-                { value: "", label: "-- Pilih Ormawa/UKM atau isi manual --" },
-                ...campusUnits
-                  .filter((u) => u.is_active && u.unit_type === "Ormawa / UKM")
-                  .map((u) => ({
-                    value: u.id,
-                    label: `${u.code} - ${u.name}${
-                      u.leader_name ? ` (Ketua: ${u.leader_name})` : ""
-                    }`,
-                  })),
-              ]}
-            />
-          ) : null}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Input
-              label="Nama Lengkap Peminjam *"
-              placeholder="Contoh: Dr. Eng. Lukman Hakim, M.T."
-              value={borrowerName}
-              onChange={(e) => setBorrowerName(e.target.value)}
-              required
-            />
-            <Select
-              label="Kategori Peminjam *"
-              value={borrowerRole}
-              onChange={(e) => {
-                const nextRole = e.target.value as BorrowerRole;
-                setBorrowerRole(nextRole);
-                if (nextRole !== "Dosen") setSelectedLecturerId("");
-                if (nextRole !== "Staf") setSelectedOfficialId("");
-                if (nextRole !== "Mahasiswa/Ormawa") setSelectedClassId("");
-              }}
-              options={BORROWER_ROLES.map((r) => ({ value: r, label: r }))}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {campusUnits.some((u) => u.is_active) ? (
-              <Select
-                label="Program Studi / Unit / Ormawa *"
-                value={selectedUnitId || (borrowerUnit ? "__LEGACY__" : "")}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === "__LEGACY__") {
-                    setSelectedUnitId("");
-                    return;
-                  }
-                  setSelectedUnitId(val);
-                  const found = campusUnits.find((u) => u.id === val);
-                  if (found) setBorrowerUnit(found.name);
-                }}
-                options={[
-                  ...campusUnits
-                    .filter((u) => u.is_active)
-                    .map((u) => ({
-                      value: u.id,
-                      label: `${u.code} - ${u.name} (${u.unit_type})`,
-                    })),
-                  ...(!selectedUnitId && borrowerUnit
-                    ? [
-                        {
-                          value: "__LEGACY__",
-                          label: `${borrowerUnit} (Manual)`,
-                        },
-                      ]
-                    : []),
-                ]}
-              />
-            ) : (
-              <Input
-                label="Program Studi / Unit / Ormawa *"
-                placeholder="Contoh: Prodi Teknik Informatika / BEM"
-                value={borrowerUnit}
-                onChange={(e) => setBorrowerUnit(e.target.value)}
-                required
-              />
-            )}
-            <Input
-              label="Nomor WhatsApp / Telepon Aktif *"
-              placeholder="Contoh: 0813-2211-9001"
-              value={borrowerPhone}
-              onChange={(e) => setBorrowerPhone(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Select
-              label="Objek Peminjaman *"
-              value={targetType}
-              onChange={(e) =>
-                setTargetType(e.target.value as BookingTargetType)
-              }
-              options={TARGET_TYPES.map((t) => ({ value: t, label: t }))}
-            />
-
-            {targetType === "Ruangan" || targetType === "Ruangan & Alat" ? (
-              <div className="sm:col-span-2">
-                <Select
-                  label="Pilih Ruangan Kampus *"
-                  value={roomId}
-                  onChange={(e) => setRoomId(e.target.value)}
-                  options={rooms.map((r) => ({
-                    value: r.id,
-                    label: `${r.code} - ${r.name} (Kap. ${r.capacity})`,
-                  }))}
-                />
-              </div>
-            ) : null}
-
-            {targetType === "Alat" ? (
-              <div className="sm:col-span-2">
-                <Select
-                  label="Pilih Alat Portabel *"
-                  value={assetId}
-                  onChange={(e) => setAssetId(e.target.value)}
-                  options={portableAssets.map((a) => ({
-                    value: a.id,
-                    label: `${a.inventory_code} - ${a.name}`,
-                  }))}
-                />
-              </div>
-            ) : null}
-          </div>
-
-          {targetType === "Ruangan & Alat" ? (
-            <Select
-              label="Pilih Alat Portabel Pendukung *"
-              value={assetId}
-              onChange={(e) => setAssetId(e.target.value)}
-              options={portableAssets.map((a) => ({
-                value: a.id,
-                label: `${a.inventory_code} - ${a.name}`,
-              }))}
-            />
-          ) : null}
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-2">
-              <Input
-                label="Nama Kegiatan / Acara *"
-                placeholder="Contoh: Seminar Nasional / Praktikum Pengganti"
-                value={activityName}
-                onChange={(e) => setActivityName(e.target.value)}
-                required
-              />
-            </div>
-            <Input
-              label="Estimasi Peserta"
-              type="number"
-              min={1}
-              max={1500}
-              value={attendeesCount}
-              onChange={(e) => setAttendeesCount(e.target.value)}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Input
-              label="Tanggal Penggunaan *"
-              type="date"
-              value={bookingDate}
-              onChange={(e) => setBookingDate(e.target.value)}
-              required
-            />
-            <Input
-              label="Jam Mulai *"
-              type="time"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              required
-            />
-            <Input
-              label="Jam Selesai *"
-              type="time"
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setBookingModalOpen(false)}
-            >
-              Batal
-            </Button>
-            <Button type="submit" variant="primary">
-              Validasi & Simpan Reservasi
-            </Button>
-          </div>
-        </form>
+        <BookingLoanForm
+          mode="modal"
+          onSuccess={() => setBookingModalOpen(false)}
+          onCancel={() => setBookingModalOpen(false)}
+        />
       </Modal>
 
       {/* Modal Catat Pengembalian & Kondisi Barang */}

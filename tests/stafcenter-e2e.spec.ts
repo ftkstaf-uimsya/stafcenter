@@ -325,6 +325,37 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
       page.getByRole("heading", { name: /Pinjamkan Alat Kantor Staf ke Kelas/i })
     ).toBeVisible();
 
+    // Switch mode ke Ruangan & Alat Portabel di Pinjam Cepat
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page
+      .getByRole("button", { name: /Ruangan & Alat Portabel/i })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: /Pinjam Cepat Ruangan & Alat Portabel/i })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /ANTREAN & SEDANG DIPINJAM/i })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /SELESAI \/ DIKEMBALIKAN/i })
+    ).toBeVisible();
+
+    // Uji modal Peminjaman & Reservasi juga memiliki tombol foto bukti & kamera live
+    await page.goto("/sarpras/peminjaman");
+    await page
+      .getByRole("button", { name: /Ajukan Peminjaman Baru/i })
+      .click();
+    await expect(
+      page.getByText(/Foto Bukti Peminjaman \(Opsional\)/i)
+    ).toBeVisible();
+    await page.getByRole("button", { name: /Ambil Foto/i }).click();
+    await expect(page.locator("video")).toBeVisible();
+    await page
+      .getByRole("button", { name: "Batal", exact: true })
+      .last()
+      .click();
+    await page.getByRole("button", { name: "Batal", exact: true }).click();
+
     expect(consoleErrors).toEqual([]);
   });
 });

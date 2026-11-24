@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { getThesisHref } from "@/lib/auth/permissions";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
-import { TODAY_ISO } from "@/lib/supabase/seed-data";
+import { useTodayWibIso } from "@/lib/sarpras/sirkulasi-utils";
 import { formatCurrencyIDR } from "@/lib/supabase/client";
 import {
   EmptyStateView,
@@ -47,6 +47,8 @@ export function DashboardView() {
     setUiSimState,
     resetToSeedData,
   } = useSarpras();
+
+  const todayWibIso = useTodayWibIso();
 
   if (uiSimState === "loading") {
     return (
@@ -97,7 +99,7 @@ export function DashboardView() {
   ).length;
   const todayActiveBookings = bookings.filter(
     (b) =>
-      b.booking_date === TODAY_ISO &&
+      b.booking_date === todayWibIso &&
       (b.status === "Sedang Dipinjam" ||
         b.status === "Disetujui" ||
         b.status === "Menunggu Persetujuan")
@@ -325,7 +327,7 @@ export function DashboardView() {
                 {todayActiveBookings.length}
               </span>
               <p className="mt-1 text-xs text-slate-700 dark:text-slate-300">
-                jadwal tanggal {TODAY_ISO}
+                jadwal tanggal {todayWibIso}
               </p>
             </div>
 
@@ -452,39 +454,46 @@ export function DashboardView() {
             {/* Daftar Ringkas Jadwal Peminjaman Hari Ini */}
             <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
               <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2.5">
-                Agenda Reservasi & Sirkulasi Hari Ini ({TODAY_ISO})
+                Agenda Reservasi & Sirkulasi Hari Ini ({todayWibIso})
               </h3>
-              <div className="space-y-2">
-                {todayActiveBookings.map((bk) => {
-                  const room = rooms.find((r) => r.id === bk.room_id);
-                  const asset = assets.find((a) => a.id === bk.asset_id);
-                  return (
-                    <Link
-                      key={bk.id}
-                      href={`/sarpras/peminjaman?inspect=${encodeURIComponent(bk.id)}`}
-                      className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 rounded border border-slate-200 dark:border-slate-800 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F]"
-                    >
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
-                            {bk.start_time}-{bk.end_time}
-                          </span>
-                          <span className="font-semibold text-slate-900 dark:text-slate-100">
-                            {bk.activity_name}
-                          </span>
+              {todayActiveBookings.length === 0 ? (
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Belum ada agenda peminjaman ruangan atau alat pada tanggal{" "}
+                  <span className="font-mono">{todayWibIso}</span>.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {todayActiveBookings.map((bk) => {
+                    const room = rooms.find((r) => r.id === bk.room_id);
+                    const asset = assets.find((a) => a.id === bk.asset_id);
+                    return (
+                      <Link
+                        key={bk.id}
+                        href={`/sarpras/peminjaman?inspect=${encodeURIComponent(bk.id)}`}
+                        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 rounded border border-slate-200 dark:border-slate-800 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F]"
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
+                              {bk.start_time}-{bk.end_time}
+                            </span>
+                            <span className="font-semibold text-slate-900 dark:text-slate-100">
+                              {bk.activity_name}
+                            </span>
+                          </div>
+                          <p className="text-slate-600 dark:text-slate-400">
+                            {bk.borrower_name} ({bk.borrower_unit}) • Target:{" "}
+                            {room ? `Ruang ${room.code}` : ""}
+                            {room && asset ? " + " : ""}
+                            {asset ? `${asset.name} (${asset.inventory_code})` : ""}
+                          </p>
                         </div>
-                        <p className="text-slate-600 dark:text-slate-400">
-                          {bk.borrower_name} ({bk.borrower_unit}) • Target:{" "}
-                          {room ? `Ruang ${room.code}` : ""}
-                          {room && asset ? " + " : ""}
-                          {asset ? `${asset.name} (${asset.inventory_code})` : ""}
-                        </p>
-                      </div>
-                      <BookingStatusBadge status={bk.status} />
-                    </Link>
-                  );
-                })}
-              </div>
+                        <BookingStatusBadge status={bk.status} />
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>

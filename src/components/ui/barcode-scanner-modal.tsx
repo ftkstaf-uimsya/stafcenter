@@ -165,7 +165,21 @@ export function BarcodeScannerModal({
               () => {}
             );
             started = true;
-          } catch {
+          } catch (envErr) {
+            const envName = envErr instanceof Error ? envErr.name : "";
+            const envMsg =
+              envErr instanceof Error
+                ? envErr.message.toLowerCase()
+                : String(envErr || "").toLowerCase();
+            if (
+              envName === "NotAllowedError" ||
+              envName === "PermissionDeniedError" ||
+              envName === "SecurityError" ||
+              envMsg.includes("permission") ||
+              envMsg.includes("notallowed")
+            ) {
+              throw envErr;
+            }
             try {
               await instance.start(
                 { facingMode: "user" },
@@ -211,7 +225,9 @@ export function BarcodeScannerModal({
         }
       } catch (err) {
         if (!cancelled) {
+          const errName = err instanceof Error ? err.name : "";
           const rawMsg = err instanceof Error ? err.message : String(err || "");
+          const rawLower = rawMsg.toLowerCase();
           const isHttpsIssue =
             typeof window !== "undefined" &&
             !window.isSecureContext &&
@@ -222,15 +238,33 @@ export function BarcodeScannerModal({
               "Akses kamera membutuhkan koneksi HTTPS yang aman (atau localhost). Gunakan tombol Scan dari Gambar atau kotak pencarian kode barang."
             );
           } else if (
-            rawMsg.toLowerCase().includes("permission") ||
-            rawMsg.toLowerCase().includes("notallowed")
+            errName === "NotAllowedError" ||
+            errName === "PermissionDeniedError" ||
+            errName === "SecurityError" ||
+            rawLower.includes("permission") ||
+            rawLower.includes("notallowed")
           ) {
             setCameraError(
-              "Izin kamera ditolak oleh browser. Klik ikon gembok di bilah alamat untuk mengizinkan kamera lalu tekan Muat Ulang Kamera."
+              "Izin kamera ditolak oleh browser/aplikasi. Klik ikon pengaturan situs di bilah alamat (atau menu tiga titik pada jendela aplikasi) > Izin Situs > Kamera > Izinkan, serta cek Privasi Kamera perangkat, lalu tekan Muat Ulang Kamera."
+            );
+          } else if (
+            errName === "NotFoundError" ||
+            errName === "DevicesNotFoundError" ||
+            rawLower.includes("tidak ditemukan")
+          ) {
+            setCameraError(
+              "Perangkat kamera tidak ditemukan. Pastikan webcam/kamera aktif atau gunakan Scan dari Gambar."
+            );
+          } else if (
+            errName === "NotReadableError" ||
+            errName === "TrackStartError"
+          ) {
+            setCameraError(
+              "Kamera sedang dipakai oleh aplikasi atau tab lain. Tutup aplikasi lain lalu tekan Muat Ulang Kamera."
             );
           } else {
             setCameraError(
-              `Kamera tidak dapat dibuka (${rawMsg || "sedang dipakai aplikasi lain"}). Coba Muat Ulang Kamera atau gunakan Scan dari Gambar.`
+              `Kamera tidak dapat dibuka (${rawMsg || "terjadi kendala perangkat kamera"}). Coba Muat Ulang Kamera atau gunakan Scan dari Gambar.`
             );
           }
         }

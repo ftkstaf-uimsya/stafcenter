@@ -60,7 +60,12 @@ type MutationPayload =
       mode?: DeleteStrategyMode;
       forceActive?: boolean;
     }
-  | { action: "insert_booking"; data: Record<string, unknown> }
+  | {
+      action: "insert_booking";
+      data: Record<string, unknown>;
+      roomId?: string | null;
+      nextRoomStatus?: string | null;
+    }
   | {
       action: "update_booking_status";
       id: string;
@@ -1516,6 +1521,16 @@ export async function POST(request: NextRequest) {
             { error: formatSafeDbError(error.message) },
             { status: 400 }
           );
+        }
+        if (
+          body.roomId &&
+          (body.nextRoomStatus === "Digunakan" ||
+            body.nextRoomStatus === "Tersedia")
+        ) {
+          await supabase
+            .from("rooms")
+            .update({ status: body.nextRoomStatus, updated_at: nowIso })
+            .eq("id", body.roomId);
         }
         return NextResponse.json({ ok: true });
       }

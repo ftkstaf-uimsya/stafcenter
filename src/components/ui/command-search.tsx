@@ -110,6 +110,28 @@ export function CommandSearch() {
       }
     }
 
+    if (canAccessPage("peminjaman")) {
+      if (
+        !q ||
+        matchesFlexibleQuery(
+          "pinjam cepat ruangan alat portabel reservasi fasilitas",
+          q
+        )
+      ) {
+        hits.push({
+          id: "nav-pinjam-cepat-fasilitas",
+          category: "Pintasan Loket",
+          code: "PINJAM CEPAT FASILITAS",
+          title: "Buka Pinjam Cepat Ruangan & Alat Portabel",
+          meta: "Form peminjaman ruangan/alat dengan foto bukti & antrean cepat",
+          href: "/sarpras/sirkulasi-invent/pinjam-cepat?mode=fasilitas",
+          icon: (
+            <CalendarClock className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />
+          ),
+        });
+      }
+    }
+
     if (canAccessPage("ruangan")) {
       for (const r of rooms) {
         if (
@@ -324,11 +346,14 @@ export function CommandSearch() {
 
     if (canAccessPage("peminjaman")) {
       for (const b of bookings) {
+        const rm = rooms.find((r) => r.id === b.room_id);
+        const ast = assets.find((a) => a.id === b.asset_id);
         if (
-          !qLower ||
-          b.booking_code.toLowerCase().includes(qLower) ||
-          b.activity_name.toLowerCase().includes(qLower) ||
-          b.borrower_name.toLowerCase().includes(qLower)
+          !q ||
+          matchesFlexibleQuery(
+            `${b.booking_code} ${b.activity_name} ${b.borrower_name} ${b.borrower_unit} ${rm?.code || ""} ${ast?.inventory_code || ""}`,
+            q
+          )
         ) {
           hits.push({
             id: `bk-${b.id}`,
@@ -508,6 +533,20 @@ export function CommandSearch() {
                   if (item.onAction) {
                     item.onAction();
                   } else if (item.href) {
+                    if (
+                      item.href.startsWith(
+                        "/sarpras/sirkulasi-invent/pinjam-cepat"
+                      )
+                    ) {
+                      const modeMatch = item.href.includes("mode=fasilitas")
+                        ? "fasilitas"
+                        : "alat-staf";
+                      window.dispatchEvent(
+                        new CustomEvent("stafcenter:pinjam-cepat-mode", {
+                          detail: { mode: modeMatch },
+                        })
+                      );
+                    }
                     router.push(item.href);
                   }
                 }}

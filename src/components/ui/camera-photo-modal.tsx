@@ -108,7 +108,16 @@ export function CameraPhotoModal({
               },
               audio: false,
             });
-          } catch {
+          } catch (envErr) {
+            const errName =
+              envErr instanceof Error ? envErr.name : "";
+            if (
+              errName === "NotAllowedError" ||
+              errName === "PermissionDeniedError" ||
+              errName === "SecurityError"
+            ) {
+              throw envErr;
+            }
             stream = await navigator.mediaDevices.getUserMedia({
               video: true,
               audio: false,
@@ -141,7 +150,9 @@ export function CameraPhotoModal({
         }
       } catch (err) {
         if (!cancelled) {
+          const errName = err instanceof Error ? err.name : "";
           const raw = err instanceof Error ? err.message : String(err || "");
+          const rawLower = raw.toLowerCase();
           const isHttpsIssue =
             typeof window !== "undefined" &&
             !window.isSecureContext &&
@@ -151,9 +162,33 @@ export function CameraPhotoModal({
             setErrorMsg(
               "Akses kamera membutuhkan koneksi HTTPS yang aman (atau localhost). Gunakan tombol fallback di bawah untuk mengambil foto."
             );
+          } else if (
+            errName === "NotAllowedError" ||
+            errName === "PermissionDeniedError" ||
+            errName === "SecurityError" ||
+            rawLower.includes("permission") ||
+            rawLower.includes("notallowed")
+          ) {
+            setErrorMsg(
+              "Izin kamera ditolak oleh browser/aplikasi. Klik ikon pengaturan situs di bilah alamat (atau menu tiga titik pada jendela aplikasi) > Izin Situs > Kamera > Izinkan, serta pastikan izin Kamera aktif di Pengaturan Privasi perangkat, lalu tekan Coba Lagi."
+            );
+          } else if (
+            errName === "NotFoundError" ||
+            errName === "DevicesNotFoundError"
+          ) {
+            setErrorMsg(
+              "Perangkat kamera tidak ditemukan pada laptop/HP ini. Gunakan tombol Buka Kamera / Galeri Perangkat di bawah."
+            );
+          } else if (
+            errName === "NotReadableError" ||
+            errName === "TrackStartError"
+          ) {
+            setErrorMsg(
+              "Kamera sedang dipakai oleh aplikasi atau tab lain. Tutup aplikasi lain yang memakai kamera lalu tekan Coba Lagi."
+            );
           } else {
             setErrorMsg(
-              `Kamera tidak dapat dinyalakan (${raw || "izin ditolak atau kamera sedang dipakai"}).`
+              `Kamera tidak dapat dinyalakan (${raw || "terjadi kendala perangkat kamera"}).`
             );
           }
         }

@@ -217,7 +217,10 @@ interface SarprasContextValue {
 
   // Peminjaman & Reservasi
   addBooking: (
-    payload: Omit<Booking, "id" | "booking_code" | "status" | "created_at">
+    payload: Omit<Booking, "id" | "booking_code" | "status" | "created_at">,
+    options?: {
+      initialStatus?: "Menunggu Persetujuan" | "Disetujui" | "Sedang Dipinjam";
+    }
   ) => ActionResult;
   updateBookingStatus: (
     id: string,
@@ -2014,8 +2017,11 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
 
   const addBooking = useCallback(
     (
-      payload: Omit<Booking, "id" | "booking_code" | "status" | "created_at">
-    ): { ok: boolean; error?: string } => {
+      payload: Omit<Booking, "id" | "booking_code" | "status" | "created_at">,
+      options?: {
+        initialStatus?: "Menunggu Persetujuan" | "Disetujui" | "Sedang Dipinjam";
+      }
+    ): ActionResult => {
       if (!requireStaffForLiveWrite("peminjaman")) {
         return { ok: false, error: "Autentikasi staf diperlukan." };
       }
@@ -2046,15 +2052,33 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       ).padStart(3, "0");
       const id = generateUuid();
       const booking_code = `PJM-${getCurrentYearMonth()}-${seq}`;
+      const initialStatus: BookingStatus =
+        options?.initialStatus || "Menunggu Persetujuan";
+      const approvedBy =
+        initialStatus === "Disetujui" || initialStatus === "Sedang Dipinjam"
+          ? authUser?.fullName || "Staf Loket Sarpras"
+          : undefined;
+
       const newBooking: Booking = {
         ...payload,
         id,
         booking_code,
-        status: "Menunggu Persetujuan",
+        status: initialStatus,
+        ...(approvedBy ? { approved_by: approvedBy } : {}),
         created_at: new Date().toISOString(),
       };
 
       setBookings((prev) => [newBooking, ...prev]);
+
+      let nextRoomStatus: Room["status"] | null = null;
+      if (initialStatus === "Sedang Dipinjam" && payload.room_id) {
+        nextRoomStatus = "Digunakan";
+        setRooms((prev) =>
+          prev.map((r) =>
+            r.id === payload.room_id ? { ...r, status: "Digunakan" } : r
+          )
+        );
+      }
 
       if (isLiveSupabase && authUser) {
         void sendMutation(
@@ -2084,28 +2108,31 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               booking_date: payload.booking_date,
               start_time: payload.start_time,
               end_time: payload.end_time,
-              status: "Menunggu Persetujuan",
-              approved_by: null,
+              status: initialStatus,
+              approved_by: approvedBy || null,
               return_condition_notes: null,
             },
+            roomId: nextRoomStatus ? payload.room_id : null,
+            nextRoomStatus,
           },
           "Menyimpan Reservasi",
           "Reservasi Tersimpan di Supabase",
-          `Tiket ${booking_code} berhasil dicatat dan menunggu persetujuan sarpras.`
+          `Tiket ${booking_code} berhasil dicatat dengan status ${initialStatus}.`
         );
-        return { ok: true };
+        return { ok: true, id };
       }
 
       notify(
         "success",
         "Reservasi Diajukan",
-        `Tiket ${newBooking.booking_code} berhasil dibuat dan menunggu persetujuan sarpras.`
+        `Tiket ${newBooking.booking_code} berhasil dibuat dengan status ${initialStatus}.`
       );
-      return { ok: true };
+      return { ok: true, id };
     },
     [
       authUser,
       bookings,
+      extendedMasterReady,
       isLiveSupabase,
       notify,
       requireStaffForLiveWrite,
