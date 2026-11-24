@@ -1,5 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || "https://stafftk.vercel.app";
+const isLocal = baseURL.startsWith("http://localhost") || baseURL.startsWith("http://127.0.0.1");
+
 export default defineConfig({
   testDir: "./tests",
   testMatch: "**/*.spec.ts",
@@ -12,7 +15,7 @@ export default defineConfig({
   },
   reporter: [["list"]],
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     permissions: ["camera"],
@@ -29,10 +32,14 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer: {
-    command: "npm run start",
-    url: "http://localhost:3000/login",
-    reuseExistingServer: true,
-    timeout: 120_000,
-  },
+  ...(isLocal
+    ? {
+        webServer: {
+          command: "npm run start",
+          url: `${baseURL}/login`,
+          reuseExistingServer: true,
+          timeout: 120_000,
+        },
+      }
+    : {}),
 });

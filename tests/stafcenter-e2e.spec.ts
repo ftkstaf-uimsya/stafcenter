@@ -13,8 +13,9 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
     page,
   }) => {
     await loginAsMasterAdmin(page);
+    const header = page.getByRole("banner");
     await expect(page.getByText("[DB: SUPABASE]")).toHaveCount(0);
-    await expect(page.getByText("staf (Master Admin)")).toHaveCount(0);
+    await expect(header.getByText("staf (Master Admin)")).toHaveCount(0);
   });
 
   test("2. Halaman Tugas Akhir (Skripsi & Artikel Jurnal) tampil 4 kolom berurutan", async ({
@@ -23,14 +24,26 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
     await loginAsMasterAdmin(page);
 
     await page.goto("/tugas-akhir/skripsi/proposal");
-    await expect(page.getByText("Berkas Daftar")).toBeVisible();
-    await expect(page.getByText("Bikin Jadwal")).toBeVisible();
-    await expect(page.getByText("Bikin Surat")).toBeVisible();
-    await expect(page.getByText("Selesai / Arsip")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Berkas Daftar" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Bikin Jadwal" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Bikin Surat" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Selesai / Arsip" })
+    ).toBeVisible();
 
     await page.goto("/tugas-akhir/artikel-jurnal/sidang");
-    await expect(page.getByText("Berkas Daftar")).toBeVisible();
-    await expect(page.getByText("Selesai / Arsip")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Berkas Daftar" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Selesai / Arsip" })
+    ).toBeVisible();
   });
 
   test("3. Manajemen Akun Staf menampilkan Otoritas Akses Halaman", async ({
@@ -40,8 +53,8 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
     await page.goto("/sarpras/akun");
     await page.getByRole("button", { name: /Tambah Akun Staf/i }).click();
     await expect(page.getByText(/Otoritas Akses Halaman/i)).toBeVisible();
-    await expect(page.getByText(/Skripsi - Proposal/i)).toBeVisible();
-    await page.getByRole("button", { name: "Batal" }).click();
+    await expect(page.getByText("Skripsi: Proposal")).toBeVisible();
+    await page.getByRole("button", { name: "Batal", exact: true }).click();
   });
 
   test("4. Pemeliharaan & Kerusakan mendukung pelaporan Alat Kantor Staf", async ({
@@ -50,11 +63,10 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
     await loginAsMasterAdmin(page);
     await page.goto("/sarpras/pemeliharaan");
     await page
-      .getByRole("button", { name: /Laporkan Kerusakan|Buat Laporan/i })
-      .first()
+      .getByRole("button", { name: "Buat Tiket Laporan Kerusakan" })
       .click();
     await expect(page.getByText(/Alat Kantor Staf/i).first()).toBeVisible();
-    await page.getByRole("button", { name: "Batal" }).click();
+    await page.getByRole("button", { name: "Batal", exact: true }).click();
   });
 
   test("5. Inventaris Aset menggunakan Cetak QR Massal tanpa Barcode 1D", async ({
@@ -62,7 +74,9 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
   }) => {
     await loginAsMasterAdmin(page);
     await page.goto("/sarpras/inventaris");
-    const cetakBtn = page.getByRole("button", { name: /Cetak QR Massal/i });
+    const cetakBtn = page.getByRole("button", {
+      name: /Cetak (QR|Barcode) Massal/i,
+    });
     await expect(cetakBtn).toBeVisible();
     if (await cetakBtn.isEnabled()) {
       await cetakBtn.click();
@@ -70,30 +84,29 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
       await expect(page.getByText(/Kombinasi \(QR \+ Barcode\)/i)).toHaveCount(
         0
       );
-      await page.getByRole("button", { name: "Tutup" }).click();
+      await page.getByRole("button", { name: "Tutup", exact: true }).click();
     }
   });
 
-  test("6. Sirkulasi Invent: Kolom/Board/Tabel, Riwayat & Rekap, Auto Pola A, Resequence Preview, QR Only, Scan & Kamera Live", async ({
+  test("6. Sirkulasi Invent: Board/Tabel, Riwayat & Rekap, Auto Pola A, Resequence Preview, QR Only, Scan & Kamera Live", async ({
     page,
   }) => {
     await loginAsMasterAdmin(page);
     await page.goto("/sarpras/sirkulasi-invent");
 
-    // 6a. Switch Kolom -> Board -> Tabel
+    // 6a. Switch Board -> Tabel
     await page.getByRole("button", { name: "Board" }).click();
     await expect(page.getByText("Sedang Dipinjam").first()).toBeVisible();
     await expect(page.getByText("Dikembalikan").first()).toBeVisible();
     await page.getByRole("button", { name: "Tabel" }).click();
-    await page.getByRole("button", { name: "Kolom" }).click();
 
     // 6b. Tab Riwayat & Rekap (Master Admin)
-    await page.getByRole("button", { name: /Riwayat & Rekap/i }).click();
+    await page.getByRole("tab", { name: /Riwayat & Rekap/i }).click();
     await expect(page.getByText(/Rekap Kelas/i).first()).toBeVisible();
 
     // 6c. Tab Katalog Barang Kantor Staf: Resequence Preview & QR Only
     await page
-      .getByRole("button", { name: /Katalog Barang Kantor Staf/i })
+      .getByRole("tab", { name: /Katalog Barang Kantor Staf/i })
       .click();
 
     await page
@@ -102,16 +115,16 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
     await expect(
       page.getByText("Rapikan Kode Unit & Nama Barang Kantor Staf")
     ).toBeVisible();
-    await page.getByRole("button", { name: "Batal" }).click();
+    await page.getByRole("button", { name: "Batal", exact: true }).click();
 
     const cetakKitQrBtn = page.getByRole("button", { name: /Cetak QR Massal/i });
-    if (await cetakKitQrBtn.isVisible() && (await cetakKitQrBtn.isEnabled())) {
+    if ((await cetakKitQrBtn.isVisible()) && (await cetakKitQrBtn.isEnabled())) {
       await cetakKitQrBtn.click();
       await expect(page.getByText(/Barcode 1D Saja/i)).toHaveCount(0);
       await expect(page.getByText(/Kombinasi \(QR \+ Barcode\)/i)).toHaveCount(
         0
       );
-      await page.getByRole("button", { name: "Tutup" }).click();
+      await page.getByRole("button", { name: "Tutup", exact: true }).click();
     }
 
     // 6d. Tambah Barang Kantor Staf: Auto Kode Pola A & Auto Nama
@@ -123,14 +136,15 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
     await expect(kodeInput).toHaveValue(/^1\d{3,}$/);
     await expect(namaInput).toHaveValue(/^Kabel HDMI \d+$/);
 
-    // Ubah kategori ke Stop Kontak (SearchableSelect / combobox button)
-    const kategoriInput = page.getByPlaceholder("Pilih kategori...");
+    const kategoriInput = page.getByRole("combobox", {
+      name: /Kategori Peralatan/i,
+    });
     await kategoriInput.click();
     await kategoriInput.fill("Stop Kontak");
     await page.getByRole("option", { name: "Stop Kontak" }).click();
     await expect(kodeInput).toHaveValue(/^2\d{3,}$/);
     await expect(namaInput).toHaveValue(/^Stop Kontak \d+$/);
-    await page.getByRole("button", { name: "Batal" }).click();
+    await page.getByRole("button", { name: "Batal", exact: true }).click();
 
     // 6e. Pinjamkan Alat ke Kelas: Scan Kamera & Ambil Foto Live
     await page
@@ -141,13 +155,15 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
     await expect(
       page.getByText(/Scan QR Code Barang Kantor Staf/i)
     ).toBeVisible();
-    await page.getByRole("button", { name: "Tutup" }).click();
+    await page.getByRole("button", { name: /Selesai Scan/i }).click();
 
     await page.getByRole("button", { name: /Ambil Foto/i }).click();
     const videoEl = page.locator("video");
     await expect(videoEl).toBeVisible();
-    await page.getByRole("button", { name: "Batal" }).click();
-
-    await page.getByRole("button", { name: "Batal" }).click();
+    await page
+      .getByRole("button", { name: "Batal", exact: true })
+      .last()
+      .click();
+    await page.getByRole("button", { name: "Batal", exact: true }).click();
   });
 });
