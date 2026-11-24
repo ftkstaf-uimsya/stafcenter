@@ -7,6 +7,7 @@ import {
   Boxes,
   Cable,
   CalendarClock,
+  ClipboardPlus,
   DoorOpen,
   GraduationCap,
   HardHat,
@@ -21,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { getThesisHref, getThesisPageKey } from "@/lib/auth/permissions";
+import { matchesFlexibleQuery } from "@/lib/search-normalize";
 import { useSarpras } from "@/lib/supabase/sarpras-context";
 
 interface SearchHit {
@@ -82,16 +84,37 @@ export function CommandSearch() {
   }, [commandSearchOpen]);
 
   const results = useMemo<SearchHit[]>(() => {
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
+    const qLower = q.toLowerCase();
     const hits: SearchHit[] = [];
+
+    if (canAccessPage("sirkulasi-invent")) {
+      if (
+        !q ||
+        matchesFlexibleQuery(
+          "pinjam cepat loket sirkulasi invent alat kantor staf",
+          q
+        )
+      ) {
+        hits.push({
+          id: "nav-pinjam-cepat",
+          category: "Pintasan Loket",
+          code: "PINJAM CEPAT",
+          title: "Buka Halaman Pinjam Cepat Alat Kantor Staf",
+          meta: "Form peminjaman cepat berdampingan dengan daftar dipinjam & dikembalikan",
+          href: "/sarpras/sirkulasi-invent/pinjam-cepat",
+          icon: (
+            <ClipboardPlus className="w-4 h-4 text-[#1E3A5F] dark:text-sky-400" />
+          ),
+        });
+      }
+    }
 
     if (canAccessPage("ruangan")) {
       for (const r of rooms) {
         if (
           !q ||
-          r.code.toLowerCase().includes(q) ||
-          r.name.toLowerCase().includes(q) ||
-          r.pic_name.toLowerCase().includes(q)
+          matchesFlexibleQuery(`${r.code} ${r.name} ${r.pic_name}`, q)
         ) {
           hits.push({
             id: `rm-${r.id}`,
@@ -109,10 +132,10 @@ export function CommandSearch() {
     if (canAccessPage("dosen")) {
       for (const l of lecturers) {
         if (
-          !q ||
-          l.nidn_nip.toLowerCase().includes(q) ||
-          l.full_name.toLowerCase().includes(q) ||
-          l.homebase_prodi.toLowerCase().includes(q)
+          !qLower ||
+          l.nidn_nip.toLowerCase().includes(qLower) ||
+          l.full_name.toLowerCase().includes(qLower) ||
+          l.homebase_prodi.toLowerCase().includes(qLower)
         ) {
           hits.push({
             id: `dsn-${l.id}`,
@@ -132,10 +155,10 @@ export function CommandSearch() {
     if (canAccessPage("makul")) {
       for (const c of courses) {
         if (
-          !q ||
-          c.code.toLowerCase().includes(q) ||
-          c.name.toLowerCase().includes(q) ||
-          c.prodi.toLowerCase().includes(q)
+          !qLower ||
+          c.code.toLowerCase().includes(qLower) ||
+          c.name.toLowerCase().includes(qLower) ||
+          c.prodi.toLowerCase().includes(qLower)
         ) {
           hits.push({
             id: `mk-${c.id}`,
@@ -153,11 +176,11 @@ export function CommandSearch() {
     if (canAccessPage("pengurus")) {
       for (const o of campusOfficials) {
         if (
-          !q ||
-          o.official_code.toLowerCase().includes(q) ||
-          o.full_name.toLowerCase().includes(q) ||
-          o.position_title.toLowerCase().includes(q) ||
-          o.unit_name.toLowerCase().includes(q)
+          !qLower ||
+          o.official_code.toLowerCase().includes(qLower) ||
+          o.full_name.toLowerCase().includes(qLower) ||
+          o.position_title.toLowerCase().includes(qLower) ||
+          o.unit_name.toLowerCase().includes(qLower)
         ) {
           hits.push({
             id: `pgr-${o.id}`,
@@ -175,11 +198,11 @@ export function CommandSearch() {
     if (canAccessPage("unit")) {
       for (const u of campusUnits) {
         if (
-          !q ||
-          u.code.toLowerCase().includes(q) ||
-          u.name.toLowerCase().includes(q) ||
-          u.unit_type.toLowerCase().includes(q) ||
-          (u.leader_name || "").toLowerCase().includes(q)
+          !qLower ||
+          u.code.toLowerCase().includes(qLower) ||
+          u.name.toLowerCase().includes(qLower) ||
+          u.unit_type.toLowerCase().includes(qLower) ||
+          (u.leader_name || "").toLowerCase().includes(qLower)
         ) {
           hits.push({
             id: `unit-${u.id}`,
@@ -197,11 +220,11 @@ export function CommandSearch() {
     if (canAccessPage("vendor")) {
       for (const v of maintenanceVendors) {
         if (
-          !q ||
-          v.vendor_code.toLowerCase().includes(q) ||
-          v.name.toLowerCase().includes(q) ||
-          v.specialty.toLowerCase().includes(q) ||
-          v.pic_name.toLowerCase().includes(q)
+          !qLower ||
+          v.vendor_code.toLowerCase().includes(qLower) ||
+          v.name.toLowerCase().includes(qLower) ||
+          v.specialty.toLowerCase().includes(qLower) ||
+          v.pic_name.toLowerCase().includes(qLower)
         ) {
           hits.push({
             id: `vnd-${v.id}`,
@@ -220,9 +243,10 @@ export function CommandSearch() {
       for (const cls of academicClasses) {
         if (
           !q ||
-          cls.class_code.toLowerCase().includes(q) ||
-          cls.prodi.toLowerCase().includes(q) ||
-          cls.dpm_name.toLowerCase().includes(q)
+          matchesFlexibleQuery(
+            `${cls.class_code} ${cls.prodi} ${cls.dpm_name}`,
+            q
+          )
         ) {
           hits.push({
             id: `cls-${cls.id}`,
@@ -241,11 +265,10 @@ export function CommandSearch() {
       for (const loan of officeKitLoans) {
         if (
           !q ||
-          loan.loan_code.toLowerCase().includes(q) ||
-          loan.class_code.toLowerCase().includes(q) ||
-          loan.dpm_name.toLowerCase().includes(q) ||
-          loan.borrower_name.toLowerCase().includes(q) ||
-          loan.kit_items_label.toLowerCase().includes(q)
+          matchesFlexibleQuery(
+            `${loan.loan_code} ${loan.class_code} ${loan.dpm_name} ${loan.borrower_name} ${loan.kit_items_label}`,
+            q
+          )
         ) {
           hits.push({
             id: `srk-${loan.id}`,
@@ -262,9 +285,7 @@ export function CommandSearch() {
       for (const kit of officeKitItems) {
         if (
           !q ||
-          kit.kit_code.toLowerCase().includes(q) ||
-          kit.name.toLowerCase().includes(q) ||
-          kit.category.toLowerCase().includes(q)
+          matchesFlexibleQuery(`${kit.kit_code} ${kit.name} ${kit.category}`, q)
         ) {
           hits.push({
             id: `kit-${kit.id}`,
@@ -283,9 +304,10 @@ export function CommandSearch() {
       for (const a of assets) {
         if (
           !q ||
-          a.inventory_code.toLowerCase().includes(q) ||
-          a.name.toLowerCase().includes(q) ||
-          a.brand_model.toLowerCase().includes(q)
+          matchesFlexibleQuery(
+            `${a.inventory_code} ${a.name} ${a.brand_model} ${a.serial_number || ""}`,
+            q
+          )
         ) {
           hits.push({
             id: `ast-${a.id}`,
@@ -303,10 +325,10 @@ export function CommandSearch() {
     if (canAccessPage("peminjaman")) {
       for (const b of bookings) {
         if (
-          !q ||
-          b.booking_code.toLowerCase().includes(q) ||
-          b.activity_name.toLowerCase().includes(q) ||
-          b.borrower_name.toLowerCase().includes(q)
+          !qLower ||
+          b.booking_code.toLowerCase().includes(qLower) ||
+          b.activity_name.toLowerCase().includes(qLower) ||
+          b.borrower_name.toLowerCase().includes(qLower)
         ) {
           hits.push({
             id: `bk-${b.id}`,
@@ -329,13 +351,13 @@ export function CommandSearch() {
           ? officeKitItems.find((k) => k.id === m.office_kit_item_id)
           : null;
         if (
-          !q ||
-          m.ticket_code.toLowerCase().includes(q) ||
-          m.issue_title.toLowerCase().includes(q) ||
-          m.reporter_name.toLowerCase().includes(q) ||
+          !qLower ||
+          m.ticket_code.toLowerCase().includes(qLower) ||
+          m.issue_title.toLowerCase().includes(qLower) ||
+          m.reporter_name.toLowerCase().includes(qLower) ||
           (kit &&
-            (kit.kit_code.toLowerCase().includes(q) ||
-              kit.name.toLowerCase().includes(q)))
+            (kit.kit_code.toLowerCase().includes(qLower) ||
+              kit.name.toLowerCase().includes(qLower)))
         ) {
           hits.push({
             id: `mnt-${m.id}`,
@@ -355,9 +377,9 @@ export function CommandSearch() {
     if (canAccessPage("bhp")) {
       for (const c of consumables) {
         if (
-          !q ||
-          c.code.toLowerCase().includes(q) ||
-          c.name.toLowerCase().includes(q)
+          !qLower ||
+          c.code.toLowerCase().includes(qLower) ||
+          c.name.toLowerCase().includes(qLower)
         ) {
           hits.push({
             id: `bhp-${c.id}`,
@@ -376,12 +398,12 @@ export function CommandSearch() {
       const taPageKey = getThesisPageKey(w.track, w.stage);
       if (!canAccessPage(taPageKey)) continue;
       if (
-        !q ||
-        w.ticket_code.toLowerCase().includes(q) ||
-        w.student_name.toLowerCase().includes(q) ||
-        w.student_nim.toLowerCase().includes(q) ||
-        w.title.toLowerCase().includes(q) ||
-        (w.journal_name || "").toLowerCase().includes(q)
+        !qLower ||
+        w.ticket_code.toLowerCase().includes(qLower) ||
+        w.student_name.toLowerCase().includes(qLower) ||
+        w.student_nim.toLowerCase().includes(qLower) ||
+        w.title.toLowerCase().includes(qLower) ||
+        (w.journal_name || "").toLowerCase().includes(qLower)
       ) {
         hits.push({
           id: `ta-${w.id}`,
@@ -398,9 +420,9 @@ export function CommandSearch() {
     }
 
     if (
-      !q ||
-      "sinkron ulang database refresh reset".includes(q) ||
-      "database".includes(q)
+      !qLower ||
+      "sinkron ulang database refresh reset".includes(qLower) ||
+      "database".includes(qLower)
     ) {
       hits.push({
         id: "util-sync-db",

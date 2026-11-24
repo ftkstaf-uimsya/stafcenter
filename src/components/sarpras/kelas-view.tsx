@@ -32,6 +32,7 @@ import {
 import { EntityDrawerSections } from "@/components/ui/entity-drawer-sections";
 import { ErrorStateView, LoadingStateView } from "@/components/ui/data-states";
 import { MasterAdminGuard } from "@/components/sarpras/master-admin-guard";
+import { matchesFlexibleQuery } from "@/lib/search-normalize";
 
 export function KelasView() {
   const {
@@ -89,16 +90,14 @@ export function KelasView() {
 
   const filteredClasses = useMemo(() => {
     return academicClasses.filter((c) => {
-      const q = searchQuery.trim().toLowerCase();
-      const prodiName = (PRODI_LABELS[c.prodi] || "").toLowerCase();
+      const q = searchQuery.trim();
+      const prodiName = PRODI_LABELS[c.prodi] || "";
       const matchSearch =
         !q ||
-        c.class_code.toLowerCase().includes(q) ||
-        c.prodi.toLowerCase().includes(q) ||
-        prodiName.includes(q) ||
-        c.dpm_name.toLowerCase().includes(q) ||
-        c.dpm_phone.toLowerCase().includes(q) ||
-        c.angkatan_year.includes(q);
+        matchesFlexibleQuery(
+          `${c.class_code} ${c.prodi} ${prodiName} ${c.dpm_name} ${c.dpm_phone} ${c.angkatan_year}`,
+          q
+        );
       const matchProdi = filterProdi === "ALL" || c.prodi === filterProdi;
       const matchSection =
         filterSection === "ALL" || c.class_section === filterSection;

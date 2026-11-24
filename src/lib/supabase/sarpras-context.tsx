@@ -209,6 +209,10 @@ interface SarprasContextValue {
     id: string,
     options?: { mode?: DeleteStrategyMode; forceActive?: boolean }
   ) => Promise<ActionResult>;
+  bulkDeleteAssets: (
+    ids: string[],
+    options?: { mode?: DeleteStrategyMode; forceActive?: boolean }
+  ) => Promise<ActionResult>;
   previewNextInventoryCode: (category: AssetCategoryCode, year: number) => string;
 
   // Peminjaman & Reservasi
@@ -357,6 +361,7 @@ interface SarprasContextValue {
     payload: Partial<Omit<OfficeKitItem, "id" | "created_at">>
   ) => void;
   deleteOfficeKitItem: (id: string) => Promise<ActionResult>;
+  bulkDeleteOfficeKitItems: (ids: string[]) => Promise<ActionResult>;
   checkoutOfficeKitLoan: (payload: {
     class_id?: string | null;
     class_code: string;
@@ -1239,6 +1244,23 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const removeEntityArtifactsBatchLocal = useCallback(
+    (entityType: SarprasEntityType, entityIds: string[]) => {
+      const idSet = new Set(entityIds);
+      setNotes((prev) =>
+        prev.filter(
+          (n) => !(n.entity_type === entityType && idSet.has(n.entity_id))
+        )
+      );
+      setAttachments((prev) =>
+        prev.filter(
+          (a) => !(a.entity_type === entityType && idSet.has(a.entity_id))
+        )
+      );
+    },
+    []
+  );
+
   const addBuilding = useCallback(
     (payload: Omit<Building, "id" | "created_at">) => {
       if (!requireMasterAdminForDataMaster("ruangan")) return;
@@ -1880,6 +1902,111 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       isLiveSupabase,
       notify,
       removeEntityArtifactsLocal,
+      requireStaffForLiveWrite,
+      sendConfirmedMutation,
+    ]
+  );
+
+  const bulkDeleteAssets = useCallback(
+    async (
+      ids: string[],
+      options?: { mode?: DeleteStrategyMode; forceActive?: boolean }
+    ): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite("inventaris")) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+      if (uniqueIds.length === 0) {
+        return { ok: false, error: "Pilih minimal 1 aset untuk dihapus." };
+      }
+
+      const idSet = new Set(uniqueIds);
+      const mode = options?.mode || "archive";
+      const forceActive = Boolean(options?.forceActive);
+      const targetMap = new Map(
+        assets
+          .filter((a) => idSet.has(a.id))
+          .map((a) => [
+            a.id,
+            `Aset ${a.inventory_code} (${a.name}) [Dihapus]`,
+          ])
+      );
+
+      const applyLocalDelete = () => {
+        setAssets((prev) => prev.filter((item) => !idSet.has(item.id)));
+        if (mode === "cascade") {
+          setBookings((prev) =>
+            prev
+              .filter((b) => !(b.asset_id && idSet.has(b.asset_id) && !b.room_id))
+              .map((b) =>
+                b.asset_id && idSet.has(b.asset_id) && b.room_id
+                  ? { ...b, asset_id: null, target_type: "Ruangan" }
+                  : b
+              )
+          );
+          setMaintenanceLogs((prev) =>
+            prev
+              .filter((m) => !(m.asset_id && idSet.has(m.asset_id) && !m.room_id))
+              .map((m) =>
+                m.asset_id && idSet.has(m.asset_id)
+                  ? { ...m, asset_id: null }
+                  : m
+              )
+          );
+        } else {
+          setBookings((prev) =>
+            prev.map((b) =>
+              b.asset_id && idSet.has(b.asset_id)
+                ? {
+                    ...b,
+                    asset_id: null,
+                    target_type: b.room_id ? "Ruangan" : b.target_type,
+                    deleted_target_label:
+                      targetMap.get(b.asset_id) || "Aset [Dihapus]",
+                  }
+                : b
+            )
+          );
+          setMaintenanceLogs((prev) =>
+            prev.map((m) =>
+              m.asset_id && idSet.has(m.asset_id)
+                ? {
+                    ...m,
+                    asset_id: null,
+                    deleted_target_label:
+                      targetMap.get(m.asset_id) || "Aset [Dihapus]",
+                  }
+                : m
+            )
+          );
+        }
+        removeEntityArtifactsBatchLocal("asset", uniqueIds);
+      };
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "bulk_delete_assets", ids: uniqueIds, mode, forceActive },
+          "Menghapus Massal Aset",
+          "Hapus Massal Aset Selesai",
+          `${uniqueIds.length} aset inventaris dihapus dari Supabase.`,
+          applyLocalDelete
+        );
+      }
+
+      applyLocalDelete();
+      notify(
+        "info",
+        "Hapus Massal Aset Selesai",
+        `${uniqueIds.length} aset inventaris dihapus dari daftar.`
+      );
+      return { ok: true };
+    },
+    [
+      assets,
+      authUser,
+      isLiveSupabase,
+      notify,
+      removeEntityArtifactsBatchLocal,
       requireStaffForLiveWrite,
       sendConfirmedMutation,
     ]
@@ -4493,6 +4620,64 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  const bulkDeleteOfficeKitItems = useCallback(
+    async (ids: string[]): Promise<ActionResult> => {
+      if (!requireStaffForLiveWrite("sirkulasi-invent")) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+      const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+      if (uniqueIds.length === 0) {
+        return { ok: false, error: "Pilih minimal 1 barang untuk dihapus." };
+      }
+
+      const idSet = new Set(uniqueIds);
+      const borrowedTargets = officeKitItems.filter(
+        (item) => idSet.has(item.id) && item.status === "Dipinjam"
+      );
+      if (borrowedTargets.length > 0) {
+        return {
+          ok: false,
+          error: `Barang berikut masih dipinjam kelas: ${borrowedTargets
+            .slice(0, 5)
+            .map((i) => i.kit_code)
+            .join(", ")}. Catat pengembalian atau hapus centangnya terlebih dahulu.`,
+        };
+      }
+
+      const applyLocalDelete = () => {
+        setOfficeKitItems((prev) => prev.filter((item) => !idSet.has(item.id)));
+        removeEntityArtifactsBatchLocal("office_kit", uniqueIds);
+      };
+
+      if (isLiveSupabase && authUser) {
+        return sendConfirmedMutation(
+          { action: "bulk_delete_office_kit_items", ids: uniqueIds },
+          "Menghapus Massal Barang Kantor Staf",
+          "Hapus Massal Barang Selesai",
+          `${uniqueIds.length} barang kantor staf telah dihapus dari katalog.`,
+          applyLocalDelete
+        );
+      }
+
+      applyLocalDelete();
+      notify(
+        "info",
+        "Hapus Massal Barang Selesai",
+        `${uniqueIds.length} barang kantor staf telah dihapus dari katalog.`
+      );
+      return { ok: true };
+    },
+    [
+      authUser,
+      isLiveSupabase,
+      notify,
+      officeKitItems,
+      removeEntityArtifactsBatchLocal,
+      requireStaffForLiveWrite,
+      sendConfirmedMutation,
+    ]
+  );
+
   const checkoutOfficeKitLoan = useCallback(
     (payload: {
       class_id?: string | null;
@@ -5482,6 +5667,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       importAssets,
       updateAsset,
       deleteAsset,
+      bulkDeleteAssets,
       previewNextInventoryCode,
       addBooking,
       updateBookingStatus,
@@ -5529,6 +5715,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       addOfficeKitItem,
       updateOfficeKitItem,
       deleteOfficeKitItem,
+      bulkDeleteOfficeKitItems,
       checkoutOfficeKitLoan,
       checkinOfficeKitLoan,
       reopenOfficeKitLoan,
@@ -5594,6 +5781,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       importAssets,
       updateAsset,
       deleteAsset,
+      bulkDeleteAssets,
       previewNextInventoryCode,
       addBooking,
       updateBookingStatus,
@@ -5641,6 +5829,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       addOfficeKitItem,
       updateOfficeKitItem,
       deleteOfficeKitItem,
+      bulkDeleteOfficeKitItems,
       checkoutOfficeKitLoan,
       checkinOfficeKitLoan,
       reopenOfficeKitLoan,

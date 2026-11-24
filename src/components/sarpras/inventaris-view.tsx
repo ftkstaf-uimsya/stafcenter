@@ -43,6 +43,7 @@ import {
 import { AssetImportModal } from "@/components/sarpras/asset-import-modal";
 import { BarcodeLabelModal } from "@/components/ui/barcode-label-modal";
 import { PrintableBarcodeItem } from "@/lib/barcode/render-codes";
+import { matchesFlexibleQuery } from "@/lib/search-normalize";
 
 const ASSET_CONDITIONS: AssetCondition[] = [
   "Baik",
@@ -66,6 +67,7 @@ export function InventarisView() {
     addAsset,
     updateAsset,
     deleteAsset,
+    bulkDeleteAssets,
     previewNextInventoryCode,
   } = useSarpras();
 
@@ -118,10 +120,16 @@ export function InventarisView() {
     };
   };
 
-  // Modal Konfirmasi Hapus Aset
+  // Modal Konfirmasi Hapus Aset (Satuan & Massal)
   const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
+
+  const selectedAssetsForDelete = useMemo(
+    () => assets.filter((a) => selectedAssetRowKeys.includes(a.id)),
+    [assets, selectedAssetRowKeys]
+  );
 
   const openDeleteConfirm = (asset: Asset) => {
     setDeleteError("");
@@ -143,13 +151,13 @@ export function InventarisView() {
 
   const filteredAssets = useMemo(() => {
     return assets.filter((a) => {
-      const q = searchQuery.trim().toLowerCase();
+      const q = searchQuery.trim();
       const matchSearch =
         !q ||
-        a.inventory_code.toLowerCase().includes(q) ||
-        a.name.toLowerCase().includes(q) ||
-        a.brand_model.toLowerCase().includes(q) ||
-        (a.serial_number || "").toLowerCase().includes(q);
+        matchesFlexibleQuery(
+          `${a.inventory_code} ${a.name} ${a.brand_model} ${a.serial_number || ""}`,
+          q
+        );
       const matchRoom =
         filterRoom === "ALL" ||
         (filterRoom === "UNASSIGNED" ? !a.room_id : a.room_id === filterRoom);
@@ -556,15 +564,32 @@ export function InventarisView() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {selectedAssetRowKeys.length > 0 ? (
+          {selectedAssetsForDelete.length > 0 ? (
             <button
               type="button"
               onClick={() => setSelectedAssetRowKeys([])}
-              className="min-h-[40px] px-2.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white underline"
+              className="min-h-[44px] px-2.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white underline"
             >
-              Batal Pilih ({selectedAssetRowKeys.length})
+              Batal Pilih ({selectedAssetsForDelete.length})
             </button>
           ) : null}
+          <Button
+            type="button"
+            variant="danger"
+            size="sm"
+            disabled={selectedAssetsForDelete.length === 0}
+            onClick={() => {
+              setDeleteError("");
+              setBulkDeleteOpen(true);
+            }}
+          >
+            <Trash2 className="w-4 h-4" aria-hidden="true" />
+            <span>
+              {selectedAssetsForDelete.length > 0
+                ? `Hapus Massal (${selectedAssetsForDelete.length})`
+                : "Hapus Massal"}
+            </span>
+          </Button>
           <ColumnsTogglePopover
             columns={columns.map((c) => ({ key: c.key, label: c.header }))}
             hiddenKeys={hiddenColumnKeys}
@@ -1066,7 +1091,123 @@ export function InventarisView() {
           if (selectedAssetId === deletingAsset.id) {
             setSelectedAssetId(null);
           }
+          setSelectedAssetRowKeys((prev) =>
+            prev.filter((k) => k !== deletingAsset.id)
+          );
           setDeletingAsset(null);
+        }}
+      />
+
+      <ConfirmDeleteModal
+        isOpen={bulkDeleteOpen && selectedAssetsForDelete.length > 0}
+        onClose={() => {
+          if (!deleting) {
+            setBulkDeleteOpen(false);
+            setDeleteError("");
+          }
+        }}
+        title="Konfirmasi Hapus Massal Aset Inventaris"
+        targetBadge={`${selectedAssetsForDelete.length} Aset Dipilih`}
+        targetName={
+          selectedAssetsForDelete
+            .slice(0, 5)
+            .map((a) => `${a.inventory_code} (${a.name})`)
+            .join(", ") +
+          (selectedAssetsForDelete.length > 5
+            ? `, dan ${selectedAssetsForDelete.length - 5} aset lainnya`
+            : "")
+        }
+        errorMessage={deleteError}
+        isSubmitting={deleting}
+        confirmLabel={`Ya, Hapus ${selectedAssetsForDelete.length} Aset`}
+        showStrategySelector={(() => {
+          const idSet = new Set(selectedAssetsForDelete.map((a) => a.id));
+          return (
+            bookings.some((b) => b.asset_id && idSet.has(b.asset_id)) ||
+            maintenanceLogs.some((m) => m.asset_id && idSet.has(m.asset_id))
+          );
+        })()}
+        impactNotes={(() => {
+          const idSet = new Set(selectedAssetsForDelete.map((a) => a.id));
+          const bkCount = bookings.filter(
+            (b) => b.asset_id && idSet.has(b.asset_id)
+          ).length;
+          const mtCount = maintenanceLogs.filter(
+            (m) => m.asset_id && idSet.has(m.asset_id)
+          ).length;
+          const noteCount = entityNotes.filter(
+            (n) => n.entity_type === "asset" && idSet.has(n.entity_id)
+          ).length;
+          const attCount = attachments.filter(
+            (a) => a.entity_type === "asset" && idSet.has(a.entity_id)
+          ).length;
+          const lines: string[] = [];
+          if (bkCount > 0) {
+            lines.push(`Terhubung ke ${bkCount} tiket peminjaman / reservasi.`);
+          }
+          if (mtCount > 0) {
+            lines.push(
+              `Terhubung ke ${mtCount} tiket pemeliharaan / laporan kerusakan.`
+            );
+          }
+          if (noteCount > 0 || attCount > 0) {
+            lines.push(
+              `${noteCount} catatan & ${attCount} berkas lampiran aset terpilih akan ikut dihapus permanen.`
+            );
+          }
+          if (lines.length === 0) {
+            lines.push(
+              "Tidak ada tiket peminjaman maupun laporan kerusakan yang terikat pada aset terpilih."
+            );
+          }
+          return lines;
+        })()}
+        activeBlockers={(() => {
+          const idSet = new Set(selectedAssetsForDelete.map((a) => a.id));
+          return [
+            ...bookings
+              .filter(
+                (b) =>
+                  b.asset_id &&
+                  idSet.has(b.asset_id) &&
+                  (b.status === "Menunggu Persetujuan" ||
+                    b.status === "Disetujui" ||
+                    b.status === "Sedang Dipinjam")
+              )
+              .map((b) => `Peminjaman ${b.booking_code} (${b.status})`),
+            ...maintenanceLogs
+              .filter(
+                (m) =>
+                  m.asset_id &&
+                  idSet.has(m.asset_id) &&
+                  m.status !== "Selesai Diperbaiki"
+              )
+              .map((m) => `Perbaikan ${m.ticket_code} (${m.status})`),
+          ];
+        })()}
+        onConfirm={async ({
+          mode,
+          forceActive,
+        }: {
+          mode: DeleteStrategyMode;
+          forceActive: boolean;
+        }) => {
+          if (selectedAssetsForDelete.length === 0) return;
+          const ids = selectedAssetsForDelete.map((a) => a.id);
+          const idSet = new Set(ids);
+          setDeleting(true);
+          setDeleteError("");
+          const res = await bulkDeleteAssets(ids, { mode, forceActive });
+          setDeleting(false);
+          if (!res.ok) {
+            setDeleteError(res.error || "Gagal menghapus massal aset.");
+            return;
+          }
+          if (selectedAssetId && idSet.has(selectedAssetId)) {
+            setSelectedAssetId(null);
+          }
+          setSelectedAssetRowKeys([]);
+          setBulkDeleteOpen(false);
         }}
       />
 

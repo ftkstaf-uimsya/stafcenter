@@ -584,12 +584,20 @@ export function DashboardView() {
             </div>
           </div>
           {canAccessPage("sirkulasi-invent") ? (
-            <Link
-              href="/sarpras/sirkulasi-invent"
-              className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
-            >
-              Buka Sirkulasi Invent ({activeOfficeKitLoans.length} aktif)
-            </Link>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href="/sarpras/sirkulasi-invent/pinjam-cepat"
+                className="text-xs font-bold text-amber-800 dark:text-amber-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
+              >
+                Pinjam Cepat
+              </Link>
+              <Link
+                href="/sarpras/sirkulasi-invent"
+                className="text-xs font-bold text-[#1E3A5F] dark:text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] rounded px-2 py-1"
+              >
+                Buka Sirkulasi Invent ({activeOfficeKitLoans.length} aktif)
+              </Link>
+            </div>
           ) : null}
         </div>
 

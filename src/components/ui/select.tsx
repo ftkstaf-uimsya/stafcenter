@@ -3,6 +3,7 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, X } from "lucide-react";
+import { matchesFlexibleQuery } from "@/lib/search-normalize";
 
 export interface SelectOption {
   value: string;
@@ -99,11 +100,9 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
       if (!isFiltering || !query.trim()) {
         return options;
       }
-      const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-      return options.filter((opt) => {
-        const haystack = `${opt.label} ${opt.value}`.toLowerCase();
-        return tokens.every((tok) => haystack.includes(tok));
-      });
+      return options.filter((opt) =>
+        matchesFlexibleQuery(`${opt.label} ${opt.value}`, query)
+      );
     }, [isFiltering, options, query]);
 
     useEffect(() => {

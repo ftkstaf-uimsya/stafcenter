@@ -86,28 +86,74 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
       );
       await page.getByRole("button", { name: "Tutup", exact: true }).click();
     }
+
+    const bulkDeleteBtn = page.getByRole("button", { name: /Hapus Massal/i });
+    await expect(bulkDeleteBtn).toBeVisible();
+    await expect(bulkDeleteBtn).toBeDisabled();
+    const firstRowCheck = page.locator("tbody input[type='checkbox']").first();
+    if (await firstRowCheck.isVisible()) {
+      await firstRowCheck.check();
+      await expect(
+        page.getByRole("button", { name: /Hapus Massal \(1\)/i })
+      ).toBeEnabled();
+      await page.getByRole("button", { name: /Hapus Massal \(1\)/i }).click();
+      await expect(
+        page.getByText("Konfirmasi Hapus Massal Aset Inventaris")
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Batal", exact: true }).click();
+      await firstRowCheck.uncheck();
+    }
   });
 
-  test("6. Sirkulasi Invent: Board/Tabel, Riwayat & Rekap, Auto Pola A, Resequence Preview, QR Only, Scan & Kamera Live", async ({
+  test("6. Sirkulasi Invent: Kartu Board Ringkas, Hapus Massal Katalog, Riwayat & Rekap, Auto Pola A, Scan & Kamera Live", async ({
     page,
   }) => {
     await loginAsMasterAdmin(page);
     await page.goto("/sarpras/sirkulasi-invent");
 
-    // 6a. Switch Board -> Tabel
+    // 6a. Switch Board -> Tabel & verifikasi kartu ringkas tanpa progress bar 50%
     await page.getByRole("button", { name: "Board" }).click();
     await expect(page.getByText("Sedang Dipinjam").first()).toBeVisible();
     await expect(page.getByText("Dikembalikan").first()).toBeVisible();
+    await expect(page.getByText("50%")).toHaveCount(0);
+    const firstBoardCardBtn = page
+      .locator("article button")
+      .filter({ hasNotText: /Tandai Dikembalikan|Terima Kembali|Ubah ke Dipinjam/ })
+      .first();
+    if (await firstBoardCardBtn.isVisible()) {
+      await firstBoardCardBtn.click();
+      await expect(
+        page.getByRole("heading", { name: /Sirkulasi Kelas/i })
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+    }
     await page.getByRole("button", { name: "Tabel" }).click();
 
     // 6b. Tab Riwayat & Rekap (Master Admin)
     await page.getByRole("tab", { name: /Riwayat & Rekap/i }).click();
     await expect(page.getByText(/Rekap Kelas/i).first()).toBeVisible();
 
-    // 6c. Tab Katalog Barang Kantor Staf: Resequence Preview & QR Only
+    // 6c. Tab Katalog Barang Kantor Staf: Resequence Preview, Cetak QR & Hapus Massal
     await page
       .getByRole("tab", { name: /Katalog Barang Kantor Staf/i })
       .click();
+
+    const bulkDeleteKitBtn = page.getByRole("button", { name: /Hapus Massal/i });
+    await expect(bulkDeleteKitBtn).toBeVisible();
+    await expect(bulkDeleteKitBtn).toBeDisabled();
+    const firstKitCheck = page.locator("tbody input[type='checkbox']").first();
+    if (await firstKitCheck.isVisible()) {
+      await firstKitCheck.check();
+      await expect(
+        page.getByRole("button", { name: /Hapus Massal \(1\)/i })
+      ).toBeEnabled();
+      await page.getByRole("button", { name: /Hapus Massal \(1\)/i }).click();
+      await expect(
+        page.getByText("Konfirmasi Hapus Massal Barang Kantor Staf")
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Batal", exact: true }).click();
+      await firstKitCheck.uncheck();
+    }
 
     await page
       .getByRole("button", { name: /Rapikan Kode & Nama Unit/i })
@@ -165,5 +211,120 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
       .last()
       .click();
     await page.getByRole("button", { name: "Batal", exact: true }).click();
+  });
+
+  test("7. Sub-menu Pinjam Cepat: Split Layout 2 Kolom, Pencarian Fleksibel, Mobile 375px & Tema Gelap", async ({
+    page,
+  }) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        consoleErrors.push(msg.text());
+      }
+    });
+    page.on("pageerror", (err) => {
+      consoleErrors.push(err.message);
+    });
+
+    await loginAsMasterAdmin(page);
+    await page.goto("/sarpras/sirkulasi-invent");
+
+    // Navigasi melalui sub-menu sidebar Pinjam Cepat
+    const desktopSidebar = page.getByRole("complementary", {
+      name: "Navigasi Utama StafCenter",
+    });
+    const pinjamCepatLink = desktopSidebar.getByRole("link", {
+      name: "Pinjam Cepat",
+    });
+    await expect(pinjamCepatLink).toBeVisible();
+    await pinjamCepatLink.click();
+    await page.waitForURL(/\/sarpras\/sirkulasi-invent\/pinjam-cepat/);
+
+    // Pastikan hanya Pinjam Cepat yang berstatus aria-current="page" (bukan Meja & Katalog)
+    await expect(pinjamCepatLink).toHaveAttribute("aria-current", "page");
+    await expect(
+      desktopSidebar.getByRole("link", { name: "Meja & Katalog" })
+    ).not.toHaveAttribute("aria-current", "page");
+
+    await expect(
+      page.getByRole("heading", { name: /Pinjam Cepat Alat Kantor Staf/i })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /Pinjamkan Alat Kantor Staf ke Kelas/i })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "SEDANG DIPINJAM" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "DIKEMBALIKAN" })
+    ).toBeVisible();
+
+    // Uji pencarian fleksibel di dropdown Pilih Kelas Mahasiswa tanpa tanda hubung
+    const classCombo = page.getByRole("combobox", {
+      name: /Pilih Kelas Mahasiswa/i,
+    });
+    await classCombo.click();
+    const firstOptionText =
+      (await page.getByRole("option").first().textContent()) || "";
+    const firstCodeMatch = firstOptionText.match(/^([A-Z]+-\d+[A-Z]+)/);
+    if (firstCodeMatch) {
+      const hyphenCode = firstCodeMatch[1];
+      const noHyphen = hyphenCode.replace(/-/g, "");
+      const spaced = hyphenCode.replace(/-/g, " ");
+
+      await classCombo.fill(noHyphen);
+      await expect(
+        page.getByRole("option", { name: new RegExp(hyphenCode) }).first()
+      ).toBeVisible();
+
+      await classCombo.fill(spaced);
+      await expect(
+        page.getByRole("option", { name: new RegExp(hyphenCode) }).first()
+      ).toBeVisible();
+    }
+    await page.keyboard.press("Escape");
+
+    // Uji toggle tema Gelap -> Terang
+    const themeToggle = page.getByRole("button", {
+      name: /Aktifkan tema gelap|Gelap/i,
+    });
+    await themeToggle.click();
+    await expect(page.locator("html")).toHaveClass(/dark/);
+    await page
+      .getByRole("button", { name: /Aktifkan tema terang|Terang/i })
+      .click();
+    await expect(page.locator("html")).not.toHaveClass(/dark/);
+
+    // Uji responsif tablet 820px dan mobile 375px tanpa horizontal overflow
+    await page.setViewportSize({ width: 820, height: 1180 });
+    const hasTabletOverflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth >
+        document.documentElement.clientWidth
+    );
+    expect(hasTabletOverflow).toBe(false);
+
+    await page.setViewportSize({ width: 375, height: 812 });
+    const hasOverflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth >
+        document.documentElement.clientWidth
+    );
+    expect(hasOverflow).toBe(false);
+
+    await page.getByRole("tab", { name: /Dipinjam/i }).click();
+    await expect(
+      page.getByRole("heading", { name: "SEDANG DIPINJAM" })
+    ).toBeVisible();
+    await page.getByRole("tab", { name: /Kembali/i }).click();
+    await expect(
+      page.getByRole("heading", { name: "DIKEMBALIKAN" })
+    ).toBeVisible();
+    await page.getByRole("tab", { name: /Form Pinjam/i }).click();
+    await expect(
+      page.getByRole("heading", { name: /Pinjamkan Alat Kantor Staf ke Kelas/i })
+    ).toBeVisible();
+
+    expect(consoleErrors).toEqual([]);
   });
 });

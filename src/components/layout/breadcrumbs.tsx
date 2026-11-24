@@ -15,6 +15,11 @@ const ROUTE_META: Record<
     group: "SAPRAS",
     label: "Sirkulasi Invent",
   },
+  "/sarpras/sirkulasi-invent/pinjam-cepat": {
+    group: "SAPRAS",
+    subgroup: "Sirkulasi Invent",
+    label: "Pinjam Cepat",
+  },
   "/sarpras/inventaris": {
     group: "SAPRAS",
     label: "Inventaris Aset & Barang",

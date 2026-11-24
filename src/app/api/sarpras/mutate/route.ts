@@ -54,6 +54,12 @@ type MutationPayload =
       mode?: DeleteStrategyMode;
       forceActive?: boolean;
     }
+  | {
+      action: "bulk_delete_assets";
+      ids: string[];
+      mode?: DeleteStrategyMode;
+      forceActive?: boolean;
+    }
   | { action: "insert_booking"; data: Record<string, unknown> }
   | {
       action: "update_booking_status";
@@ -121,6 +127,7 @@ type MutationPayload =
   | { action: "insert_office_kit_item"; data: Record<string, unknown> }
   | { action: "update_office_kit_item"; id: string; data: Record<string, unknown> }
   | { action: "delete_office_kit_item"; id: string }
+  | { action: "bulk_delete_office_kit_items"; ids: string[] }
   | {
       action: "checkout_office_kit_loan";
       data: Record<string, unknown>;
@@ -1295,6 +1302,212 @@ export async function POST(request: NextRequest) {
           nowIso
         );
       }
+      case "bulk_delete_assets": {
+        const ids = Array.from(
+          new Set(
+            (Array.isArray(body.ids) ? body.ids : [])
+              .map((v) => (typeof v === "string" ? v.trim() : ""))
+              .filter(Boolean)
+          )
+        );
+        if (ids.length === 0) {
+          return NextResponse.json(
+            { error: "Pilih minimal 1 aset inventaris yang akan dihapus." },
+            { status: 400 }
+          );
+        }
+        if (ids.length > 500) {
+          return NextResponse.json(
+            { error: "Maksimal 500 aset per penghapusan massal." },
+            { status: 400 }
+          );
+        }
+
+        const mode: DeleteStrategyMode =
+          body.mode === "cascade" ? "cascade" : "archive";
+        const forceActive = Boolean(body.forceActive);
+
+        const [bkRes, maintRes] = await Promise.all([
+          supabase
+            .from("bookings")
+            .select("id, booking_code, status, target_type, room_id, asset_id")
+            .in("asset_id", ids),
+          supabase.from("maintenance_logs").select("*").in("asset_id", ids),
+        ]);
+
+        if (bkRes.error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(bkRes.error.message) },
+            { status: 400 }
+          );
+        }
+        if (maintRes.error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(maintRes.error.message) },
+            { status: 400 }
+          );
+        }
+
+        const relatedBookings = bkRes.data || [];
+        const relatedMaint = maintRes.data || [];
+
+        const activeBk = relatedBookings.filter((b) =>
+          ACTIVE_BOOKING_STATUSES.has(String(b.status))
+        );
+        const openMaint = relatedMaint.filter((m) =>
+          OPEN_MAINT_STATUSES.has(String(m.status))
+        );
+
+        if ((activeBk.length > 0 || openMaint.length > 0) && !forceActive) {
+          const parts: string[] = [];
+          if (activeBk.length > 0) {
+            parts.push(
+              `${activeBk.length} peminjaman aktif (${activeBk
+                .slice(0, 3)
+                .map((b) => b.booking_code)
+                .join(", ")})`
+            );
+          }
+          if (openMaint.length > 0) {
+            parts.push(
+              `${openMaint.length} tiket pemeliharaan terbuka (${openMaint
+                .slice(0, 3)
+                .map((m) => m.ticket_code)
+                .join(", ")})`
+            );
+          }
+          return NextResponse.json(
+            {
+              error: `Tidak dapat menghapus karena masih terikat pada ${parts.join(
+                " dan "
+              )}. Selesaikan transaksi tersebut terlebih dahulu atau centang konfirmasi hapus paksa di dialog konfirmasi.`,
+            },
+            { status: 409 }
+          );
+        }
+
+        if (mode === "cascade") {
+          const bookingIdsToDowngrade: string[] = [];
+          const bookingIdsToDelete: string[] = [];
+          for (const bk of relatedBookings) {
+            if (bk.room_id) {
+              bookingIdsToDowngrade.push(String(bk.id));
+            } else {
+              bookingIdsToDelete.push(String(bk.id));
+            }
+          }
+
+          const maintIdsToClearAsset: string[] = [];
+          const maintIdsToDelete: string[] = [];
+          for (const mt of relatedMaint) {
+            if (mt.room_id) {
+              maintIdsToClearAsset.push(String(mt.id));
+            } else {
+              maintIdsToDelete.push(String(mt.id));
+            }
+          }
+
+          const batchJobs: Array<
+            PromiseLike<{ error?: { message: string } | null } | void>
+          > = [];
+
+          if (bookingIdsToDowngrade.length > 0) {
+            batchJobs.push(
+              supabase
+                .from("bookings")
+                .update({
+                  asset_id: null,
+                  target_type: "Ruangan",
+                  updated_at: nowIso,
+                })
+                .in("id", bookingIdsToDowngrade)
+            );
+          }
+          if (bookingIdsToDelete.length > 0) {
+            batchJobs.push(
+              cleanupEntityArtifactsBatch(supabase, "booking", bookingIdsToDelete)
+            );
+            batchJobs.push(
+              supabase.from("bookings").delete().in("id", bookingIdsToDelete)
+            );
+          }
+          if (maintIdsToClearAsset.length > 0) {
+            batchJobs.push(
+              supabase
+                .from("maintenance_logs")
+                .update({ asset_id: null, updated_at: nowIso })
+                .in("id", maintIdsToClearAsset)
+            );
+          }
+          if (maintIdsToDelete.length > 0) {
+            batchJobs.push(
+              cleanupEntityArtifactsBatch(
+                supabase,
+                "maintenance",
+                maintIdsToDelete
+              )
+            );
+            batchJobs.push(
+              supabase
+                .from("maintenance_logs")
+                .delete()
+                .in("id", maintIdsToDelete)
+            );
+          }
+
+          if (batchJobs.length > 0) {
+            const results = await Promise.all(batchJobs);
+            for (const res of results) {
+              if (res && typeof res === "object" && "error" in res && res.error) {
+                return NextResponse.json(
+                  { error: formatSafeDbError(res.error.message) },
+                  { status: 400 }
+                );
+              }
+            }
+          }
+        } else {
+          const bookingIdsToDowngrade = relatedBookings
+            .filter((bk) => Boolean(bk.room_id))
+            .map((bk) => String(bk.id));
+          if (bookingIdsToDowngrade.length > 0) {
+            await supabase
+              .from("bookings")
+              .update({
+                asset_id: null,
+                target_type: "Ruangan",
+                updated_at: nowIso,
+              })
+              .in("id", bookingIdsToDowngrade);
+          }
+        }
+
+        const delRes = await supabase.from("assets").delete().in("id", ids);
+
+        if (delRes.error) {
+          const msg = delRes.error.message || "";
+          if (
+            msg.includes("chk_booking_target") ||
+            msg.includes("chk_maintenance_target")
+          ) {
+            return NextResponse.json(
+              {
+                error:
+                  "Sebagian unit memiliki tiket peminjaman atau kerusakan yang merujuk eksklusif padanya. Pilih opsi 'Hapus Bersih Beserta Tiket Terkait' di dialog konfirmasi, atau jalankan migrasi supabase/migrations/004_safe_delete_and_integrity.sql di SQL Editor Supabase agar mode arsip histori aktif.",
+              },
+              { status: 409 }
+            );
+          }
+          return NextResponse.json(
+            { error: formatSafeDbError(msg) },
+            { status: 400 }
+          );
+        }
+
+        await cleanupEntityArtifactsBatch(supabase, "asset", ids);
+
+        return NextResponse.json({ ok: true, deletedCount: ids.length });
+      }
       case "insert_booking": {
         const cleanData = sanitizeTablePayload("bookings", body.data, false);
         const { error } = await supabase.from("bookings").insert(cleanData);
@@ -2091,6 +2304,82 @@ export async function POST(request: NextRequest) {
           );
         }
         return NextResponse.json({ ok: true });
+      }
+      case "bulk_delete_office_kit_items": {
+        const ids = Array.from(
+          new Set(
+            (Array.isArray(body.ids) ? body.ids : [])
+              .map((v) => (typeof v === "string" ? v.trim() : ""))
+              .filter(Boolean)
+          )
+        );
+        if (ids.length === 0) {
+          return NextResponse.json(
+            { error: "Pilih minimal 1 barang kantor staf yang akan dihapus." },
+            { status: 400 }
+          );
+        }
+        if (ids.length > 500) {
+          return NextResponse.json(
+            { error: "Maksimal 500 barang per penghapusan massal." },
+            { status: 400 }
+          );
+        }
+
+        const { data: kitRows, error: fetchErr } = await supabase
+          .from("office_kit_items")
+          .select("id, kit_code, name, status")
+          .in("id", ids);
+
+        if (fetchErr) {
+          return NextResponse.json(
+            { error: formatSafeDbError(fetchErr.message) },
+            { status: 400 }
+          );
+        }
+
+        const borrowedRows = (kitRows || []).filter(
+          (k) => k.status === "Dipinjam"
+        );
+        if (borrowedRows.length > 0) {
+          return NextResponse.json(
+            {
+              error: `Tidak dapat menghapus barang yang masih dipinjam kelas: ${borrowedRows
+                .slice(0, 5)
+                .map((k) => k.kit_code)
+                .join(", ")}. Catat pengembalian atau hapus centang barang tersebut terlebih dahulu.`,
+            },
+            { status: 409 }
+          );
+        }
+
+        if (kitRows && kitRows.length > 0) {
+          await Promise.all(
+            kitRows.map((row) =>
+              supabase
+                .from("maintenance_logs")
+                .update({
+                  deleted_target_label: `Alat Kantor ${row.kit_code} (${row.name}) [Dihapus]`,
+                  updated_at: nowIso,
+                })
+                .eq("office_kit_item_id", row.id)
+                .is("deleted_target_label", null)
+            )
+          );
+        }
+
+        const delRes = await supabase
+          .from("office_kit_items")
+          .delete()
+          .in("id", ids);
+        if (delRes.error) {
+          return NextResponse.json(
+            { error: formatSafeDbError(delRes.error.message) },
+            { status: 400 }
+          );
+        }
+        await cleanupEntityArtifactsBatch(supabase, "office_kit", ids);
+        return NextResponse.json({ ok: true, deletedCount: ids.length });
       }
       case "checkout_office_kit_loan": {
         const itemIds = Array.isArray(body.itemIds) ? body.itemIds : [];

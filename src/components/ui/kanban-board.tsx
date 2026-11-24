@@ -31,7 +31,11 @@ export interface KanbanCardRenderProps {
 interface KanbanBoardProps<T> {
   columns: KanbanColumnDef<T>[];
   rowKey: (item: T) => string;
-  renderCard: (item: T) => KanbanCardRenderProps;
+  renderCard?: (item: T) => KanbanCardRenderProps;
+  renderCustomCard?: (
+    item: T,
+    meta: { isSelected: boolean; isDraggable: boolean; onClick: () => void }
+  ) => React.ReactNode;
   onCardClick: (item: T) => void;
   activeItemId?: string | null;
   onCardDrop?: (
@@ -47,6 +51,7 @@ export function KanbanBoard<T>({
   columns,
   rowKey,
   renderCard,
+  renderCustomCard,
   onCardClick,
   activeItemId,
   onCardDrop,
@@ -154,11 +159,46 @@ export function KanbanBoard<T>({
               ) : (
                 col.items.map((item) => {
                   const key = rowKey(item);
-                  const card = renderCard(item);
                   const isSelected = activeItemId === key;
                   const itemDraggable =
                     dndEnabled && (canDragCard ? canDragCard(item) : true);
                   const isDragging = draggingMeta?.key === key;
+                  const cardArticleClass = `rounded-lg border bg-white dark:bg-slate-900 transition-all ${
+                    itemDraggable ? "cursor-grab active:cursor-grabbing" : ""
+                  } ${isDragging ? "opacity-55 ring-2 ring-[#1E3A5F]/40" : ""} ${
+                    isSelected
+                      ? "border-[#1E3A5F] ring-2 ring-[#1E3A5F]/20 dark:border-sky-400 dark:ring-sky-400/20"
+                      : "border-slate-300 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-700"
+                  }`;
+
+                  if (renderCustomCard) {
+                    return (
+                      <article
+                        key={key}
+                        draggable={itemDraggable}
+                        onDragStart={(e) => {
+                          if (!itemDraggable) return;
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", key);
+                          setDraggingMeta({ key, item, sourceColumnId: col.id });
+                        }}
+                        onDragEnd={() => {
+                          setDraggingMeta(null);
+                          setDragOverColumnId(null);
+                        }}
+                        className={cardArticleClass}
+                      >
+                        {renderCustomCard(item, {
+                          isSelected,
+                          isDraggable: itemDraggable,
+                          onClick: () => onCardClick(item),
+                        })}
+                      </article>
+                    );
+                  }
+
+                  if (!renderCard) return null;
+                  const card = renderCard(item);
 
                   return (
                     <article
@@ -174,13 +214,7 @@ export function KanbanBoard<T>({
                         setDraggingMeta(null);
                         setDragOverColumnId(null);
                       }}
-                      className={`rounded-lg border bg-white dark:bg-slate-900 transition-all ${
-                        itemDraggable ? "cursor-grab active:cursor-grabbing" : ""
-                      } ${isDragging ? "opacity-55 ring-2 ring-[#1E3A5F]/40" : ""} ${
-                        isSelected
-                          ? "border-[#1E3A5F] ring-2 ring-[#1E3A5F]/20 dark:border-sky-400 dark:ring-sky-400/20"
-                          : "border-slate-300 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-700"
-                      }`}
+                      className={cardArticleClass}
                     >
                       <button
                         type="button"

@@ -298,6 +298,7 @@ export const ACTION_TO_PAGE_KEY: Record<string, SarprasPageKey> = {
   bulk_insert_assets: "inventaris",
   update_asset: "inventaris",
   delete_asset: "inventaris",
+  bulk_delete_assets: "inventaris",
 
   insert_booking: "peminjaman",
   update_booking_status: "peminjaman",
@@ -352,6 +353,7 @@ export const ACTION_TO_PAGE_KEY: Record<string, SarprasPageKey> = {
   insert_office_kit_item: "sirkulasi-invent",
   update_office_kit_item: "sirkulasi-invent",
   delete_office_kit_item: "sirkulasi-invent",
+  bulk_delete_office_kit_items: "sirkulasi-invent",
   checkout_office_kit_loan: "sirkulasi-invent",
   checkin_office_kit_loan: "sirkulasi-invent",
   reopen_office_kit_loan: "sirkulasi-invent",

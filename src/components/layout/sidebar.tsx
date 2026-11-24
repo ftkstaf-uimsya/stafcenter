@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ClipboardPlus,
   FileText,
   GraduationCap,
   HardHat,
@@ -38,6 +39,7 @@ export interface NavSubItem {
   label: string;
   shortLabel: string;
   icon: LucideIcon;
+  exactMatch?: boolean;
   badgeCount?: number;
   badgeTone?: "warning" | "danger" | "info";
 }
@@ -76,6 +78,7 @@ export function Sidebar({
     setCommandSearchOpen,
   } = useSarpras();
   const [sarprasExpanded, setSarprasExpanded] = useState(true);
+  const [sirkulasiExpanded, setSirkulasiExpanded] = useState(true);
   const [tugasAkhirExpanded, setTugasAkhirExpanded] = useState(true);
   const [skripsiExpanded, setSkripsiExpanded] = useState(true);
   const [artikelExpanded, setArtikelExpanded] = useState(true);
@@ -232,6 +235,26 @@ export function Sidebar({
     canAccessPage(item.pageKey)
   );
 
+  const sirkulasiSubItems: NavSubItem[] = canAccessPage("sirkulasi-invent")
+    ? [
+        {
+          pageKey: "sirkulasi-invent",
+          href: "/sarpras/sirkulasi-invent/pinjam-cepat",
+          label: "Pinjam Cepat",
+          shortLabel: "Pinjam Cepat",
+          icon: ClipboardPlus,
+        },
+        {
+          pageKey: "sirkulasi-invent",
+          href: "/sarpras/sirkulasi-invent",
+          label: "Meja & Katalog",
+          shortLabel: "Sirkulasi",
+          icon: Cable,
+          exactMatch: true,
+        },
+      ]
+    : [];
+
   const countActiveThesis = (
     track: "skripsi" | "artikel_jurnal",
     stage: "proposal" | "sidang"
@@ -339,8 +362,9 @@ export function Sidebar({
     <ul className="mt-1 space-y-1" role="list">
       {items.map((item) => {
         const Icon = item.icon;
-        const isActive =
-          pathname === item.href || pathname.startsWith(`${item.href}/`);
+        const isActive = item.exactMatch
+          ? pathname === item.href
+          : pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (
           <li key={item.href}>
             <Link
@@ -387,6 +411,118 @@ export function Sidebar({
     </ul>
   );
 
+  const renderSaprasNavList = (isCollapsedView: boolean) => {
+    if (isCollapsedView) {
+      const collapsedItems = saprasNavItems.flatMap((item) =>
+        item.pageKey === "sirkulasi-invent"
+          ? sirkulasiSubItems.map((sub) => ({
+              ...sub,
+              label: `Sirkulasi: ${sub.label}`,
+            }))
+          : [item]
+      );
+      return renderNavItemList(collapsedItems, true);
+    }
+
+    return (
+      <ul className="mt-1 space-y-1" role="list">
+        {saprasNavItems.map((item) => {
+          if (item.pageKey === "sirkulasi-invent") {
+            const isSirkulasiParentActive = pathname.startsWith(
+              "/sarpras/sirkulasi-invent"
+            );
+            const isOpen = sirkulasiExpanded || isSirkulasiParentActive;
+            return (
+              <li key={item.href}>
+                <button
+                  type="button"
+                  onClick={() => setSirkulasiExpanded((prev) => !prev)}
+                  aria-expanded={isOpen}
+                  className={`w-full min-h-[44px] lg:min-h-[38px] flex items-center justify-between gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                    isSirkulasiParentActive
+                      ? "bg-white/15 text-amber-300 font-bold"
+                      : "text-slate-100 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  <span className="flex items-center gap-3 min-w-0">
+                    <Cable
+                      className={`w-5 h-5 shrink-0 ${
+                        isSirkulasiParentActive
+                          ? "text-amber-300"
+                          : "text-slate-200"
+                      }`}
+                      aria-hidden={true}
+                    />
+                    <span className="truncate">{item.label}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    {activeOfficeLoans > 0 ? (
+                      <span
+                        className={`px-2 py-0.5 text-xs font-mono font-bold rounded border ${badgeToneClasses.warning}`}
+                      >
+                        {activeOfficeLoans}
+                      </span>
+                    ) : null}
+                    <ChevronDown
+                      className={`w-4 h-4 transition-transform ${
+                        isOpen ? "rotate-0" : "-rotate-90"
+                      }`}
+                      aria-hidden="true"
+                    />
+                  </span>
+                </button>
+                {isOpen ? (
+                  <div className="pl-4 border-l border-white/15 ml-4 mt-1">
+                    {renderNavItemList(sirkulasiSubItems, false)}
+                  </div>
+                ) : null}
+              </li>
+            );
+          }
+
+          const Icon = item.icon;
+          const isActive =
+            pathname === item.href || pathname.startsWith(`${item.href}/`);
+          return (
+            <li key={item.href}>
+              <Link
+                href={item.href}
+                onClick={onCloseMobile}
+                aria-current={isActive ? "page" : undefined}
+                className={`min-h-[44px] lg:min-h-[38px] flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                  isActive
+                    ? "bg-amber-500 text-slate-950 font-bold"
+                    : "text-slate-100 hover:bg-white/10 hover:text-white"
+                }`}
+              >
+                <span className="flex items-center gap-3 min-w-0">
+                  <Icon
+                    className={`w-5 h-5 shrink-0 ${
+                      isActive ? "text-slate-950" : "text-slate-200"
+                    }`}
+                    aria-hidden={true}
+                  />
+                  <span className="truncate">{item.label}</span>
+                </span>
+                {item.badgeCount !== undefined && item.badgeCount > 0 ? (
+                  <span
+                    className={`px-2 py-0.5 text-xs font-mono font-bold rounded border ${
+                      isActive
+                        ? "bg-slate-950 text-amber-300 border-slate-800"
+                        : badgeToneClasses[item.badgeTone || "info"]
+                    }`}
+                  >
+                    {item.badgeCount}
+                  </span>
+                ) : null}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
+
   const renderNavLinks = (
     isCollapsedView: boolean,
     isMobileDrawer = false
@@ -428,7 +564,7 @@ export function Sidebar({
           ) : null}
 
           {sarprasExpanded || isCollapsedView
-            ? renderNavItemList(saprasNavItems, isCollapsedView)
+            ? renderSaprasNavList(isCollapsedView)
             : null}
         </div>
       ) : null}
@@ -794,8 +930,9 @@ export function Sidebar({
           <ul className={`grid ${mobileGridColsClass} gap-0.5`} role="list">
             {mobileBottomItems.map((item) => {
               const Icon = item.icon;
-              const isActive =
-                pathname === item.href || pathname.startsWith(`${item.href}/`);
+              const isActive = item.exactMatch
+                ? pathname === item.href
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
                 <li key={item.href}>
                   <Link
