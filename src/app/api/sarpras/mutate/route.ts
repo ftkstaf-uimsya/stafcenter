@@ -663,6 +663,9 @@ async function reconcileMaintenanceTargets(
 
   if (assetId && assetRowRes.data) {
     const remainingMaint = remMaintRes.data || [];
+    const hasLost = remainingMaint.some(
+      (m) => m.damage_severity === "Hilang"
+    );
     const hasHeavy = remainingMaint.some(
       (m) => m.damage_severity === "Rusak Berat"
     );
@@ -670,9 +673,14 @@ async function reconcileMaintenanceTargets(
       (m) => m.damage_severity === "Rusak Ringan"
     );
     let nextCondition = assetRowRes.data.condition as string;
-    if (hasHeavy) nextCondition = "Rusak Berat";
+    if (hasLost) nextCondition = "Hilang";
+    else if (hasHeavy) nextCondition = "Rusak Berat";
     else if (hasLight) nextCondition = "Rusak Ringan";
-    else if (nextCondition === "Rusak Berat" || nextCondition === "Rusak Ringan") {
+    else if (
+      nextCondition === "Hilang" ||
+      nextCondition === "Rusak Berat" ||
+      nextCondition === "Rusak Ringan"
+    ) {
       nextCondition = "Baik";
     }
     if (nextCondition !== assetRowRes.data.condition) {
@@ -687,6 +695,9 @@ async function reconcileMaintenanceTargets(
 
   if (officeKitItemId && kitRowRes.data) {
     const remainingKitMaint = remKitMaintRes.data || [];
+    const hasLost = remainingKitMaint.some(
+      (m) => m.damage_severity === "Hilang"
+    );
     const hasHeavy = remainingKitMaint.some(
       (m) => m.damage_severity === "Rusak Berat"
     );
@@ -698,16 +709,27 @@ async function reconcileMaintenanceTargets(
     let nextCondition = currentCondition;
     let nextStatus = currentStatus;
 
-    if (hasHeavy) {
+    if (hasLost) {
+      nextCondition = "Hilang";
+      if (currentStatus === "Tersedia") nextStatus = "Perbaikan";
+    } else if (hasHeavy) {
       nextCondition = "Rusak Berat";
       if (currentStatus === "Tersedia") nextStatus = "Perbaikan";
     } else if (hasLight) {
-      if (currentCondition === "Baik" || currentCondition === "Rusak Berat") {
+      if (
+        currentCondition === "Baik" ||
+        currentCondition === "Rusak Berat" ||
+        currentCondition === "Hilang"
+      ) {
         nextCondition = "Rusak Ringan";
       }
       if (currentStatus === "Tersedia") nextStatus = "Perbaikan";
     } else {
-      if (currentCondition === "Rusak Berat" || currentCondition === "Rusak Ringan") {
+      if (
+        currentCondition === "Hilang" ||
+        currentCondition === "Rusak Berat" ||
+        currentCondition === "Rusak Ringan"
+      ) {
         nextCondition = "Baik";
       }
       if (currentStatus === "Perbaikan") {

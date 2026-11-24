@@ -32,7 +32,7 @@ export type MaintenanceStatus =
   | "Dalam Pengerjaan"
   | "Selesai Diperbaiki";
 
-export type DamageSeverity = "Rusak Ringan" | "Rusak Berat";
+export type DamageSeverity = "Rusak Ringan" | "Rusak Berat" | "Hilang";
 
 export type ConsumableUnit = string;
 

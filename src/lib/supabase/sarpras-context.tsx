@@ -236,7 +236,8 @@ interface SarprasContextValue {
     payload: Omit<
       MaintenanceLog,
       "id" | "ticket_code" | "status" | "reported_at"
-    >
+    >,
+    options?: { sequenceOffset?: number }
   ) => MaintenanceLog;
   updateMaintenanceStatus: (
     id: string,
@@ -2293,10 +2294,14 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       payload: Omit<
         MaintenanceLog,
         "id" | "ticket_code" | "status" | "reported_at"
-      >
+      >,
+      options?: { sequenceOffset?: number }
     ): MaintenanceLog => {
+      const offset = Math.max(0, options?.sequenceOffset || 0);
       const seq = String(
-        extractMaxSequence(maintenanceLogs.map((m) => m.ticket_code)) + 1
+        extractMaxSequence(maintenanceLogs.map((m) => m.ticket_code)) +
+          1 +
+          offset
       ).padStart(3, "0");
       const id = generateUuid();
       const ticket_code = `MNT-${getCurrentYearMonth()}-${seq}`;
@@ -2315,7 +2320,13 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         setAssets((prev) =>
           prev.map((a) => {
             if (a.id !== payload.asset_id) return a;
-            if (payload.damage_severity === "Rusak Berat") {
+            if (payload.damage_severity === "Hilang") {
+              return { ...a, condition: "Hilang" };
+            }
+            if (
+              payload.damage_severity === "Rusak Berat" &&
+              a.condition !== "Hilang"
+            ) {
               return { ...a, condition: "Rusak Berat" };
             }
             if (
@@ -2345,7 +2356,10 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           prev.map((kit) => {
             if (kit.id !== payload.office_kit_item_id) return kit;
             const nextCondition =
-              payload.damage_severity === "Rusak Berat"
+              payload.damage_severity === "Hilang"
+                ? "Hilang"
+                : payload.damage_severity === "Rusak Berat" &&
+                  kit.condition !== "Hilang"
                 ? "Rusak Berat"
                 : kit.condition === "Baik"
                 ? "Rusak Ringan"
@@ -2399,7 +2413,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         "success",
         "Laporan Kerusakan Dicatat",
         `Tiket ${newTicket.ticket_code} berhasil dibuat${
-          payload.damage_severity === "Rusak Berat"
+          payload.damage_severity === "Hilang"
+            ? " dan kondisi item otomatis diperbarui menjadi Hilang."
+            : payload.damage_severity === "Rusak Berat"
             ? " dan kondisi item otomatis diperbarui menjadi Rusak Berat."
             : "."
         }`
@@ -2466,6 +2482,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           (m) =>
             m.asset_id === target.asset_id && m.status !== "Selesai Diperbaiki"
         );
+        const hasLost = openForAsset.some(
+          (m) => m.damage_severity === "Hilang"
+        );
         const hasHeavy = openForAsset.some(
           (m) => m.damage_severity === "Rusak Berat"
         );
@@ -2475,9 +2494,11 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
         setAssets((prev) =>
           prev.map((a) => {
             if (a.id !== target.asset_id) return a;
+            if (hasLost) return { ...a, condition: "Hilang" };
             if (hasHeavy) return { ...a, condition: "Rusak Berat" };
             if (hasLight) return { ...a, condition: "Rusak Ringan" };
             if (
+              a.condition === "Hilang" ||
               a.condition === "Rusak Berat" ||
               a.condition === "Rusak Ringan"
             ) {
@@ -2494,6 +2515,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
             m.office_kit_item_id === target.office_kit_item_id &&
             m.status !== "Selesai Diperbaiki"
         );
+        const hasLost = openForKit.some(
+          (m) => m.damage_severity === "Hilang"
+        );
         const hasHeavy = openForKit.some(
           (m) => m.damage_severity === "Rusak Berat"
         );
@@ -2505,16 +2529,24 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
             if (kit.id !== target.office_kit_item_id) return kit;
             let nextCondition = kit.condition;
             let nextStatus = kit.status;
-            if (hasHeavy) {
+            if (hasLost) {
+              nextCondition = "Hilang";
+              if (nextStatus === "Tersedia") nextStatus = "Perbaikan";
+            } else if (hasHeavy) {
               nextCondition = "Rusak Berat";
               if (nextStatus === "Tersedia") nextStatus = "Perbaikan";
             } else if (hasLight) {
-              if (nextCondition === "Baik" || nextCondition === "Rusak Berat") {
+              if (
+                nextCondition === "Baik" ||
+                nextCondition === "Rusak Berat" ||
+                nextCondition === "Hilang"
+              ) {
                 nextCondition = "Rusak Ringan";
               }
               if (nextStatus === "Tersedia") nextStatus = "Perbaikan";
             } else {
               if (
+                nextCondition === "Hilang" ||
                 nextCondition === "Rusak Berat" ||
                 nextCondition === "Rusak Ringan"
               ) {
@@ -2615,6 +2647,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
             (m) =>
               m.asset_id === target.asset_id && m.status !== "Selesai Diperbaiki"
           );
+          const hasLost = openForAsset.some(
+            (m) => m.damage_severity === "Hilang"
+          );
           const hasHeavy = openForAsset.some(
             (m) => m.damage_severity === "Rusak Berat"
           );
@@ -2624,9 +2659,11 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
           setAssets((prev) =>
             prev.map((a) => {
               if (a.id !== target.asset_id) return a;
+              if (hasLost) return { ...a, condition: "Hilang" };
               if (hasHeavy) return { ...a, condition: "Rusak Berat" };
               if (hasLight) return { ...a, condition: "Rusak Ringan" };
               if (
+                a.condition === "Hilang" ||
                 a.condition === "Rusak Berat" ||
                 a.condition === "Rusak Ringan"
               ) {
@@ -2642,6 +2679,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               m.office_kit_item_id === target.office_kit_item_id &&
               m.status !== "Selesai Diperbaiki"
           );
+          const hasLost = openForKit.some(
+            (m) => m.damage_severity === "Hilang"
+          );
           const hasHeavy = openForKit.some(
             (m) => m.damage_severity === "Rusak Berat"
           );
@@ -2653,19 +2693,24 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
               if (kit.id !== target.office_kit_item_id) return kit;
               let nextCondition = kit.condition;
               let nextStatus = kit.status;
-              if (hasHeavy) {
+              if (hasLost) {
+                nextCondition = "Hilang";
+                if (nextStatus === "Tersedia") nextStatus = "Perbaikan";
+              } else if (hasHeavy) {
                 nextCondition = "Rusak Berat";
                 if (nextStatus === "Tersedia") nextStatus = "Perbaikan";
               } else if (hasLight) {
                 if (
                   nextCondition === "Baik" ||
-                  nextCondition === "Rusak Berat"
+                  nextCondition === "Rusak Berat" ||
+                  nextCondition === "Hilang"
                 ) {
                   nextCondition = "Rusak Ringan";
                 }
                 if (nextStatus === "Tersedia") nextStatus = "Perbaikan";
               } else {
                 if (
+                  nextCondition === "Hilang" ||
                   nextCondition === "Rusak Berat" ||
                   nextCondition === "Rusak Ringan"
                 ) {

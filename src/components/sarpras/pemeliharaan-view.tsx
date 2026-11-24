@@ -32,18 +32,27 @@ import {
   MaintenanceStatusBadge,
   PriorityBadge,
 } from "@/components/sarpras/status-badges";
+import { MaintenanceReportModal } from "@/components/sarpras/maintenance-report-modal";
 
 const PRIORITIES: MaintenancePriority[] = [
   "Rendah",
   "Sedang",
   "Tinggi/Darurat",
 ];
-const SEVERITIES: DamageSeverity[] = ["Rusak Ringan", "Rusak Berat"];
 const STATUSES: MaintenanceStatus[] = [
   "Dilaporkan",
   "Dalam Pengerjaan",
   "Selesai Diperbaiki",
 ];
+
+function isUrlImage(url?: string | null): boolean {
+  if (!url) return false;
+  return (
+    url.startsWith("http://") ||
+    url.startsWith("https://") ||
+    url.startsWith("blob:")
+  );
+}
 
 function getMaintenanceProgress(status: MaintenanceStatus): {
   percent: number;
@@ -60,11 +69,6 @@ function getMaintenanceProgress(status: MaintenanceStatus): {
   }
 }
 
-function isUrlImage(url?: string | null): boolean {
-  if (!url) return false;
-  return url.startsWith("http://") || url.startsWith("https://") || url.startsWith("blob:");
-}
-
 export function PemeliharaanView() {
   const {
     rooms,
@@ -72,16 +76,12 @@ export function PemeliharaanView() {
     officeKitItems,
     maintenanceLogs,
     maintenanceVendors,
-    campusOfficials,
-    lecturers,
     notes,
     attachments,
     uiSimState,
     setUiSimState,
-    addMaintenanceLog,
     updateMaintenanceStatus,
     deleteMaintenanceLog,
-    uploadEntityFile,
   } = useSarpras();
 
   const [viewMode, setViewMode] = useState<"board" | "table">("board");
@@ -95,24 +95,11 @@ export function PemeliharaanView() {
 
   // Modal Lapor Kerusakan Baru
   const [reportModalOpen, setReportModalOpen] = useState(false);
-  const [targetKind, setTargetKind] = useState<
+  const [reportInitialKind, setReportInitialKind] = useState<
     "asset" | "office_kit" | "room"
   >("asset");
-  const [assetId, setAssetId] = useState("");
-  const [officeKitItemId, setOfficeKitItemId] = useState("");
-  const [roomId, setRoomId] = useState("");
+  const [reportInitialKitIds, setReportInitialKitIds] = useState<string[]>([]);
   const handledReportKitRef = useRef<string | null>(null);
-  const [reporterQuickPick, setReporterQuickPick] = useState("");
-  const [reporterName, setReporterName] = useState("");
-  const [reporterRole, setReporterRole] = useState("PIC Ruangan / Dosen");
-  const [issueTitle, setIssueTitle] = useState("");
-  const [issueDescription, setIssueDescription] = useState("");
-  const [damageSeverity, setDamageSeverity] =
-    useState<DamageSeverity>("Rusak Ringan");
-  const [priority, setPriority] = useState<MaintenancePriority>("Sedang");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [formError, setFormError] = useState("");
-  const [submittingReport, setSubmittingReport] = useState(false);
 
   // Modal Update Tracking Perbaikan
   const [trackingTicket, setTrackingTicket] = useState<MaintenanceLog | null>(
@@ -144,19 +131,8 @@ export function PemeliharaanView() {
       const matchedKit = officeKitItems.find((k) => k.id === reportKit);
       if (matchedKit) {
         handledReportKitRef.current = reportKit;
-        setTargetKind("office_kit");
-        setOfficeKitItemId(matchedKit.id);
-        setAssetId("");
-        setRoomId(matchedKit.linked_room_id || "");
-        setReporterQuickPick("");
-        setReporterName("");
-        setReporterRole("PIC Ruangan / Staf");
-        setIssueTitle("");
-        setIssueDescription("");
-        setDamageSeverity("Rusak Ringan");
-        setPriority("Sedang");
-        setSelectedFile(null);
-        setFormError("");
+        setReportInitialKind("office_kit");
+        setReportInitialKitIds([matchedKit.id]);
         setReportModalOpen(true);
       }
     }
@@ -222,122 +198,15 @@ export function PemeliharaanView() {
   }
 
   const openReportModal = () => {
-    const firstAsset = assets[0];
-    const firstKit = officeKitItems[0];
-    const defaultKind: "asset" | "office_kit" | "room" = firstAsset
-      ? "asset"
-      : firstKit
-      ? "office_kit"
-      : "room";
-    setTargetKind(defaultKind);
-    setAssetId(defaultKind === "asset" ? firstAsset?.id || "" : "");
-    setOfficeKitItemId(defaultKind === "office_kit" ? firstKit?.id || "" : "");
-    setRoomId(
-      defaultKind === "asset"
-        ? firstAsset?.room_id || rooms[0]?.id || ""
-        : defaultKind === "office_kit"
-        ? firstKit?.linked_room_id || ""
-        : rooms[0]?.id || ""
-    );
-    setReporterQuickPick("");
-    setReporterName("");
-    setReporterRole("PIC Ruangan / Staf");
-    setIssueTitle("");
-    setIssueDescription("");
-    setDamageSeverity("Rusak Ringan");
-    setPriority("Sedang");
-    setSelectedFile(null);
-    setFormError("");
+    const defaultKind: "asset" | "office_kit" | "room" =
+      assets.length > 0
+        ? "asset"
+        : officeKitItems.length > 0
+        ? "office_kit"
+        : "room";
+    setReportInitialKind(defaultKind);
+    setReportInitialKitIds([]);
     setReportModalOpen(true);
-  };
-
-  const handleTargetKindChange = (nextKind: "asset" | "office_kit" | "room") => {
-    setTargetKind(nextKind);
-    if (nextKind === "asset") {
-      const nextAsset = assets.find((a) => a.id === assetId) || assets[0];
-      setAssetId(nextAsset?.id || "");
-      setOfficeKitItemId("");
-      setRoomId(nextAsset?.room_id || rooms[0]?.id || "");
-    } else if (nextKind === "office_kit") {
-      const nextKit =
-        officeKitItems.find((k) => k.id === officeKitItemId) ||
-        officeKitItems[0];
-      setOfficeKitItemId(nextKit?.id || "");
-      setAssetId("");
-      setRoomId(nextKit?.linked_room_id || "");
-    } else {
-      setAssetId("");
-      setOfficeKitItemId("");
-      setRoomId((prev) => prev || rooms[0]?.id || "");
-    }
-  };
-
-  const handleAssetSelectionChange = (newAssetId: string) => {
-    setAssetId(newAssetId);
-    const found = assets.find((a) => a.id === newAssetId);
-    if (found?.room_id) {
-      setRoomId(found.room_id);
-    }
-  };
-
-  const handleOfficeKitSelectionChange = (newKitId: string) => {
-    setOfficeKitItemId(newKitId);
-    const found = officeKitItems.find((k) => k.id === newKitId);
-    setRoomId(found?.linked_room_id || "");
-  };
-
-  const handleReportSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (targetKind === "asset" && !assetId) {
-      setFormError("Pilih aset inventaris yang bermasalah terlebih dahulu.");
-      return;
-    }
-    if (targetKind === "office_kit" && !officeKitItemId) {
-      setFormError("Pilih alat kantor staf yang bermasalah terlebih dahulu.");
-      return;
-    }
-    if (targetKind === "room" && !roomId) {
-      setFormError("Pilih lokasi ruangan fasilitas yang bermasalah.");
-      return;
-    }
-    if (
-      !reporterName.trim() ||
-      !issueTitle.trim() ||
-      !issueDescription.trim()
-    ) {
-      setFormError(
-        "Nama Pelapor, Judul Kendala, dan Deskripsi Kerusakan wajib diisi."
-      );
-      return;
-    }
-
-    setSubmittingReport(true);
-    try {
-      const created = addMaintenanceLog({
-        asset_id: targetKind === "asset" ? assetId || null : null,
-        office_kit_item_id:
-          targetKind === "office_kit" ? officeKitItemId || null : null,
-        room_id: roomId || null,
-        reporter_name: reporterName.trim(),
-        reporter_role: reporterRole.trim() || "Staf Kampus",
-        issue_title: issueTitle.trim(),
-        issue_description: issueDescription.trim(),
-        damage_severity: damageSeverity,
-        priority,
-        photo_url: undefined,
-        repair_cost: 0,
-      });
-
-      if (selectedFile && created?.id) {
-        // Beri jeda singkat agar insert tiket selesai terlebih dahulu bila terhubung DB
-        setTimeout(() => {
-          void uploadEntityFile("maintenance", created.id, selectedFile);
-        }, 400);
-      }
-      setReportModalOpen(false);
-    } finally {
-      setSubmittingReport(false);
-    }
   };
 
   const openTrackingModal = (ticket: MaintenanceLog) => {
@@ -673,25 +542,12 @@ export function PemeliharaanView() {
               status: targetColId as MaintenanceStatus,
             });
           }}
-          renderCard={(row) => {
+          renderCustomCard={(row, meta) => {
             const room = rooms.find((r) => r.id === row.room_id);
             const asset = assets.find((a) => a.id === row.asset_id);
             const officeKit = row.office_kit_item_id
               ? officeKitItems.find((k) => k.id === row.office_kit_item_id)
               : null;
-            const prog = getMaintenanceProgress(row.status);
-            const noteCount = notes.filter(
-              (n) => n.entity_type === "maintenance" && n.entity_id === row.id
-            ).length;
-            const itemAttachments = attachments.filter(
-              (a) => a.entity_type === "maintenance" && a.entity_id === row.id
-            );
-            const firstImageAtt = itemAttachments.find((a) =>
-              a.mime_type.startsWith("image/")
-            );
-            const thumb = isUrlImage(row.photo_url)
-              ? row.photo_url
-              : firstImageAtt?.file_url || null;
 
             const locLabel = room
               ? `Ruang ${room.code}`
@@ -699,41 +555,65 @@ export function PemeliharaanView() {
               ? "Kantor Staf"
               : "Fasilitas";
             const itemLabel = asset
-              ? asset.inventory_code
+              ? `${asset.inventory_code} - ${asset.name}`
               : officeKit
-              ? officeKit.kit_code
-              : row.damage_severity;
+              ? `${officeKit.kit_code} (${officeKit.name})`
+              : "Prasarana Ruangan";
 
-            return {
-              code: row.ticket_code,
-              title: row.issue_title,
-              subtitle: `${locLabel} • ${itemLabel}`,
-              description: row.issue_description,
-              valueBadge:
-                row.repair_cost > 0
-                  ? formatCurrencyIDR(row.repair_cost)
-                  : row.damage_severity,
-              priorityBadge: <PriorityBadge priority={row.priority} />,
-              thumbnailUrl: thumb,
-              assigneeName: row.technician_vendor || `Pelapor: ${row.reporter_name}`,
-              progressPercent: prog.percent,
-              progressColorClass: prog.barClass,
-              notesCount: noteCount,
-              attachmentsCount: itemAttachments.length,
-              ageLabel: row.reported_at.slice(0, 10),
-              footerAction: (
-                <Button
+            return (
+              <div
+                className={`rounded-lg border transition-colors ${
+                  meta.isSelected
+                    ? "border-[#1E3A5F] bg-sky-50/90 dark:border-sky-400 dark:bg-sky-950/40"
+                    : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                }`}
+              >
+                <button
                   type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => openTrackingModal(row)}
+                  onClick={meta.onClick}
+                  className="w-full text-left p-3.5 space-y-2 rounded-t-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
                 >
-                  <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Update Status</span>
-                </Button>
-              ),
-            };
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-[#1E3A5F] text-white dark:bg-sky-400 dark:text-slate-950">
+                      {row.ticket_code}
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-slate-100 leading-snug">
+                      {row.issue_title}
+                    </span>
+                  </div>
+                  <p className="text-xs font-medium text-slate-700 dark:text-slate-300 leading-relaxed">
+                    {locLabel} • {itemLabel} • {row.damage_severity}
+                  </p>
+                </button>
+                <div
+                  className="px-3.5 pb-3 pt-1 flex items-center gap-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => openTrackingModal(row)}
+                  >
+                    <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Update Status</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => {
+                      setDeleteError("");
+                      setDeletingTicket(row);
+                    }}
+                    aria-label={`Hapus tiket ${row.ticket_code}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  </Button>
+                </div>
+              </div>
+            );
           }}
         />
       ) : (
@@ -914,265 +794,12 @@ export function PemeliharaanView() {
       </Drawer>
 
       {/* Modal Form Lapor Kerusakan */}
-      <Modal
+      <MaintenanceReportModal
         isOpen={reportModalOpen}
         onClose={() => setReportModalOpen(false)}
-        title="Form Pelaporan Kerusakan Aset / Alat Kantor / Ruangan"
-        description="Kondisi Aset Inventaris atau status Alat Kantor Staf otomatis disinkronkan saat tiket dibuat maupun selesai diperbaiki."
-        maxWidthClass="max-w-2xl"
-      >
-        <form onSubmit={handleReportSubmit} className="space-y-4">
-          {formError ? (
-            <div
-              role="alert"
-              className="p-3 rounded-md bg-red-50 dark:bg-red-950 border border-red-600 text-xs font-medium text-red-900 dark:text-red-200"
-            >
-              {formError}
-            </div>
-          ) : null}
-
-          <div className="space-y-1.5">
-            <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
-              Jenis Objek yang Dilaporkan *
-            </span>
-            <div
-              role="group"
-              aria-label="Jenis objek laporan kerusakan"
-              className="grid grid-cols-1 sm:grid-cols-3 gap-2"
-            >
-              {(
-                [
-                  { id: "asset", label: "Aset Inventaris" },
-                  { id: "office_kit", label: "Alat Kantor Staf" },
-                  { id: "room", label: "Fasilitas Fisik Ruangan" },
-                ] as const
-              ).map((opt) => {
-                const active = targetKind === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => handleTargetKindChange(opt.id)}
-                    aria-pressed={active}
-                    className={`min-h-[44px] px-3 py-2 rounded-md border text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400 ${
-                      active
-                        ? "border-[#1E3A5F] bg-[#1E3A5F] text-white dark:border-sky-400 dark:bg-sky-500 dark:text-slate-950"
-                        : "border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {targetKind === "asset" ? (
-              <Select
-                label="Pilih Aset Inventaris Bermasalah *"
-                value={assetId}
-                onChange={(e) => handleAssetSelectionChange(e.target.value)}
-                options={
-                  assets.length === 0
-                    ? [{ value: "", label: "Belum ada data aset terdaftar" }]
-                    : assets.map((a) => ({
-                        value: a.id,
-                        label: `${a.inventory_code} - ${a.name}`,
-                      }))
-                }
-              />
-            ) : targetKind === "office_kit" ? (
-              <Select
-                label="Pilih Alat Kantor Staf Bermasalah *"
-                value={officeKitItemId}
-                onChange={(e) => handleOfficeKitSelectionChange(e.target.value)}
-                options={
-                  officeKitItems.length === 0
-                    ? [
-                        {
-                          value: "",
-                          label: "Belum ada barang di katalog kantor staf",
-                        },
-                      ]
-                    : officeKitItems.map((k) => ({
-                        value: k.id,
-                        label: `${k.kit_code} - ${k.name} [${k.category}] (${k.status})`,
-                      }))
-                }
-              />
-            ) : (
-              <div className="flex items-end pb-1">
-                <p className="w-full min-h-[44px] px-3.5 py-2.5 text-xs rounded-md border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-700 dark:text-slate-300">
-                  Target laporan ditujukan langsung pada prasarana fisik ruangan.
-                </p>
-              </div>
-            )}
-
-            <Select
-              label={
-                targetKind === "office_kit"
-                  ? "Lokasi Ruangan (Opsional)"
-                  : "Lokasi Ruangan *"
-              }
-              value={roomId}
-              onChange={(e) => setRoomId(e.target.value)}
-              options={
-                targetKind === "office_kit"
-                  ? [
-                      {
-                        value: "",
-                        label: "Kantor Staf / Universal (Tanpa Ruang Khusus)",
-                      },
-                      ...rooms.map((r) => ({
-                        value: r.id,
-                        label: `${r.code} - ${r.name}`,
-                      })),
-                    ]
-                  : rooms.map((r) => ({
-                      value: r.id,
-                      label: `${r.code} - ${r.name}`,
-                    }))
-              }
-            />
-          </div>
-
-          {targetKind === "office_kit" &&
-          officeKitItems.find((k) => k.id === officeKitItemId)?.status ===
-            "Dipinjam" ? (
-            <div className="p-3 rounded-md border border-amber-400 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-700 text-xs text-amber-950 dark:text-amber-200">
-              Barang ini saat ini berstatus <strong>Dipinjam</strong>. Kondisi
-              rusaknya akan tercatat pada laporan kerusakan dan item akan
-              otomatis beralih ke Perbaikan setelah pengembalian diterima.
-            </div>
-          ) : null}
-
-          {campusOfficials.length > 0 || lecturers.length > 0 ? (
-            <Select
-              label="Pilih Pelapor dari Data Master (Opsional)"
-              value={reporterQuickPick}
-              onChange={(e) => {
-                const val = e.target.value;
-                setReporterQuickPick(val);
-                if (!val) return;
-                if (val.startsWith("official:")) {
-                  const found = campusOfficials.find(
-                    (o) => o.id === val.slice("official:".length)
-                  );
-                  if (found) {
-                    setReporterName(found.full_name);
-                    setReporterRole(found.position_title);
-                  }
-                } else if (val.startsWith("lecturer:")) {
-                  const found = lecturers.find(
-                    (l) => l.id === val.slice("lecturer:".length)
-                  );
-                  if (found) {
-                    setReporterName(found.full_name);
-                    setReporterRole(`Dosen (${found.homebase_prodi})`);
-                  }
-                }
-              }}
-              options={[
-                { value: "", label: "-- Pilih pelapor atau ketik manual --" },
-                ...campusOfficials
-                  .filter((o) => o.is_active)
-                  .map((o) => ({
-                    value: `official:${o.id}`,
-                    label: `[Pengurus] ${o.full_name} (${o.position_title})`,
-                  })),
-                ...lecturers
-                  .filter((l) => l.is_active)
-                  .map((l) => ({
-                    value: `lecturer:${l.id}`,
-                    label: `[Dosen] ${l.full_name} (${l.homebase_prodi})`,
-                  })),
-              ]}
-            />
-          ) : null}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Input
-              label="Nama Pelapor *"
-              placeholder="Contoh: Hendra Wijaya, S.T."
-              value={reporterName}
-              onChange={(e) => setReporterName(e.target.value)}
-              required
-            />
-            <Input
-              label="Jabatan / Peran Pelapor *"
-              placeholder="Contoh: PIC Ruangan / Dosen Pengampu"
-              value={reporterRole}
-              onChange={(e) => setReporterRole(e.target.value)}
-              required
-            />
-          </div>
-
-          <Input
-            label="Judul Kendala / Kerusakan *"
-            placeholder="Contoh: Kompresor AC mati & kebocoran pipa drainase"
-            value={issueTitle}
-            onChange={(e) => setIssueTitle(e.target.value)}
-            required
-          />
-
-          <Input
-            label="Deskripsi Detail Kendala *"
-            placeholder="Jelaskan gejala kerusakan agar teknisi dapat menyiapkan suku cadang..."
-            value={issueDescription}
-            onChange={(e) => setIssueDescription(e.target.value)}
-            required
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Select
-              label="Tingkat Keparahan Kerusakan Aset *"
-              value={damageSeverity}
-              onChange={(e) =>
-                setDamageSeverity(e.target.value as DamageSeverity)
-              }
-              options={SEVERITIES.map((s) => ({ value: s, label: s }))}
-            />
-            <Select
-              label="Prioritas Penanganan *"
-              value={priority}
-              onChange={(e) =>
-                setPriority(e.target.value as MaintenancePriority)
-              }
-              options={PRIORITIES.map((p) => ({ value: p, label: p }))}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label
-              htmlFor="maintenance-photo-file"
-              className="block text-xs font-bold text-slate-800 dark:text-slate-200"
-            >
-              Unggah Foto Dokumentasi Kerusakan (Opsional, JPG/PNG/PDF maks 5 MB)
-            </label>
-            <input
-              id="maintenance-photo-file"
-              type="file"
-              accept="image/*,.pdf"
-              onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-              className="block w-full text-xs text-slate-700 dark:text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border file:border-slate-300 dark:file:border-slate-700 file:text-xs file:font-semibold file:bg-slate-100 dark:file:bg-slate-800 file:text-slate-900 dark:file:text-slate-100 hover:file:bg-slate-200"
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setReportModalOpen(false)}
-            >
-              Batal
-            </Button>
-            <Button type="submit" variant="secondary" disabled={submittingReport}>
-              {submittingReport ? "Menyimpan..." : "Kirim Laporan Kerusakan"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+        initialTargetKind={reportInitialKind}
+        initialOfficeKitIds={reportInitialKitIds}
+      />
 
       {/* Modal Update Tracking Perbaikan */}
       <Modal

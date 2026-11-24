@@ -31,6 +31,7 @@ import {
 } from "@/lib/supabase/sarpras-context";
 import {
   AssetCondition,
+  DamageSeverity,
   OfficeKitCategory,
   OfficeKitItem,
   OfficeKitLoan,
@@ -57,6 +58,7 @@ import { BarcodeLabelModal } from "@/components/ui/barcode-label-modal";
 import { PrintableBarcodeItem } from "@/lib/barcode/render-codes";
 import { LoanBoardCompactCard } from "@/components/sarpras/loan-compact-card";
 import { QuickLoanForm } from "@/components/sarpras/quick-loan-form";
+import { MaintenanceReportModal } from "@/components/sarpras/maintenance-report-modal";
 import {
   formatWibDateTime,
   isLoanVisibleOnDailyDesk,
@@ -210,6 +212,7 @@ export function SirkulasiInventView() {
     reopenOfficeKitLoan,
     deleteOfficeKitLoan,
     resequenceOfficeKitItems,
+    notify,
   } = useSarpras();
 
   const todayWibIso = useTodayWibIso();
@@ -247,8 +250,14 @@ export function SirkulasiInventView() {
     string | undefined
   >(undefined);
 
-  // Seleksi, Cetak Label QR & Penomoran Ulang Barang Kantor Staf
+  // Seleksi, Cetak Label QR, Perbaikan Massal & Penomoran Ulang Barang Kantor Staf
   const [selectedKitRowKeys, setSelectedKitRowKeys] = useState<string[]>([]);
+  const [bulkRepairMenuOpen, setBulkRepairMenuOpen] = useState(false);
+  const [bulkRepairModal, setBulkRepairModal] = useState<{
+    open: boolean;
+    severity: DamageSeverity;
+    kitIds: string[];
+  }>({ open: false, severity: "Rusak Ringan", kitIds: [] });
   const [barcodePrintItems, setBarcodePrintItems] = useState<
     PrintableBarcodeItem[] | null
   >(null);
@@ -1740,6 +1749,68 @@ export function SirkulasiInventView() {
                     : "Cetak QR Massal"}
                 </span>
               </Button>
+              <div className="relative">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={officeKitItems.length === 0}
+                  aria-expanded={bulkRepairMenuOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setBulkRepairMenuOpen((prev) => !prev)}
+                >
+                  <Wrench className="w-4 h-4" aria-hidden="true" />
+                  <span>Perbaikan Massal</span>
+                </Button>
+                {bulkRepairMenuOpen ? (
+                  <div
+                    role="menu"
+                    aria-label="Pilih kondisi barang untuk perbaikan massal"
+                    className="absolute right-0 z-30 mt-1.5 w-60 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg p-1.5 space-y-1"
+                  >
+                    {(["Rusak Ringan", "Rusak Berat", "Hilang"] as const).map(
+                      (cond) => {
+                        const matchCount = officeKitItems.filter(
+                          (k) => k.condition === cond
+                        ).length;
+                        return (
+                          <button
+                            key={cond}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setBulkRepairMenuOpen(false);
+                              const matched = officeKitItems.filter(
+                                (k) => k.condition === cond
+                              );
+                              if (matched.length === 0) {
+                                notify(
+                                  "info",
+                                  "Tidak Ada Barang Ditemukan",
+                                  `Tidak ada barang di katalog dengan kondisi ${cond}.`
+                                );
+                                return;
+                              }
+                              const ids = matched.map((k) => k.id);
+                              setSelectedKitRowKeys(ids);
+                              setBulkRepairModal({
+                                open: true,
+                                severity: cond,
+                                kitIds: ids,
+                              });
+                            }}
+                            className="w-full min-h-[40px] px-3 py-2 rounded-md text-left text-xs font-semibold flex items-center justify-between gap-2 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400"
+                          >
+                            <span>{cond}</span>
+                            <span className="px-1.5 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              {matchCount}
+                            </span>
+                          </button>
+                        );
+                      }
+                    )}
+                  </div>
+                ) : null}
+              </div>
               <Button
                 type="button"
                 variant="danger"
@@ -3592,6 +3663,18 @@ export function SirkulasiInventView() {
           </div>
         </div>
       </Modal>
+
+      <MaintenanceReportModal
+        isOpen={bulkRepairModal.open}
+        onClose={() =>
+          setBulkRepairModal((prev) => ({ ...prev, open: false }))
+        }
+        initialTargetKind="office_kit"
+        initialOfficeKitIds={bulkRepairModal.kitIds}
+        initialSeverity={bulkRepairModal.severity}
+        bulkPresetLabel={bulkRepairModal.severity}
+        onSubmitted={() => setSelectedKitRowKeys([])}
+      />
     </div>
   );
 }
