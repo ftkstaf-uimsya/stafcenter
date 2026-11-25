@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { extractScannedItemCode } from "@/lib/barcode/render-codes";
 
 export interface ScanCodeOutcome {
   status: "added" | "duplicate" | "unavailable" | "not_found";
@@ -69,7 +70,7 @@ export function BarcodeScannerModal({
   const [scanLogs, setScanLogs] = useState<ScanLogItem[]>([]);
 
   const pushDecodedResult = (decodedText: string) => {
-    const clean = decodedText.trim();
+    const clean = extractScannedItemCode(decodedText);
     if (!clean) return;
     const normalized = clean.toUpperCase();
     const now = Date.now();

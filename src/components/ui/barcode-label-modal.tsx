@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Minus, Plus, Printer, QrCode, Trash2 } from "lucide-react";
 import {
+  buildPublicScanUrl,
   generateQrDataUrl,
   LabelPrintLayout,
   PrintableBarcodeItem,
@@ -44,7 +45,7 @@ export function BarcodeLabelModal({
     const buildAllQrs = async () => {
       const nextEntries = await Promise.all(
         queue.map(async ({ item }) => {
-          const qr = await generateQrDataUrl(item.code);
+          const qr = await generateQrDataUrl(buildPublicScanUrl(item.code));
           return [item.id, qr] as const;
         })
       );

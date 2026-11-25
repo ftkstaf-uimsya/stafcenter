@@ -29,6 +29,7 @@ import {
 import {
   useSarpras,
 } from "@/lib/supabase/sarpras-context";
+import { formatCurrencyIDR } from "@/lib/supabase/client";
 import {
   AssetCondition,
   DamageSeverity,
@@ -285,6 +286,8 @@ export function SirkulasiInventView() {
   const [kitSpec, setKitSpec] = useState("");
   const [kitTray, setKitTray] = useState("Kotak Kabel Loker A1 - Kantor Staf");
   const [kitLinkedRoomId, setKitLinkedRoomId] = useState("");
+  const [kitProcurementYear, setKitProcurementYear] = useState("");
+  const [kitAcquisitionCost, setKitAcquisitionCost] = useState("");
   const [kitCondition, setKitCondition] = useState<AssetCondition>("Baik");
   const [kitNotes, setKitNotes] = useState("");
   const [kitError, setKitError] = useState("");
@@ -802,6 +805,8 @@ export function SirkulasiInventView() {
     setKitSpec("");
     setKitTray("Kotak Kabel Loker A1 - Kantor Staf");
     setKitLinkedRoomId("");
+    setKitProcurementYear(String(new Date().getFullYear()));
+    setKitAcquisitionCost("");
     setKitCondition("Baik");
     setKitNotes("");
     setKitError("");
@@ -818,6 +823,14 @@ export function SirkulasiInventView() {
     setKitSpec(item.brand_spec);
     setKitTray(item.storage_tray);
     setKitLinkedRoomId(item.linked_room_id || "");
+    setKitProcurementYear(
+      item.procurement_year ? String(item.procurement_year) : ""
+    );
+    setKitAcquisitionCost(
+      typeof item.acquisition_cost === "number" && item.acquisition_cost > 0
+        ? String(item.acquisition_cost)
+        : ""
+    );
     setKitCondition(item.condition);
     setKitNotes(item.notes || "");
     setKitError("");
@@ -895,6 +908,26 @@ export function SirkulasiInventView() {
       return;
     }
 
+    let parsedYear: number | null = null;
+    if (kitProcurementYear.trim()) {
+      const yr = Number(kitProcurementYear.trim());
+      if (!Number.isInteger(yr) || yr < 1990 || yr > 2100) {
+        setKitError("Tahun pengadaan harus berupa angka antara 1990 s.d. 2100.");
+        return;
+      }
+      parsedYear = yr;
+    }
+
+    let parsedCost = 0;
+    if (kitAcquisitionCost.trim()) {
+      const cost = Number(kitAcquisitionCost.trim());
+      if (!Number.isFinite(cost) || cost < 0) {
+        setKitError("Harga perolehan harus berupa angka 0 atau lebih.");
+        return;
+      }
+      parsedCost = Math.round(cost);
+    }
+
     const nextStatus: OfficeKitStatus =
       kitCondition === "Rusak Ringan" ||
       kitCondition === "Rusak Berat" ||
@@ -912,6 +945,8 @@ export function SirkulasiInventView() {
         brand_spec: kitSpec.trim() || "-",
         storage_tray: kitTray.trim() || "Loker Kantor Staf",
         linked_room_id: kitLinkedRoomId || null,
+        procurement_year: parsedYear,
+        acquisition_cost: parsedCost,
         condition: kitCondition,
         status: nextStatus,
         notes: kitNotes.trim(),
@@ -925,6 +960,8 @@ export function SirkulasiInventView() {
         brand_spec: kitSpec.trim() || "-",
         storage_tray: kitTray.trim() || "Loker Kantor Staf",
         linked_room_id: kitLinkedRoomId || null,
+        procurement_year: parsedYear,
+        acquisition_cost: parsedCost,
         condition: kitCondition,
         status: nextStatus,
         is_active: true,
@@ -1116,6 +1153,22 @@ export function SirkulasiInventView() {
           </div>
         );
       },
+    },
+    {
+      key: "acquisition",
+      header: "Pengadaan & Nilai",
+      render: (row) => (
+        <div className="text-xs space-y-1">
+          <p className="font-semibold text-slate-900 dark:text-slate-100">
+            {row.procurement_year ? `Tahun ${row.procurement_year}` : "Tahun -"}
+          </p>
+          <p className="font-mono text-slate-700 dark:text-slate-300">
+            {typeof row.acquisition_cost === "number" && row.acquisition_cost > 0
+              ? formatCurrencyIDR(row.acquisition_cost)
+              : "-"}
+          </p>
+        </div>
+      ),
     },
     {
       key: "condition_status",
@@ -3116,6 +3169,25 @@ export function SirkulasiInventView() {
                 </dd>
               </div>
               <div>
+                <dt className="text-slate-600 dark:text-slate-400">
+                  Tahun Pengadaan
+                </dt>
+                <dd className="mt-0.5 font-mono font-semibold text-slate-900 dark:text-slate-100">
+                  {selectedKit.procurement_year || "-"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-600 dark:text-slate-400">
+                  Harga Perolehan
+                </dt>
+                <dd className="mt-0.5 font-mono font-semibold text-slate-900 dark:text-slate-100">
+                  {typeof selectedKit.acquisition_cost === "number" &&
+                  selectedKit.acquisition_cost > 0
+                    ? formatCurrencyIDR(selectedKit.acquisition_cost)
+                    : "-"}
+                </dd>
+              </div>
+              <div className="sm:col-span-2">
                 <dt className="text-slate-600 dark:text-slate-400">Catatan</dt>
                 <dd className="mt-0.5 text-slate-800 dark:text-slate-200">
                   {selectedKit.notes || "-"}
@@ -3371,6 +3443,27 @@ export function SirkulasiInventView() {
                 value: c,
                 label: c,
               }))}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input
+              label="Tahun Pengadaan (Opsional)"
+              type="number"
+              min={1990}
+              max={2100}
+              placeholder="Contoh: 2026"
+              value={kitProcurementYear}
+              onChange={(e) => setKitProcurementYear(e.target.value)}
+            />
+            <Input
+              label="Harga Perolehan (Rp) (Opsional)"
+              type="number"
+              min={0}
+              step={50000}
+              placeholder="Contoh: 175000"
+              value={kitAcquisitionCost}
+              onChange={(e) => setKitAcquisitionCost(e.target.value)}
             />
           </div>
 

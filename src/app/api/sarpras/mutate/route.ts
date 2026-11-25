@@ -376,6 +376,8 @@ const TABLE_ALLOWED_COLUMNS: Record<string, readonly string[]> = {
     "brand_spec",
     "storage_tray",
     "linked_room_id",
+    "procurement_year",
+    "acquisition_cost",
     "condition",
     "status",
     "is_active",

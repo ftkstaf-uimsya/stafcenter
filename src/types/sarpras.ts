@@ -138,6 +138,8 @@ export interface OfficeKitItem {
   brand_spec: string;
   storage_tray: string;
   linked_room_id?: string | null;
+  procurement_year?: number | null;
+  acquisition_cost?: number;
   condition: AssetCondition;
   status: OfficeKitStatus;
   is_active: boolean;

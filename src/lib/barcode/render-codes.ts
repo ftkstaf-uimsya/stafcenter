@@ -17,6 +17,34 @@ export interface PrintableLabelEntry {
   qrDataUrl: string;
 }
 
+export function buildPublicScanUrl(code: string, origin?: string): string {
+  const clean = code.trim();
+  if (!clean) return "";
+  const base = (
+    origin || (typeof window !== "undefined" ? window.location.origin : "")
+  ).replace(/\/+$/, "");
+  if (!base) return clean;
+  return `${base}/scan/${encodeURIComponent(clean)}`;
+}
+
+/**
+ * Extracts item/asset code from either a raw code string ("3001")
+ * or a public scan URL ("https://domain/scan/3001").
+ */
+export function extractScannedItemCode(rawValue: string): string {
+  const clean = rawValue.trim();
+  if (!clean) return "";
+  const match = clean.match(/\/scan\/([^/?#]+)/i);
+  if (match && match[1]) {
+    try {
+      return decodeURIComponent(match[1]).trim();
+    } catch {
+      return match[1].trim();
+    }
+  }
+  return clean;
+}
+
 export async function generateQrDataUrl(value: string): Promise<string> {
   const clean = value.trim();
   if (!clean) return "";

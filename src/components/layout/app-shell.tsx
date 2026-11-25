@@ -30,7 +30,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   } = useSarpras();
 
   const isAuthPage = pathname === "/login" || pathname?.startsWith("/login/");
-  const requiresAuth = isLiveSupabase && !isAuthPage;
+  const isPublicScanPage =
+    pathname === "/scan" || pathname?.startsWith("/scan/");
+  const requiresAuth = isLiveSupabase && !isAuthPage && !isPublicScanPage;
   const pageKey = getPageKeyFromPathname(pathname);
   const isPinjamCepatRoute =
     pathname === "/sarpras/sirkulasi-invent/pinjam-cepat";
@@ -99,6 +101,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       ))}
     </div>
   );
+
+  if (isPublicScanPage) {
+    return (
+      <div className="min-h-dvh bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+        {children}
+      </div>
+    );
+  }
 
   // Blokir akses ke rute operasional sampai sesi autentikasi Staf terverifikasi
   if (requiresAuth && (authLoading || !authUser)) {

@@ -24,6 +24,7 @@ import {
   matchesFlexibleQuery,
   normalizeCompactSearch,
 } from "@/lib/search-normalize";
+import { extractScannedItemCode } from "@/lib/barcode/render-codes";
 import { compressPhotoIfNeeded } from "@/lib/media/compress-image";
 import { OfficeKitCategory } from "@/types/sarpras";
 import { Button } from "@/components/ui/button";
@@ -240,7 +241,7 @@ export function QuickLoanForm({
   };
 
   const handleScanOrQuickAddCode = (rawCode: string): ScanCodeOutcome => {
-    const clean = rawCode.trim();
+    const clean = extractScannedItemCode(rawCode);
     const normalized = clean.toUpperCase();
     const compact = normalizeCompactSearch(clean);
     if (!normalized) {
