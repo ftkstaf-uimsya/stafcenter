@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
+  ArrowLeftRight,
   BarChart3,
   Building2,
   Cable,
@@ -63,6 +64,7 @@ import { PrintableBarcodeItem } from "@/lib/barcode/render-codes";
 import { LoanBoardCompactCard } from "@/components/sarpras/loan-compact-card";
 import { QuickLoanForm } from "@/components/sarpras/quick-loan-form";
 import { MaintenanceReportModal } from "@/components/sarpras/maintenance-report-modal";
+import { ReplaceLoanItemModal } from "@/components/sarpras/replace-loan-item-modal";
 import {
   formatWibDateTime,
   isLoanVisibleOnDailyDesk,
@@ -256,6 +258,9 @@ export function SirkulasiInventView() {
   // Slide-over detail drawer
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const [selectedKitId, setSelectedKitId] = useState<string | null>(null);
+  const [replacingLoan, setReplacingLoan] = useState<OfficeKitLoan | null>(
+    null
+  );
 
   // Modal Check-Out Pinjam Cepat Alat Kantor Staf
   const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
@@ -3118,10 +3123,21 @@ export function SirkulasiInventView() {
                 </dd>
               </div>
               <div className="sm:col-span-2">
-                <dt className="text-slate-600 dark:text-slate-400">
-                  Barang Dipinjam
+                <dt className="flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-400">
+                  <span>Barang Dipinjam</span>
+                  {selectedLoan.status === "Dipinjam" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setReplacingLoan(selectedLoan)}
+                    >
+                      <ArrowLeftRight className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Ganti Barang Dipinjam</span>
+                    </Button>
+                  ) : null}
                 </dt>
-                <dd className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
+                <dd className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
                   {selectedLoan.kit_items_label}
                 </dd>
               </div>
@@ -3991,6 +4007,11 @@ export function SirkulasiInventView() {
           </div>
         ) : null}
       </Modal>
+      <ReplaceLoanItemModal
+        isOpen={Boolean(replacingLoan)}
+        onClose={() => setReplacingLoan(null)}
+        loan={replacingLoan}
+      />
     </div>
   );
 }

@@ -388,6 +388,13 @@ interface SarprasContextValue {
     }
   ) => ActionResult;
   reopenOfficeKitLoan: (id: string) => ActionResult;
+  replaceOfficeKitLoanItem: (params: {
+    loanId: string;
+    oldItemId: string;
+    newItemId: string;
+    oldCondition: "Rusak Ringan" | "Rusak Berat";
+    notes?: string;
+  }) => ActionResult;
   deleteOfficeKitLoan: (id: string) => Promise<ActionResult>;
   resequenceOfficeKitItems: (
     updates: Array<{ id: string; kit_code: string; name: string }>
@@ -4977,6 +4984,169 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  const replaceOfficeKitLoanItem = useCallback(
+    (params: {
+      loanId: string;
+      oldItemId: string;
+      newItemId: string;
+      oldCondition: "Rusak Ringan" | "Rusak Berat";
+      notes?: string;
+    }): ActionResult => {
+      if (!requireStaffForLiveWrite("sirkulasi-invent")) {
+        return { ok: false, error: "Autentikasi staf diperlukan." };
+      }
+
+      const loan = officeKitLoans.find((l) => l.id === params.loanId);
+      if (!loan) {
+        return { ok: false, error: "Tiket sirkulasi tidak ditemukan." };
+      }
+      if (loan.status !== "Dipinjam") {
+        return {
+          ok: false,
+          error: "Penggantian barang hanya tersedia saat tiket berstatus Dipinjam.",
+        };
+      }
+      if (!loan.kit_item_ids.includes(params.oldItemId)) {
+        return {
+          ok: false,
+          error: "Barang yang akan diganti tidak ditemukan di tiket ini.",
+        };
+      }
+      if (params.oldItemId === params.newItemId) {
+        return {
+          ok: false,
+          error: "Pilih barang pengganti yang berbeda dari barang rusak.",
+        };
+      }
+
+      const oldItem = officeKitItems.find((k) => k.id === params.oldItemId);
+      const newItem = officeKitItems.find((k) => k.id === params.newItemId);
+      if (!newItem || newItem.status !== "Tersedia") {
+        return {
+          ok: false,
+          error: `Barang pengganti ${
+            newItem?.kit_code || ""
+          } saat ini tidak tersedia (${newItem?.status || "tidak ditemukan"}).`,
+        };
+      }
+
+      const nextKitItemIds = loan.kit_item_ids.map((id) =>
+        id === params.oldItemId ? params.newItemId : id
+      );
+      const nextKitItemsLabel = nextKitItemIds
+        .map((id) => {
+          const kit = officeKitItems.find((k) => k.id === id);
+          return kit ? `${kit.kit_code} (${kit.name})` : id;
+        })
+        .join(", ");
+
+      setOfficeKitLoans((prev) =>
+        prev.map((item) =>
+          item.id === loan.id
+            ? {
+                ...item,
+                kit_item_ids: nextKitItemIds,
+                kit_items_label: nextKitItemsLabel,
+              }
+            : item
+        )
+      );
+
+      setOfficeKitItems((prev) =>
+        prev.map((item) => {
+          if (item.id === params.oldItemId) {
+            return {
+              ...item,
+              status: "Perbaikan",
+              condition: params.oldCondition,
+            };
+          }
+          if (item.id === params.newItemId) {
+            return {
+              ...item,
+              status: "Dipinjam",
+            };
+          }
+          return item;
+        })
+      );
+
+      if (isLiveSupabase && authUser) {
+        void sendMutation(
+          {
+            action: "replace_office_kit_loan_item",
+            id: loan.id,
+            oldItemId: params.oldItemId,
+            newItemId: params.newItemId,
+            oldCondition: params.oldCondition,
+            data: {
+              kit_item_ids: nextKitItemIds,
+              kit_items_label: nextKitItemsLabel,
+            },
+          },
+          "Mengganti Barang Dipinjam",
+          "Barang Dipinjam Diganti",
+          `${oldItem?.kit_code || "Barang lama"} diganti ke ${
+            newItem.kit_code
+          } pada tiket ${loan.loan_code}.`
+        );
+      } else {
+        notify(
+          "success",
+          "Barang Dipinjam Diganti",
+          `${oldItem?.kit_code || "Barang lama"} diganti ke ${
+            newItem.kit_code
+          } pada tiket ${loan.loan_code}.`
+        );
+      }
+
+      const staffName = authUser?.fullName || "Staf Loket";
+      const reasonSuffix = params.notes?.trim()
+        ? ` Catatan: ${params.notes.trim()}`
+        : "";
+      void addEntityNote(
+        "office_loan",
+        loan.id,
+        `[Ganti Barang Rusak] ${
+          oldItem ? `${oldItem.kit_code} (${oldItem.name})` : params.oldItemId
+        } [${params.oldCondition}] diganti ke ${newItem.kit_code} (${
+          newItem.name
+        }) oleh ${staffName}.${reasonSuffix}`
+      );
+
+      // Otomatis buat tiket di menu Pemeliharaan & Kerusakan untuk barang lama yang rusak
+      addMaintenanceLog({
+        asset_id: null,
+        office_kit_item_id: params.oldItemId,
+        room_id: loan.room_id || oldItem?.linked_room_id || null,
+        reporter_name: staffName,
+        reporter_role: "Staf Loket Sarpras",
+        issue_title: `Kerusakan saat dipinjam ${loan.class_code} (${loan.loan_code})`,
+        issue_description:
+          params.notes?.trim() ||
+          `Barang ditarik saat sirkulasi aktif ${loan.loan_code} (kelas ${loan.class_code}) dan diganti dengan ${newItem.kit_code} (${newItem.name}).`,
+        damage_severity: params.oldCondition,
+        priority:
+          params.oldCondition === "Rusak Berat" ? "Tinggi/Darurat" : "Sedang",
+        photo_url: undefined,
+        repair_cost: 0,
+      });
+
+      return { ok: true };
+    },
+    [
+      addEntityNote,
+      addMaintenanceLog,
+      authUser,
+      isLiveSupabase,
+      notify,
+      officeKitItems,
+      officeKitLoans,
+      requireStaffForLiveWrite,
+      sendMutation,
+    ]
+  );
+
   const reopenOfficeKitLoan = useCallback(
     (id: string): ActionResult => {
       if (!requireStaffForLiveWrite("sirkulasi-invent")) {
@@ -5791,6 +5961,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       checkoutOfficeKitLoan,
       checkinOfficeKitLoan,
       reopenOfficeKitLoan,
+      replaceOfficeKitLoanItem,
       deleteOfficeKitLoan,
       resequenceOfficeKitItems,
       addThesisWorkflow,
@@ -5905,6 +6076,7 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       checkoutOfficeKitLoan,
       checkinOfficeKitLoan,
       reopenOfficeKitLoan,
+      replaceOfficeKitLoanItem,
       deleteOfficeKitLoan,
       resequenceOfficeKitItems,
       addThesisWorkflow,

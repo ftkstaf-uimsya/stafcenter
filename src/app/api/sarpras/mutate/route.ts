@@ -151,6 +151,17 @@ type MutationPayload =
       itemIds: string[];
       data?: Record<string, unknown>;
     }
+  | {
+      action: "replace_office_kit_loan_item";
+      id: string;
+      oldItemId: string;
+      newItemId: string;
+      oldCondition: "Rusak Ringan" | "Rusak Berat";
+      data: {
+        kit_item_ids: string[];
+        kit_items_label: string;
+      };
+    }
   | { action: "delete_office_kit_loan"; id: string }
   | {
       action: "resequence_office_kit_items";
@@ -2486,6 +2497,69 @@ export async function POST(request: NextRequest) {
         if (updRes.error) {
           return NextResponse.json(
             { error: formatSafeDbError(updRes.error.message) },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "replace_office_kit_loan_item": {
+        const cleanData = sanitizeTablePayload(
+          "office_kit_loans",
+          body.data,
+          true
+        );
+        const { data: newKitRow, error: newKitErr } = await supabase
+          .from("office_kit_items")
+          .select("id, kit_code, status")
+          .eq("id", body.newItemId)
+          .maybeSingle();
+        if (newKitErr) {
+          return NextResponse.json(
+            { error: formatSafeDbError(newKitErr.message) },
+            { status: 400 }
+          );
+        }
+        if (!newKitRow || newKitRow.status !== "Tersedia") {
+          return NextResponse.json(
+            {
+              error: `Barang pengganti ${
+                newKitRow?.kit_code || ""
+              } tidak tersedia untuk mengganti barang rusak (${
+                newKitRow?.status || "tidak ditemukan"
+              }).`,
+            },
+            { status: 409 }
+          );
+        }
+        const safeOldCondition =
+          body.oldCondition === "Rusak Berat" ? "Rusak Berat" : "Rusak Ringan";
+
+        const [loanRes, oldKitRes, nextKitRes] = await Promise.all([
+          supabase
+            .from("office_kit_loans")
+            .update({ ...cleanData, updated_at: nowIso })
+            .eq("id", body.id),
+          supabase
+            .from("office_kit_items")
+            .update({
+              status: "Perbaikan",
+              condition: safeOldCondition,
+              updated_at: nowIso,
+            })
+            .eq("id", body.oldItemId),
+          supabase
+            .from("office_kit_items")
+            .update({ status: "Dipinjam", updated_at: nowIso })
+            .eq("id", body.newItemId),
+        ]);
+        if (loanRes.error || oldKitRes.error || nextKitRes.error) {
+          const msg =
+            loanRes.error?.message ||
+            oldKitRes.error?.message ||
+            nextKitRes.error?.message ||
+            "Gagal mengganti barang dipinjam.";
+          return NextResponse.json(
+            { error: formatSafeDbError(msg) },
             { status: 400 }
           );
         }

@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  ArrowLeftRight,
   Building2,
   Cable,
   CalendarClock,
@@ -43,6 +44,7 @@ import { LoanQuickRow } from "@/components/sarpras/loan-compact-card";
 import { BookingLoanForm } from "@/components/sarpras/booking-loan-form";
 import { BookingQuickRow } from "@/components/sarpras/booking-quick-row";
 import { BookingStatusBadge } from "@/components/sarpras/status-badges";
+import { ReplaceLoanItemModal } from "@/components/sarpras/replace-loan-item-modal";
 
 type MobileQuickTab = "form" | "borrowed" | "returned";
 type QuickDeskMode = "alat-staf" | "fasilitas";
@@ -176,6 +178,9 @@ export function QuickLoanView() {
   // State Mode 1: Alat Kantor Staf
   const [listSearch, setListSearch] = useState("");
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
+  const [replacingLoan, setReplacingLoan] = useState<OfficeKitLoan | null>(
+    null
+  );
   const [returningLoan, setReturningLoan] = useState<OfficeKitLoan | null>(
     null
   );
@@ -1163,10 +1168,21 @@ export function QuickLoanView() {
                 </dd>
               </div>
               <div className="sm:col-span-2">
-                <dt className="text-slate-600 dark:text-slate-400">
-                  Barang Dipinjam
+                <dt className="flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-400">
+                  <span>Barang Dipinjam</span>
+                  {selectedLoan.status === "Dipinjam" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setReplacingLoan(selectedLoan)}
+                    >
+                      <ArrowLeftRight className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Ganti Barang Dipinjam</span>
+                    </Button>
+                  ) : null}
                 </dt>
-                <dd className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
+                <dd className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
                   {selectedLoan.kit_items_label}
                 </dd>
               </div>
@@ -1690,6 +1706,12 @@ export function QuickLoanView() {
           }
           setDeletingBooking(null);
         }}
+      />
+
+      <ReplaceLoanItemModal
+        isOpen={Boolean(replacingLoan)}
+        onClose={() => setReplacingLoan(null)}
+        loan={replacingLoan}
       />
     </div>
   );
