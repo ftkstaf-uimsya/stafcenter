@@ -771,11 +771,11 @@ export function Sidebar({
       {/* Sidebar Desktop */}
       <aside
         aria-label="Navigasi Utama StafCenter"
-        className={`hidden lg:flex lg:flex-col lg:shrink-0 bg-[#1E3A5F] dark:bg-slate-950 text-white border-r border-slate-800 transition-all duration-150 ${
+        className={`hidden lg:flex lg:flex-col lg:shrink-0 lg:sticky lg:top-0 lg:h-dvh lg:overflow-hidden bg-[#1E3A5F] dark:bg-slate-950 text-white border-r border-slate-800 transition-all duration-150 ${
           collapsed ? "lg:w-20" : "lg:w-72"
         }`}
       >
-        <div className="h-16 flex items-center justify-between px-4 border-b border-white/15">
+        <div className="h-16 shrink-0 flex items-center justify-between px-4 border-b border-white/15">
           {!collapsed ? (
             <Link
               href={defaultHomeHref}

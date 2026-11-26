@@ -204,14 +204,27 @@ export async function POST(request: NextRequest) {
       });
 
     if (insertErr) {
-      return NextResponse.json(
-        {
-          error: insertErr.message.includes("sarpras_attachments")
-            ? "Tabel lampiran belum dibuat. Jalankan migrasi supabase/migrations/003_notes_and_attachments.sql di SQL Editor Supabase."
-            : insertErr.message,
-        },
-        { status: 400 }
-      );
+      await supabase.storage.from(BUCKET_NAME).remove([filePath]);
+      const errCode = (insertErr as { code?: string }).code || "";
+      const msg = insertErr.message || "";
+      let friendlyMessage = msg;
+      if (
+        errCode === "42P01" ||
+        /relation\s+"?(?:public\.)?sarpras_attachments"?\s+does not exist/i.test(
+          msg
+        )
+      ) {
+        friendlyMessage =
+          "Tabel lampiran belum dibuat. Jalankan migrasi supabase/migrations/012_ensure_attachments_and_office_loan.sql di SQL Editor Supabase.";
+      } else if (
+        errCode === "23514" ||
+        msg.includes("chk_sarpras_attachments_entity_type") ||
+        msg.includes("sarpras_attachments_entity_type_check")
+      ) {
+        friendlyMessage =
+          "Constraint tipe lampiran di database belum mendukung entitas ini. Jalankan migrasi supabase/migrations/012_ensure_attachments_and_office_loan.sql di SQL Editor Supabase.";
+      }
+      return NextResponse.json({ error: friendlyMessage }, { status: 400 });
     }
 
     // Jika ini foto pemeliharaan, simpan juga ke photo_url tiket bila masih kosong

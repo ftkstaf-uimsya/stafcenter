@@ -126,7 +126,7 @@ async function resolvePublicScanItem(rawCode: string): Promise<PublicScanResult 
               .maybeSingle()
           : Promise.resolve({ data: null }),
         supabase
-          .from("entity_attachments")
+          .from("sarpras_attachments")
           .select("file_url, mime_type")
           .eq("entity_type", "office_kit")
           .eq("entity_id", kit.id)
@@ -235,7 +235,7 @@ async function resolvePublicScanItem(rawCode: string): Promise<PublicScanResult 
               .maybeSingle()
           : Promise.resolve({ data: null }),
         supabase
-          .from("entity_attachments")
+          .from("sarpras_attachments")
           .select("file_url, mime_type")
           .eq("entity_type", "asset")
           .eq("entity_id", asset.id)
