@@ -11,7 +11,9 @@ import {
   Clock,
   Download,
   Edit3,
+  ExternalLink,
   History,
+  ImageIcon,
   KanbanSquare,
   Layers,
   Plus,
@@ -33,6 +35,7 @@ import { formatCurrencyIDR } from "@/lib/supabase/client";
 import {
   AssetCondition,
   DamageSeverity,
+  SarprasAttachment,
   OfficeKitCategory,
   OfficeKitItem,
   OfficeKitLoan,
@@ -229,8 +232,17 @@ export function SirkulasiInventView() {
   const [historyEndDate, setHistoryEndDate] = useState("");
   const [historyProdi, setHistoryProdi] = useState("ALL");
   const [historyStatus, setHistoryStatus] = useState("ALL");
+  const [historyPhotoFilter, setHistoryPhotoFilter] = useState<
+    "ALL" | "WITH_PHOTO" | "NO_PHOTO"
+  >("ALL");
   const [historyClassFilter, setHistoryClassFilter] = useState("");
   const [historySearch, setHistorySearch] = useState("");
+  const [photoLightbox, setPhotoLightbox] = useState<{
+    loanCode: string;
+    classCode: string;
+    photos: SarprasAttachment[];
+    index: number;
+  } | null>(null);
   const [recapSaprasMode, setRecapSaprasMode] =
     useState<RecapSaprasMode>("category");
   const [searchQuery, setSearchQuery] = useState("");
@@ -382,6 +394,28 @@ export function SirkulasiInventView() {
   const activeItemFilterCount =
     (filterKitCategory !== "ALL" ? 1 : 0) + (filterKitStatus !== "ALL" ? 1 : 0);
 
+  const loanPhotosById = useMemo(() => {
+    const map = new Map<string, SarprasAttachment[]>();
+    for (const att of attachments) {
+      if (att.entity_type !== "office_loan") continue;
+      if (!att.mime_type.startsWith("image/")) continue;
+      if (
+        !att.file_url.startsWith("https://") &&
+        !att.file_url.startsWith("http://") &&
+        !att.file_url.startsWith("blob:")
+      ) {
+        continue;
+      }
+      const list = map.get(att.entity_id);
+      if (list) {
+        list.push(att);
+      } else {
+        map.set(att.entity_id, [att]);
+      }
+    }
+    return map;
+  }, [attachments]);
+
   const historyFilteredLoans = useMemo(() => {
     const q = historySearch.trim();
     const min7d = shiftIsoDate(todayWibIso, -6);
@@ -412,6 +446,11 @@ export function SirkulasiInventView() {
 
         if (historyProdi !== "ALL" && l.prodi !== historyProdi) return false;
         if (historyStatus !== "ALL" && l.status !== historyStatus) return false;
+        if (historyPhotoFilter !== "ALL") {
+          const hasPhotos = (loanPhotosById.get(l.id)?.length || 0) > 0;
+          if (historyPhotoFilter === "WITH_PHOTO" && !hasPhotos) return false;
+          if (historyPhotoFilter === "NO_PHOTO" && hasPhotos) return false;
+        }
         if (
           historyClassFilter &&
           l.class_code.toUpperCase() !== historyClassFilter.toUpperCase()
@@ -437,10 +476,12 @@ export function SirkulasiInventView() {
     historyClassFilter,
     historyEndDate,
     historyPeriod,
+    historyPhotoFilter,
     historyProdi,
     historySearch,
     historyStartDate,
     historyStatus,
+    loanPhotosById,
     officeKitLoans,
     rooms,
     todayWibIso,
@@ -453,6 +494,9 @@ export function SirkulasiInventView() {
     }
 
     const totalLoans = historyFilteredLoans.length;
+    const loansWithPhotoCount = historyFilteredLoans.filter(
+      (l) => (loanPhotosById.get(l.id)?.length || 0) > 0
+    ).length;
     const returnedLoans = historyFilteredLoans.filter(
       (l) => l.status === "Dikembalikan"
     ).length;
@@ -469,6 +513,7 @@ export function SirkulasiInventView() {
       prodi: ProdiCode;
       dpmName: string;
       loanCount: number;
+      photoLoanCount: number;
       activeCount: number;
       totalItemsBorrowed: number;
       lastLoanDate: string;
@@ -524,12 +569,16 @@ export function SirkulasiInventView() {
         prodi: loan.prodi,
         dpmName: loan.dpm_name,
         loanCount: 0,
+        photoLoanCount: 0,
         activeCount: 0,
         totalItemsBorrowed: 0,
         lastLoanDate: loan.loan_date,
         catCounts: new Map<OfficeKitCategory, number>(),
       };
       existingClass.loanCount += 1;
+      if ((loanPhotosById.get(loan.id)?.length || 0) > 0) {
+        existingClass.photoLoanCount += 1;
+      }
       if (loan.status === "Dipinjam") existingClass.activeCount += 1;
       existingClass.totalItemsBorrowed += loan.kit_item_ids.length;
       if (loan.loan_date > existingClass.lastLoanDate) {
@@ -618,6 +667,7 @@ export function SirkulasiInventView() {
           prodi: entry.prodi,
           dpmName: entry.dpmName,
           loanCount: entry.loanCount,
+          photoLoanCount: entry.photoLoanCount,
           activeCount: entry.activeCount,
           totalItemsBorrowed: entry.totalItemsBorrowed,
           lastLoanDate: entry.lastLoanDate,
@@ -712,6 +762,7 @@ export function SirkulasiInventView() {
 
     return {
       totalLoans,
+      loansWithPhotoCount,
       returnedLoans,
       activeLoans,
       totalUnitsBorrowed,
@@ -722,7 +773,7 @@ export function SirkulasiInventView() {
       itemRankings,
       roomRankings,
     };
-  }, [historyFilteredLoans, officeKitItems, rooms]);
+  }, [historyFilteredLoans, loanPhotosById, officeKitItems, rooms]);
 
   if (uiSimState === "loading") {
     return (
@@ -1263,9 +1314,12 @@ export function SirkulasiInventView() {
         "Petugas Penyerah",
         "Petugas Penerima",
         "Catatan Kondisi Kembali",
+        "Jumlah Foto Bukti",
+        "Tautan Foto Bukti",
       ];
       const rows = historyFilteredLoans.map((loan) => {
         const room = rooms.find((r) => r.id === loan.room_id);
+        const photos = loanPhotosById.get(loan.id) || [];
         return [
           loan.loan_code,
           loan.loan_date,
@@ -1285,6 +1339,8 @@ export function SirkulasiInventView() {
           loan.handed_by_staff || "Staf Loket",
           loan.received_by_staff || "-",
           loan.return_condition_notes || "-",
+          photos.length,
+          photos.length > 0 ? photos.map((p) => p.file_url).join(" | ") : "-",
         ]
           .map(escapeCsvCell)
           .join(",");
@@ -1306,6 +1362,7 @@ export function SirkulasiInventView() {
       "Prodi",
       "DPM / Ketua Kelas",
       "Frekuensi Peminjaman",
+      "Transaksi Berfoto",
       "Total Unit Dipinjam",
       "Sedang Dipinjam",
       "Sapras Terbanyak Kelas Ini",
@@ -1318,6 +1375,7 @@ export function SirkulasiInventView() {
         cls.prodi,
         cls.dpmName,
         cls.loanCount,
+        cls.photoLoanCount,
         cls.totalItemsBorrowed,
         cls.activeCount,
         cls.topCategories,
@@ -1425,6 +1483,53 @@ export function SirkulasiInventView() {
           ) : null}
         </div>
       ),
+    },
+    {
+      key: "photo_proof",
+      header: "Foto Bukti",
+      render: (row) => {
+        const photos = loanPhotosById.get(row.id) || [];
+        if (photos.length === 0) {
+          return (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              <ImageIcon className="w-3.5 h-3.5 opacity-60" aria-hidden="true" />
+              <span>Tanpa Foto</span>
+            </span>
+          );
+        }
+        return (
+          <div
+            className="flex items-center gap-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() =>
+                setPhotoLightbox({
+                  loanCode: row.loan_code,
+                  classCode: row.class_code,
+                  photos,
+                  index: 0,
+                })
+              }
+              aria-label={`Lihat foto bukti ${row.loan_code}`}
+              className="group relative w-11 h-11 rounded-md overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3A5F] dark:focus-visible:ring-sky-400 shrink-0"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={photos[0].file_url}
+                alt={`Bukti ${row.loan_code}`}
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+              />
+              {photos.length > 1 ? (
+                <span className="absolute bottom-0.5 right-0.5 px-1 rounded text-[10px] font-mono font-bold bg-slate-950/80 text-white">
+                  +{photos.length - 1}
+                </span>
+              ) : null}
+            </button>
+          </div>
+        );
+      },
     },
     {
       key: "status",
@@ -2037,7 +2142,7 @@ export function SirkulasiInventView() {
           {/* Filter Periode, Prodi, Status & Pencarian Riwayat */}
           <div className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
-              <div className="lg:col-span-4">
+              <div className="lg:col-span-3">
                 <Input
                   label="Cari Riwayat Sirkulasi"
                   value={historySearch}
@@ -2079,7 +2184,7 @@ export function SirkulasiInventView() {
                 />
               </div>
 
-              <div className="lg:col-span-3">
+              <div className="lg:col-span-2">
                 <Select
                   label="Status Pengembalian"
                   value={historyStatus}
@@ -2088,6 +2193,23 @@ export function SirkulasiInventView() {
                     { value: "ALL", label: "Semua Status" },
                     { value: "Dipinjam", label: "Sedang Dipinjam" },
                     { value: "Dikembalikan", label: "Sudah Dikembalikan" },
+                  ]}
+                />
+              </div>
+
+              <div className="lg:col-span-2">
+                <Select
+                  label="Foto Bukti"
+                  value={historyPhotoFilter}
+                  onChange={(e) =>
+                    setHistoryPhotoFilter(
+                      e.target.value as "ALL" | "WITH_PHOTO" | "NO_PHOTO"
+                    )
+                  }
+                  options={[
+                    { value: "ALL", label: "Semua" },
+                    { value: "WITH_PHOTO", label: "Ada Foto Bukti" },
+                    { value: "NO_PHOTO", label: "Tanpa Foto" },
                   ]}
                 />
               </div>
@@ -2114,6 +2236,7 @@ export function SirkulasiInventView() {
               historyPeriod !== "ALL" ||
               historyProdi !== "ALL" ||
               historyStatus !== "ALL" ||
+              historyPhotoFilter !== "ALL" ||
               historySearch.trim()) ? (
               <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
                 <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -2143,6 +2266,7 @@ export function SirkulasiInventView() {
                     setHistoryEndDate("");
                     setHistoryProdi("ALL");
                     setHistoryStatus("ALL");
+                    setHistoryPhotoFilter("ALL");
                     setHistoryClassFilter("");
                     setHistorySearch("");
                   }}
@@ -2182,7 +2306,8 @@ export function SirkulasiInventView() {
                     {recapSummary.totalLoans}
                   </p>
                   <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                    {recapSummary.totalUnitsBorrowed} total unit alat keluar dari loket
+                    {recapSummary.totalUnitsBorrowed} unit keluar •{" "}
+                    {recapSummary.loansWithPhotoCount} berfoto bukti
                   </p>
                 </div>
 
@@ -2311,7 +2436,8 @@ export function SirkulasiInventView() {
                                     DPM: <strong className="text-slate-800 dark:text-slate-200">{cls.dpmName}</strong>
                                   </p>
                                   <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-                                    Terakhir: {cls.lastLoanDate}
+                                    Terakhir: {cls.lastLoanDate} •{" "}
+                                    {cls.photoLoanCount} berfoto
                                   </p>
                                 </td>
                                 <td className="px-3 py-3 align-top min-w-[140px] space-y-1.5">
@@ -3768,6 +3894,103 @@ export function SirkulasiInventView() {
         bulkPresetLabel={bulkRepairModal.severity}
         onSubmitted={() => setSelectedKitRowKeys([])}
       />
+
+      <Modal
+        isOpen={Boolean(photoLightbox)}
+        onClose={() => setPhotoLightbox(null)}
+        title={
+          photoLightbox
+            ? `Foto Bukti Peminjaman ${photoLightbox.loanCode}`
+            : "Foto Bukti Peminjaman"
+        }
+        description={
+          photoLightbox
+            ? `Kelas ${photoLightbox.classCode} • ${photoLightbox.photos.length} lampiran foto`
+            : undefined
+        }
+        maxWidthClass="max-w-2xl"
+      >
+        {photoLightbox ? (
+          <div className="space-y-4">
+            {(() => {
+              const activePhoto =
+                photoLightbox.photos[photoLightbox.index] ||
+                photoLightbox.photos[0];
+              if (!activePhoto) return null;
+              return (
+                <>
+                  <div className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 overflow-hidden flex items-center justify-center max-h-[60dvh]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={activePhoto.file_url}
+                      alt={`Foto bukti ${photoLightbox.loanCode}`}
+                      className="max-h-[60dvh] w-auto object-contain"
+                    />
+                  </div>
+                  {photoLightbox.photos.length > 1 ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {photoLightbox.photos.map((p, idx) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() =>
+                            setPhotoLightbox((prev) =>
+                              prev ? { ...prev, index: idx } : null
+                            )
+                          }
+                          className={`w-14 h-14 rounded-md overflow-hidden border-2 transition-colors ${
+                            idx === photoLightbox.index
+                              ? "border-[#1E3A5F] dark:border-sky-400"
+                              : "border-slate-300 dark:border-slate-700 opacity-75 hover:opacity-100"
+                          }`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={p.file_url}
+                            alt={p.file_name}
+                            className="w-full h-full object-cover"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-400 truncate max-w-[240px]">
+                      {activePhoto.file_name}
+                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={activePhoto.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="min-h-[40px] px-3 py-1.5 inline-flex items-center gap-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Buka Tab Baru</span>
+                      </a>
+                      <a
+                        href={activePhoto.file_url}
+                        download={activePhoto.file_name}
+                        className="min-h-[40px] px-3 py-1.5 inline-flex items-center gap-1.5 rounded-md bg-[#1E3A5F] text-white dark:bg-sky-500 dark:text-slate-950 text-xs font-bold hover:opacity-90"
+                      >
+                        <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Unduh Foto</span>
+                      </a>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setPhotoLightbox(null)}
+                      >
+                        Tutup
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

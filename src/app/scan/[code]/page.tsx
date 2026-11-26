@@ -26,8 +26,17 @@ import { Asset, OfficeKitItem } from "@/types/sarpras";
 export const dynamic = "force-dynamic";
 
 interface ActiveLoanPublicInfo {
+  loan_code: string;
   class_code: string;
+  prodi: string;
+  dpm_name: string;
+  borrower_name: string;
+  room_label: string | null;
+  course_name: string;
+  loan_date: string;
+  borrow_time: string;
   expected_return_time: string;
+  handed_by_staff: string;
 }
 
 interface PublicScanResult {
@@ -107,7 +116,9 @@ async function resolvePublicScanItem(rawCode: string): Promise<PublicScanResult 
         kit.status === "Dipinjam"
           ? supabase
               .from("office_kit_loans")
-              .select("class_code, expected_return_time")
+              .select(
+                "loan_code, class_code, prodi, dpm_name, borrower_name, room_id, course_name, loan_date, borrow_time, expected_return_time, handed_by_staff"
+              )
               .eq("status", "Dipinjam")
               .contains("kit_item_ids", [kit.id])
               .order("created_at", { ascending: false })
@@ -126,7 +137,48 @@ async function resolvePublicScanItem(rawCode: string): Promise<PublicScanResult 
       ]);
 
       const linkedRoom = roomRes.data as { code: string; name: string } | null;
-      const loanInfo = activeLoanRes.data as ActiveLoanPublicInfo | null;
+      const rawLoan = activeLoanRes.data as {
+        loan_code: string;
+        class_code: string;
+        prodi: string;
+        dpm_name: string;
+        borrower_name: string;
+        room_id?: string | null;
+        course_name?: string | null;
+        loan_date: string;
+        borrow_time: string;
+        expected_return_time: string;
+        handed_by_staff?: string | null;
+      } | null;
+
+      let loanRoomLabel: string | null = null;
+      if (rawLoan?.room_id) {
+        const { data: lRoom } = await supabase
+          .from("rooms")
+          .select("code, name")
+          .eq("id", rawLoan.room_id)
+          .maybeSingle();
+        if (lRoom) {
+          const r = lRoom as { code: string; name: string };
+          loanRoomLabel = `${r.code} (${r.name})`;
+        }
+      }
+
+      const loanInfo: ActiveLoanPublicInfo | null = rawLoan
+        ? {
+            loan_code: rawLoan.loan_code,
+            class_code: rawLoan.class_code,
+            prodi: rawLoan.prodi,
+            dpm_name: rawLoan.dpm_name,
+            borrower_name: rawLoan.borrower_name,
+            room_label: loanRoomLabel,
+            course_name: rawLoan.course_name || "",
+            loan_date: rawLoan.loan_date,
+            borrow_time: rawLoan.borrow_time,
+            expected_return_time: rawLoan.expected_return_time,
+            handed_by_staff: rawLoan.handed_by_staff || "Staf Loket",
+          }
+        : null;
       const imageUrl =
         (imgRes.data as { file_url?: string } | null)?.file_url || null;
 
@@ -260,6 +312,10 @@ async function resolvePublicScanItem(rawCode: string): Promise<PublicScanResult 
           ) || null
         : null;
 
+    const loanRoom = activeLoan?.room_id
+      ? INITIAL_ROOMS.find((r) => r.id === activeLoan.room_id)
+      : null;
+
     return {
       kind: "office_kit",
       code: seedKit.kit_code,
@@ -285,8 +341,17 @@ async function resolvePublicScanItem(rawCode: string): Promise<PublicScanResult 
           : "danger",
       activeLoan: activeLoan
         ? {
+            loan_code: activeLoan.loan_code,
             class_code: activeLoan.class_code,
+            prodi: activeLoan.prodi,
+            dpm_name: activeLoan.dpm_name,
+            borrower_name: activeLoan.borrower_name,
+            room_label: loanRoom ? `${loanRoom.code} (${loanRoom.name})` : null,
+            course_name: activeLoan.course_name || "",
+            loan_date: activeLoan.loan_date,
+            borrow_time: activeLoan.borrow_time,
             expected_return_time: activeLoan.expected_return_time,
+            handed_by_staff: activeLoan.handed_by_staff || "Staf Loket",
           }
         : null,
       procurementYear: seedKit.procurement_year ?? null,
@@ -439,13 +504,59 @@ export default async function PublicScanDetailPage({
               </div>
 
               {item.activeLoan ? (
-                <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 text-xs text-amber-950 dark:text-amber-200">
-                  Dipinjam oleh{" "}
-                  <strong className="font-mono">{item.activeLoan.class_code}</strong>
-                  , est. kembali{" "}
-                  <strong className="font-mono">
-                    {item.activeLoan.expected_return_time} WIB
-                  </strong>
+                <div className="p-3.5 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 text-xs text-amber-950 dark:text-amber-200 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono font-bold uppercase tracking-wider text-[11px]">
+                      Detail Peminjam Aktif
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-amber-200/80 dark:bg-amber-900 font-mono font-bold">
+                      {item.activeLoan.loan_code}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                    <p>
+                      Kelas:{" "}
+                      <strong className="font-mono">
+                        {item.activeLoan.class_code}
+                      </strong>{" "}
+                      ({item.activeLoan.prodi})
+                    </p>
+                    <p>
+                      Pengambil:{" "}
+                      <strong>{item.activeLoan.borrower_name}</strong>
+                    </p>
+                    <p>
+                      DPM / Ketua:{" "}
+                      <strong>{item.activeLoan.dpm_name}</strong>
+                    </p>
+                    <p>
+                      Jadwal:{" "}
+                      <strong className="font-mono">
+                        {item.activeLoan.borrow_time} -{" "}
+                        {item.activeLoan.expected_return_time} WIB
+                      </strong>
+                    </p>
+                    {item.activeLoan.room_label || item.activeLoan.course_name ? (
+                      <p className="sm:col-span-2">
+                        Lokasi / Keperluan:{" "}
+                        <strong>
+                          {[
+                            item.activeLoan.room_label,
+                            item.activeLoan.course_name,
+                          ]
+                            .filter(Boolean)
+                            .join(" • ")}
+                        </strong>
+                      </p>
+                    ) : null}
+                    <p className="sm:col-span-2 text-[11px] opacity-90">
+                      Tanggal Pinjam:{" "}
+                      <span className="font-mono">
+                        {item.activeLoan.loan_date}
+                      </span>{" "}
+                      • Diserahkan oleh {item.activeLoan.handed_by_staff}
+                    </p>
+                  </div>
                 </div>
               ) : null}
             </div>
