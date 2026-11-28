@@ -1,6 +1,13 @@
 "use client";
 
-import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, X } from "lucide-react";
 import { matchesFlexibleQuery } from "@/lib/search-normalize";
@@ -58,7 +65,13 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
     const [isFiltering, setIsFiltering] = useState(false);
     const [query, setQuery] = useState("");
     const [activeIndex, setActiveIndex] = useState(0);
-    const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+    const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({
+      position: "fixed",
+      top: -9999,
+      left: -9999,
+      visibility: "hidden",
+      zIndex: 70,
+    });
 
     useEffect(() => {
       setMounted(true);
@@ -112,13 +125,22 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
       }
     }, [closedDisplayText, isOpen]);
 
-    useEffect(() => {
-      if (!isOpen) return;
+    useLayoutEffect(() => {
+      if (!isOpen) {
+        setMenuStyle({
+          position: "fixed",
+          top: -9999,
+          left: -9999,
+          visibility: "hidden",
+          zIndex: 70,
+        });
+        return;
+      }
       const updatePosition = () => {
         if (!wrapperRef.current) return;
         const rect = wrapperRef.current.getBoundingClientRect();
-        const spaceBelow = window.innerHeight - rect.bottom - 10;
-        const spaceAbove = rect.top - 10;
+        const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - 10);
+        const spaceAbove = Math.max(0, rect.top - 10);
         const openAbove = spaceBelow < 220 && spaceAbove > spaceBelow;
         const width = Math.min(
           window.innerWidth - 16,
@@ -130,31 +152,63 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         );
 
         if (openAbove) {
+          const safeMaxHeight = Math.max(
+            140,
+            Math.min(264, Math.min(spaceAbove, window.innerHeight - 16))
+          );
+          const safeBottom = Math.max(
+            8,
+            Math.min(
+              window.innerHeight - rect.top + 4,
+              window.innerHeight - safeMaxHeight - 8
+            )
+          );
           setMenuStyle({
             position: "fixed",
             left,
-            bottom: window.innerHeight - rect.top + 4,
+            bottom: safeBottom,
             width,
-            maxHeight: Math.max(140, Math.min(264, spaceAbove)),
+            maxHeight: safeMaxHeight,
+            visibility: "visible",
             zIndex: 70,
           });
         } else {
+          const safeMaxHeight = Math.max(
+            140,
+            Math.min(264, spaceBelow, window.innerHeight - 16)
+          );
+          const safeTop = Math.max(
+            8,
+            Math.min(rect.bottom + 4, window.innerHeight - safeMaxHeight - 8)
+          );
           setMenuStyle({
             position: "fixed",
             left,
-            top: rect.bottom + 4,
+            top: safeTop,
             width,
-            maxHeight: Math.max(140, Math.min(264, spaceBelow)),
+            maxHeight: safeMaxHeight,
+            visibility: "visible",
             zIndex: 70,
           });
         }
       };
 
+      const handleExternalScroll = (event: Event) => {
+        if (
+          dropdownRef.current &&
+          event.target instanceof Node &&
+          dropdownRef.current.contains(event.target)
+        ) {
+          return;
+        }
+        updatePosition();
+      };
+
       updatePosition();
-      window.addEventListener("scroll", updatePosition, true);
+      window.addEventListener("scroll", handleExternalScroll, true);
       window.addEventListener("resize", updatePosition);
       return () => {
-        window.removeEventListener("scroll", updatePosition, true);
+        window.removeEventListener("scroll", handleExternalScroll, true);
         window.removeEventListener("resize", updatePosition);
       };
     }, [isOpen, filteredOptions.length]);
@@ -179,11 +233,21 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
 
     useEffect(() => {
       if (!isOpen) return;
-      const activeEl = dropdownRef.current?.querySelector(
+      const container = dropdownRef.current;
+      const activeEl = container?.querySelector(
         `[data-option-index="${activeIndex}"]`
-      );
-      if (activeEl && "scrollIntoView" in activeEl) {
-        (activeEl as HTMLElement).scrollIntoView({ block: "nearest" });
+      ) as HTMLElement | null;
+      if (!container || !activeEl) return;
+
+      // Scroll hanya pada kontainer listbox sendiri tanpa scrollIntoView agar window tidak melompat
+      const itemTop = activeEl.offsetTop;
+      const itemBottom = itemTop + activeEl.offsetHeight;
+      const viewTop = container.scrollTop;
+      const viewBottom = viewTop + container.clientHeight;
+      if (itemTop < viewTop) {
+        container.scrollTop = itemTop;
+      } else if (itemBottom > viewBottom) {
+        container.scrollTop = itemBottom - container.clientHeight;
       }
     }, [activeIndex, isOpen]);
 

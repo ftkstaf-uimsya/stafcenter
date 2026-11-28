@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
@@ -23,6 +23,7 @@ export function Modal({
 }: ModalProps) {
   const titleId = React.useId();
   const descId = React.useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -32,9 +33,13 @@ export function Modal({
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) {
-        onClose();
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== dialogRef.current) {
+        return;
       }
+      event.preventDefault();
+      onClose();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -44,6 +49,7 @@ export function Modal({
 
   return createPortal(
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75"
       role="dialog"
       aria-modal="true"

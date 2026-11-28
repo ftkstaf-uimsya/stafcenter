@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
@@ -271,6 +271,31 @@ export function SirkulasiInventView() {
   // Seleksi, Cetak Label QR, Perbaikan Massal & Penomoran Ulang Barang Kantor Staf
   const [selectedKitRowKeys, setSelectedKitRowKeys] = useState<string[]>([]);
   const [bulkRepairMenuOpen, setBulkRepairMenuOpen] = useState(false);
+  const bulkRepairContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!bulkRepairMenuOpen) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (
+        bulkRepairContainerRef.current &&
+        !bulkRepairContainerRef.current.contains(e.target as Node)
+      ) {
+        setBulkRepairMenuOpen(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        e.preventDefault();
+        setBulkRepairMenuOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handleOutside);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("mousedown", handleOutside);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [bulkRepairMenuOpen]);
   const [bulkRepairModal, setBulkRepairModal] = useState<{
     open: boolean;
     severity: DamageSeverity;
@@ -1912,7 +1937,7 @@ export function SirkulasiInventView() {
                     : "Cetak QR Massal"}
                 </span>
               </Button>
-              <div className="relative">
+              <div ref={bulkRepairContainerRef} className="relative">
                 <Button
                   type="button"
                   variant="outline"

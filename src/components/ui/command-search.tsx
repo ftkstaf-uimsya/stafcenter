@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   BookOpen,
@@ -63,13 +64,24 @@ export function CommandSearch() {
 
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setCommandSearchOpen(!commandSearchOpen);
-      } else if (e.key === "Escape" && commandSearchOpen) {
+      } else if (e.key === "Escape" && commandSearchOpen && !e.defaultPrevented) {
+        const dialogs = document.querySelectorAll('[role="dialog"]');
+        if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== dialogRef.current) {
+          return;
+        }
+        e.preventDefault();
         setCommandSearchOpen(false);
       }
     };
@@ -503,10 +515,13 @@ export function CommandSearch() {
     thesisWorkflows,
   ]);
 
-  if (!commandSearchOpen) return null;
+  if (!commandSearchOpen || !mounted || typeof document === "undefined") {
+    return null;
+  }
 
-  return (
+  return createPortal(
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-24 p-4 bg-slate-950/70"
       role="dialog"
       aria-modal="true"
@@ -597,6 +612,7 @@ export function CommandSearch() {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

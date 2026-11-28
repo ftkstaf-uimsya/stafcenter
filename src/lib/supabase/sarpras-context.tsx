@@ -3129,6 +3129,9 @@ export function SarprasProvider({ children }: { children: React.ReactNode }) {
       ) {
         return;
       }
+      if (targetAtt?.file_url?.startsWith("blob:")) {
+        URL.revokeObjectURL(targetAtt.file_url);
+      }
       setAttachments((prev) => prev.filter((a) => a.id !== id));
       if (isLiveSupabase && authUser) {
         await sendMutation(

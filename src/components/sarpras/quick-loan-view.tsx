@@ -575,7 +575,7 @@ export function QuickLoanView() {
           left={
             <section
               aria-label="Form Pinjamkan Alat Kantor Staf ke Kelas"
-              className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 lg:sticky lg:top-20"
+              className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto"
             >
               <div className="pb-3 mb-4 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-2">
                 <div>
@@ -770,7 +770,7 @@ export function QuickLoanView() {
           left={
             <section
               aria-label="Form Pengajuan Peminjaman Ruangan & Alat"
-              className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 lg:sticky lg:top-20"
+              className="rounded-lg border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto"
             >
               <div className="pb-3 mb-4 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-2">
                 <div>

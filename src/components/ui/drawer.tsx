@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 interface DrawerProps {
@@ -26,22 +27,33 @@ export function Drawer({
 }: DrawerProps) {
   const titleId = React.useId();
   const subtitleId = React.useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== dialogRef.current) {
+        return;
       }
+      event.preventDefault();
+      onClose();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted || typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex justify-end"
       role="dialog"
       aria-modal="true"
@@ -99,6 +111,7 @@ export function Drawer({
           </div>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

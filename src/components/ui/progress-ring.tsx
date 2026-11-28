@@ -1,4 +1,5 @@
 import React from "react";
+import { toWibDateIso } from "@/lib/sarpras/sirkulasi-utils";
 
 interface ProgressRingProps {
   percent: number;
@@ -72,15 +73,14 @@ export function ActivityStrip({
 
   for (const iso of eventDatesIso) {
     if (!iso) continue;
-    const key = iso.slice(0, 10);
+    const key = iso.length === 10 ? iso : toWibDateIso(iso) || iso.slice(0, 10);
     countsByDay.set(key, (countsByDay.get(key) || 0) + 1);
   }
 
   const days: { dateKey: string; count: number }[] = [];
   for (let i = 13; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
+    const d = new Date(today.getTime() - i * 86_400_000);
+    const key = toWibDateIso(d.toISOString()) || d.toISOString().slice(0, 10);
     days.push({ dateKey: key, count: countsByDay.get(key) || 0 });
   }
 
