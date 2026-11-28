@@ -19,6 +19,7 @@ import {
   Landmark,
   LayoutDashboard,
   type LucideIcon,
+  Monitor,
   Newspaper,
   Package,
   Presentation,
@@ -543,6 +544,48 @@ export function Sidebar({
           </kbd>
         </button>
       ) : null}
+
+      {/* Meja Kerja Pixel Personal: otomatis tersedia untuk semua staf yang login */}
+      <div className="pb-2 mb-2 border-b border-white/15">
+        {!isCollapsedView ? (
+          <p className="px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-amber-300">
+            RUANG KERJA STAF
+          </p>
+        ) : null}
+        <ul className="mt-0.5 space-y-1" role="list">
+          <li>
+            <Link
+              href="/sarpras/meja-kerja"
+              onClick={onCloseMobile}
+              aria-current={
+                pathname === "/sarpras/meja-kerja" ? "page" : undefined
+              }
+              title={isCollapsedView ? "Meja Kerja Pixel" : undefined}
+              className={`min-h-[44px] lg:min-h-[38px] flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                pathname === "/sarpras/meja-kerja"
+                  ? "bg-amber-500 text-slate-950 font-bold"
+                  : "text-slate-100 hover:bg-white/10 hover:text-white"
+              }`}
+            >
+              <span className="flex items-center gap-3 min-w-0">
+                <Monitor
+                  className={`w-5 h-5 shrink-0 ${
+                    pathname === "/sarpras/meja-kerja"
+                      ? "text-slate-950"
+                      : "text-amber-300"
+                  }`}
+                  aria-hidden={true}
+                />
+                {!isCollapsedView ? (
+                  <span className="truncate">Meja Kerja Pixel</span>
+                ) : (
+                  <span className="sr-only">Meja Kerja Pixel</span>
+                )}
+              </span>
+            </Link>
+          </li>
+        </ul>
+      </div>
 
       {saprasNavItems.length > 0 ? (
         <div>

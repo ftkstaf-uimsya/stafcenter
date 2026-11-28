@@ -12,6 +12,7 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-jakarta)", "system-ui", "sans-serif"],
         mono: ["var(--font-jetbrains)", "monospace"],
+        pixel: ["var(--font-pixel)", "var(--font-jetbrains)", "monospace"],
       },
       colors: {
         campus: {

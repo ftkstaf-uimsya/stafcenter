@@ -538,3 +538,103 @@ export interface ThesisWorkflow {
   created_at: string;
   updated_at?: string;
 }
+
+export type WorkspaceRoomTheme = "auto" | "day" | "night";
+
+export type WorkspaceNoteColor = "yellow" | "pink" | "mint" | "sky";
+
+export type WorkspaceJournalMood =
+  | "great"
+  | "good"
+  | "neutral"
+  | "sad"
+  | "stressed";
+
+export type WorkspaceEventCategory =
+  | "pribadi"
+  | "rapat"
+  | "kuliah"
+  | "deadline"
+  | "cuti";
+
+export type WorkspaceEventColorTag = "amber" | "emerald" | "sky" | "rose";
+
+export type WorkspacePomodoroMode = "focus" | "short_break" | "long_break";
+
+export interface WorkspacePreferences {
+  staff_id: string;
+  weather_city: string;
+  weather_lat: number;
+  weather_lon: number;
+  room_theme: WorkspaceRoomTheme;
+  reduce_motion: boolean;
+  pet_enabled: boolean;
+  pet_name: string;
+  sound_enabled: boolean;
+  pomodoro_focus_min: number;
+  pomodoro_short_min: number;
+  pomodoro_long_min: number;
+  widget_layout: Record<string, { x?: number; y?: number; visible?: boolean }>;
+  updated_at?: string;
+}
+
+export interface WorkspaceTodo {
+  id: string;
+  staff_id: string;
+  title: string;
+  is_done: boolean;
+  done_at?: string | null;
+  todo_date: string;
+  linked_source?: string | null;
+  linked_ref_id?: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface WorkspaceStickyNote {
+  id: string;
+  staff_id: string;
+  title: string;
+  content: string;
+  color_variant: WorkspaceNoteColor;
+  pos_x: number;
+  pos_y: number;
+  is_pinned: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface WorkspaceJournalEntry {
+  id: string;
+  staff_id: string;
+  entry_date: string;
+  mood: WorkspaceJournalMood;
+  prompt_question: string;
+  prompt_answer: string;
+  content: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface WorkspacePersonalEvent {
+  id: string;
+  staff_id: string;
+  title: string;
+  event_date: string;
+  start_time: string;
+  end_time?: string | null;
+  category: WorkspaceEventCategory;
+  color_tag: WorkspaceEventColorTag;
+  notes?: string | null;
+  created_at: string;
+}
+
+export interface WorkspacePomodoroSession {
+  id: string;
+  staff_id: string;
+  session_date: string;
+  mode: WorkspacePomodoroMode;
+  duration_minutes: number;
+  task_label?: string | null;
+  completed_at: string;
+}

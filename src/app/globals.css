@@ -48,3 +48,74 @@
     padding: 0 !important;
   }
 }
+
+/* Utilitas Meja Kerja Pixel (terisolasi dari tabel operasional) */
+.pixel-crisp {
+  image-rendering: pixelated;
+  shape-rendering: crispEdges;
+}
+
+.pixel-card-shadow {
+  box-shadow: 4px 4px 0px rgba(15, 23, 42, 0.85);
+}
+
+@keyframes pixel-rain-fall {
+  0% {
+    transform: translateY(-16px);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.85;
+  }
+  85% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translateY(88px);
+    opacity: 0;
+  }
+}
+
+@keyframes pixel-cat-bob {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes pixel-heart-float {
+  0% {
+    transform: translateY(4px) scale(0.9);
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-18px) scale(1);
+    opacity: 0;
+  }
+}
+
+.animate-pixel-rain {
+  animation: pixel-rain-fall 1.1s linear infinite;
+}
+
+.animate-pixel-cat {
+  animation: pixel-cat-bob 1.8s steps(2, end) infinite;
+}
+
+.animate-pixel-heart {
+  animation: pixel-heart-float 1.1s steps(4, end) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pixel-rain,
+  .animate-pixel-cat,
+  .animate-pixel-heart {
+    animation: none !important;
+  }
+}

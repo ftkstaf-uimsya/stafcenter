@@ -383,4 +383,54 @@ test.describe("StafCenter E2E Verification (Non-Destructive)", () => {
 
     expect(consoleErrors).toEqual([]);
   });
+
+  test("8. Meja Kerja Pixel tampil responsif, interaktif (Pet, Pomodoro, Jurnal, Pengaturan) tanpa overflow", async ({
+    page,
+  }) => {
+    await loginAsMasterAdmin(page);
+    await page.goto("/sarpras/meja-kerja");
+
+    await expect(
+      page.getByRole("heading", { name: "MEJA KERJA PIXEL" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "TUGAS HARI INI" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "KALENDER" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "POMODORO" })
+    ).toBeVisible();
+
+    // Uji interaksi Kucing Pet
+    const petBtn = page.getByRole("button", { name: /Elus /i }).first();
+    await petBtn.click();
+    await expect(page.getByText(/MEONG|MIAW|SEMANGAT|PURR/i)).toBeVisible();
+
+    // Uji buka-tutup Buku Jurnal
+    await page.getByRole("button", { name: "Jurnal", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: /JURNAL HARIAN STAF/i })
+    ).toBeVisible();
+    await page.getByRole("button", { name: "TUTUP BUKU" }).click();
+
+    // Uji buka-tutup Pengaturan
+    await page
+      .getByRole("button", { name: "Buka pengaturan meja kerja" })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: /Pengaturan Meja Kerja Pixel/i })
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Batal", exact: true }).click();
+
+    // Uji reflow mobile 375px tanpa horizontal overflow
+    await page.setViewportSize({ width: 375, height: 812 });
+    const hasOverflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth >
+        document.documentElement.clientWidth
+    );
+    expect(hasOverflow).toBe(false);
+  });
 });

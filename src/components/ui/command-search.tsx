@@ -12,6 +12,7 @@ import {
   GraduationCap,
   HardHat,
   Landmark,
+  Monitor,
   Package,
   RotateCcw,
   School,
@@ -87,6 +88,24 @@ export function CommandSearch() {
     const q = query.trim();
     const qLower = q.toLowerCase();
     const hits: SearchHit[] = [];
+
+    if (
+      !q ||
+      matchesFlexibleQuery(
+        "meja kerja pixel workspace pomodoro to-do jurnal sticky notes cuaca",
+        q
+      )
+    ) {
+      hits.push({
+        id: "nav-meja-kerja",
+        category: "Ruang Kerja Staf",
+        code: "MEJA KERJA",
+        title: "Buka Meja Kerja Pixel (Produktivitas & Agenda Harian)",
+        meta: "To-do, Pomodoro, Sticky Notes, Jurnal Harian, Kucing Pet, & Kalender Kampus",
+        href: "/sarpras/meja-kerja",
+        icon: <Monitor className="w-4 h-4 text-amber-600 dark:text-amber-400" />,
+      });
+    }
 
     if (canAccessPage("sirkulasi-invent")) {
       if (

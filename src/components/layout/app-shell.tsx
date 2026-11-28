@@ -32,6 +32,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isAuthPage = pathname === "/login" || pathname?.startsWith("/login/");
   const isPublicScanPage =
     pathname === "/scan" || pathname?.startsWith("/scan/");
+  const isMejaKerjaPage =
+    pathname === "/sarpras/meja-kerja" ||
+    pathname?.startsWith("/sarpras/meja-kerja/");
   const requiresAuth = isLiveSupabase && !isAuthPage && !isPublicScanPage;
   const pageKey = getPageKeyFromPathname(pathname);
   const isPinjamCepatRoute =
@@ -39,6 +42,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const hasPinjamCepatAccess =
     canAccessPage("sirkulasi-invent") || canAccessPage("peminjaman");
   const pageBlocked =
+    !isMejaKerjaPage &&
     Boolean(isLiveSupabase && authUser && pageKey) &&
     (isPinjamCepatRoute
       ? !hasPinjamCepatAccess
@@ -203,7 +207,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <main
               id="main-workspace"
-              className="flex-1 p-4 sm:p-6 lg:p-8 pb-24 lg:pb-10 max-w-7xl w-full mx-auto"
+              className={
+                isMejaKerjaPage
+                  ? "flex-1 p-2 sm:p-4 pb-24 lg:pb-4 w-full min-w-0"
+                  : "flex-1 p-4 sm:p-6 lg:p-8 pb-24 lg:pb-10 max-w-7xl w-full mx-auto"
+              }
             >
               {pageBlocked ? (
                 <MasterAdminGuard

@@ -11,6 +11,10 @@ const ROUTE_META: Record<
   { group: string; subgroup?: string; label: string }
 > = {
   "/sarpras/dashboard": { group: "SAPRAS", label: "Ringkasan Operasional" },
+  "/sarpras/meja-kerja": {
+    group: "Personal Staf",
+    label: "Meja Kerja Pixel",
+  },
   "/sarpras/sirkulasi-invent": {
     group: "SAPRAS",
     label: "Sirkulasi Invent",
